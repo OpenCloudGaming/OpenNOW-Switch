@@ -1,0 +1,11 @@
+build/
+out/
+.vs/
+.vscode/
+*.nro
+*.nacp
+*.elf
+*.pdb
+*.obj
+*.ilk
+*.log
