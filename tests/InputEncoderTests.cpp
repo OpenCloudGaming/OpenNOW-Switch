@@ -41,6 +41,7 @@ int main() {
     });
     assert(mouse.size() == 34);
     assert(mouse[0] == 0x23);
+    assert(mouse[8] == 1);
     assert(mouse[9] == 0x21);
     assert(mouse[10] == 0);
     assert(mouse[11] == 22);
@@ -59,6 +60,14 @@ int main() {
     }, 0x0101, false);
     assert(gamepad.size() == 50);
     assert(gamepad[0] == 0x23);
+    assert(gamepad[1] == 0x01);
+    assert(gamepad[2] == 0x02);
+    assert(gamepad[3] == 0x03);
+    assert(gamepad[4] == 0x04);
+    assert(gamepad[5] == 0x05);
+    assert(gamepad[6] == 0x06);
+    assert(gamepad[7] == 0x07);
+    assert(gamepad[8] == 0x08);
     assert(gamepad[9] == 0x21);
     assert(gamepad[10] == 0);
     assert(gamepad[11] == 38);
@@ -72,6 +81,7 @@ int main() {
         .timestampUs = 1,
     }, 0x0202, true);
     assert(prGamepad.size() == 54);
+    assert(prGamepad[8] == 1);
     assert(prGamepad[9] == 0x26);
     assert(prGamepad[10] == 1);
     assert(prGamepad[13] == 0x21);

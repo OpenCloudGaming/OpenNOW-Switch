@@ -84,6 +84,8 @@ public:
     bool mediaConnected() const;
     bool inputReady() const;
     bool sendGamepadInput(const gfn::GamepadInput& input, std::uint16_t connectedBitmap = 0x0101);
+    bool sendMouseMove(const gfn::MouseMovePayload& input);
+    bool sendMouseButton(const gfn::MouseButtonPayload& input, bool pressed);
     std::size_t videoBytesReceived() const;
     std::size_t audioBytesReceived() const;
 

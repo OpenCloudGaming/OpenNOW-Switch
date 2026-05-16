@@ -59,6 +59,8 @@ public:
     bool sendReliableInput(const gfn::Bytes& payload);
     bool sendPartiallyReliableInput(const gfn::Bytes& payload);
     bool sendGamepadInput(const gfn::GamepadInput& input, std::uint16_t connectedBitmap = 0x0101);
+    bool sendMouseMove(const gfn::MouseMovePayload& input);
+    bool sendMouseButton(const gfn::MouseButtonPayload& input, bool pressed);
     std::string connectionState() const;
     bool mediaConnected() const;
     void close();

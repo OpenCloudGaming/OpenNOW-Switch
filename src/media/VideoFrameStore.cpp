@@ -1,6 +1,7 @@
 #include "opennow/media/VideoFrameStore.hpp"
 
 #include <mutex>
+#include <utility>
 
 namespace opennow::media {
 namespace {
@@ -18,6 +19,9 @@ void publishVideoFrame(std::uint32_t width, std::uint32_t height, const std::uin
     }
 
     std::lock_guard<std::mutex> lock(gFrameMutex);
+    if (gHasFrame) {
+        return;
+    }
     gLatestFrame.width = width;
     gLatestFrame.height = height;
     gLatestFrame.frameId = gNextFrameId++;
@@ -30,8 +34,15 @@ bool consumeLatestVideoFrame(RgbaVideoFrame& out) {
     if (!gHasFrame) {
         return false;
     }
-    out = gLatestFrame;
+    out = std::move(gLatestFrame);
+    gLatestFrame = {};
+    gHasFrame = false;
     return true;
+}
+
+bool hasPendingVideoFrame() {
+    std::lock_guard<std::mutex> lock(gFrameMutex);
+    return gHasFrame;
 }
 
 void clearVideoFrames() {

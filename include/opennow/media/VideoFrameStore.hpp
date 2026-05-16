@@ -14,6 +14,7 @@ struct RgbaVideoFrame {
 
 void publishVideoFrame(std::uint32_t width, std::uint32_t height, const std::uint8_t* rgba, std::size_t bytes);
 bool consumeLatestVideoFrame(RgbaVideoFrame& out);
+bool hasPendingVideoFrame();
 void clearVideoFrames();
 
 } // namespace opennow::media

@@ -201,6 +201,11 @@ private:
     }
 
     void publishDecodedFrame(AVFrame* frame) {
+        if (hasPendingVideoFrame()) {
+            av_frame_unref(transferred_);
+            return;
+        }
+
         AVFrame* source = frame;
         if ((frame->format == AV_PIX_FMT_DRM_PRIME || usingHardware_) && av_hwframe_transfer_data(transferred_, frame, 0) == 0) {
             source = transferred_;
@@ -395,15 +400,10 @@ public:
             close();
             return {false, "audout returned unsupported audio format."};
         }
-        rc = audoutStartAudioOut();
-        if (R_FAILED(rc)) {
-            close();
-            return {false, "audoutStartAudioOut failed: 0x" + hexResult(rc)};
-        }
-        started_ = true;
-
         buffers_.resize(kBufferCount);
         free_.assign(kBufferCount, true);
+        queued_ = 0;
+        failed_ = false;
         for (std::size_t i = 0; i < buffers_.size(); ++i) {
             buffers_[i].storage = static_cast<std::uint8_t*>(memalign(0x1000, kBufferBytes));
             if (!buffers_[i].storage) {
@@ -417,7 +417,7 @@ public:
             buffers_[i].buffer.data_size = 0;
             buffers_[i].buffer.data_offset = 0;
         }
-        return {true, "Switch audout opened at 48 kHz stereo S16."};
+        return {true, "Switch audout opened at 48 kHz stereo S16 with jitter prebuffer."};
 #else
         return {true, "Audio sink disabled on this platform."};
 #endif
@@ -425,7 +425,7 @@ public:
 
     void submit(const std::int16_t* samples, std::size_t sampleCount) {
 #if defined(OPENNOW_PLATFORM_SWITCH) && defined(OPENNOW_HAS_NATIVE_AUDIO)
-        if (!initialized_ || !samples || sampleCount == 0) {
+        if (!initialized_ || failed_ || !samples || sampleCount == 0) {
             return;
         }
         reclaim();
@@ -441,11 +441,22 @@ public:
             armDCacheFlush(buffers_[index].storage, chunk);
             buffers_[index].buffer.data_size = chunk;
             const Result rc = audoutAppendAudioOutBuffer(&buffers_[index].buffer);
-            if (R_FAILED(rc)) {
+            Result appendRc = rc;
+            if (R_FAILED(appendRc) && !started_) {
+                const Result startRc = audoutStartAudioOut();
+                if (R_SUCCEEDED(startRc)) {
+                    started_ = true;
+                    appendRc = audoutAppendAudioOutBuffer(&buffers_[index].buffer);
+                }
+            }
+            if (R_FAILED(appendRc)) {
                 free_[index] = true;
+                failed_ = true;
                 return;
             }
             free_[index] = false;
+            ++queued_;
+            ensureStarted();
             bytes += chunk;
             remaining -= chunk;
         }
@@ -473,6 +484,8 @@ public:
             audoutExit();
             initialized_ = false;
         }
+        queued_ = 0;
+        failed_ = false;
 #endif
     }
 
@@ -483,8 +496,9 @@ private:
         std::uint8_t* storage = nullptr;
     };
 
-    static constexpr std::size_t kBufferCount = 12;
+    static constexpr std::size_t kBufferCount = 24;
     static constexpr std::size_t kBufferBytes = 0x4000;
+    static constexpr std::size_t kStartBufferCount = 4;
 
     static std::string hexResult(Result result) {
         std::ostringstream out;
@@ -498,6 +512,9 @@ private:
         while (R_SUCCEEDED(audoutGetReleasedAudioOutBuffer(&released, &releasedCount)) && released && releasedCount > 0) {
             for (std::size_t i = 0; i < buffers_.size(); ++i) {
                 if (&buffers_[i].buffer == released) {
+                    if (!free_[i] && queued_ > 0) {
+                        --queued_;
+                    }
                     free_[i] = true;
                     break;
                 }
@@ -505,6 +522,18 @@ private:
             released = nullptr;
             releasedCount = 0;
         }
+    }
+
+    void ensureStarted() {
+        if (started_ || queued_ < kStartBufferCount) {
+            return;
+        }
+        const Result rc = audoutStartAudioOut();
+        if (R_FAILED(rc)) {
+            failed_ = true;
+            return;
+        }
+        started_ = true;
     }
 
     std::size_t acquireFreeBuffer() {
@@ -519,6 +548,8 @@ private:
 
     bool initialized_ = false;
     bool started_ = false;
+    bool failed_ = false;
+    std::size_t queued_ = 0;
     std::vector<Slot> buffers_;
     std::vector<bool> free_;
 #endif
@@ -636,9 +667,11 @@ public:
         std::function<void(const std::uint8_t*, std::size_t)> audioCallback;
 #if defined(OPENNOW_HAS_FFMPEG_DECODER)
         videoCallback = [this](const std::uint8_t* bytes, std::size_t size) {
+            std::lock_guard<std::mutex> lock(videoDecodeMutex);
             video.submit(bytes, size);
         };
         audioCallback = [this](const std::uint8_t* bytes, std::size_t size) {
+            std::lock_guard<std::mutex> lock(audioDecodeMutex);
             opus.submit(bytes, size);
         };
 #endif
@@ -722,6 +755,14 @@ public:
         return webrtc.sendGamepadInput(input, connectedBitmap);
     }
 
+    bool sendMouseMove(const gfn::MouseMovePayload& input) {
+        return webrtc.sendMouseMove(input);
+    }
+
+    bool sendMouseButton(const gfn::MouseButtonPayload& input, bool pressed) {
+        return webrtc.sendMouseButton(input, pressed);
+    }
+
     std::size_t videoBytesReceived() const {
         return webrtc.videoBytesReceived();
     }
@@ -737,6 +778,8 @@ public:
 #if defined(OPENNOW_HAS_FFMPEG_DECODER)
     H264FrameDecoder video;
     OpusDecoder opus;
+    std::mutex videoDecodeMutex;
+    std::mutex audioDecodeMutex;
 #endif
     SwitchAudioSink audio;
 };
@@ -771,6 +814,14 @@ bool NativeMediaPipeline::inputReady() const {
 
 bool NativeMediaPipeline::sendGamepadInput(const gfn::GamepadInput& input, std::uint16_t connectedBitmap) {
     return impl_->sendGamepadInput(input, connectedBitmap);
+}
+
+bool NativeMediaPipeline::sendMouseMove(const gfn::MouseMovePayload& input) {
+    return impl_->sendMouseMove(input);
+}
+
+bool NativeMediaPipeline::sendMouseButton(const gfn::MouseButtonPayload& input, bool pressed) {
+    return impl_->sendMouseButton(input, pressed);
 }
 
 std::size_t NativeMediaPipeline::videoBytesReceived() const {

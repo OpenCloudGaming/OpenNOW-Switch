@@ -53,27 +53,27 @@ void writeU64Le(Bytes& bytes, std::size_t offset, std::uint64_t value) {
     }
 }
 
-Bytes wrapSingleEvent(const Bytes& payload, std::uint32_t protocolVersion) {
+Bytes wrapSingleEvent(const Bytes& payload, std::uint32_t protocolVersion, std::uint64_t timestampUs) {
     if (protocolVersion <= 2) {
         return payload;
     }
 
     Bytes wrapped(10 + payload.size());
     wrapped[0] = 0x23;
-    writeU64Be(wrapped, 1, 0);
+    writeU64Be(wrapped, 1, timestampUs);
     wrapped[9] = 0x22;
     std::copy(payload.begin(), payload.end(), wrapped.begin() + 10);
     return wrapped;
 }
 
-Bytes wrapBatchedEvent(const Bytes& payload, std::uint32_t protocolVersion) {
+Bytes wrapBatchedEvent(const Bytes& payload, std::uint32_t protocolVersion, std::uint64_t timestampUs) {
     if (protocolVersion <= 2) {
         return payload;
     }
 
     Bytes wrapped(12 + payload.size());
     wrapped[0] = 0x23;
-    writeU64Be(wrapped, 1, 0);
+    writeU64Be(wrapped, 1, timestampUs);
     wrapped[9] = 0x21;
     writeU16Be(wrapped, 10, static_cast<std::uint16_t>(payload.size()));
     std::copy(payload.begin(), payload.end(), wrapped.begin() + 12);
@@ -83,6 +83,7 @@ Bytes wrapBatchedEvent(const Bytes& payload, std::uint32_t protocolVersion) {
 Bytes wrapGamepadPartiallyReliable(
     const Bytes& payload,
     std::uint32_t protocolVersion,
+    std::uint64_t timestampUs,
     std::uint16_t gamepadIndex,
     std::uint16_t sequenceNumber) {
     if (protocolVersion <= 2) {
@@ -91,7 +92,7 @@ Bytes wrapGamepadPartiallyReliable(
 
     Bytes wrapped(16 + payload.size());
     wrapped[0] = 0x23;
-    writeU64Be(wrapped, 1, 0);
+    writeU64Be(wrapped, 1, timestampUs);
     wrapped[9] = 0x26;
     wrapped[10] = static_cast<std::uint8_t>(gamepadIndex & 0xff);
     writeU16Be(wrapped, 11, sequenceNumber);
@@ -129,7 +130,7 @@ Bytes InputEncoder::encodeMouseMove(const MouseMovePayload& payload) const {
     writeU16Be(bytes, 8, 0);
     writeU32Be(bytes, 10, 0);
     writeU64Be(bytes, 14, payload.timestampUs);
-    return wrapBatchedEvent(bytes, protocolVersion_);
+    return wrapBatchedEvent(bytes, protocolVersion_, payload.timestampUs);
 }
 
 Bytes InputEncoder::encodeMouseButtonDown(const MouseButtonPayload& payload) const {
@@ -148,14 +149,14 @@ Bytes InputEncoder::encodeMouseWheel(const MouseWheelPayload& payload) const {
     writeU16Be(bytes, 8, 0);
     writeU32Be(bytes, 10, 0);
     writeU64Be(bytes, 14, payload.timestampUs);
-    return wrapSingleEvent(bytes, protocolVersion_);
+    return wrapSingleEvent(bytes, protocolVersion_, payload.timestampUs);
 }
 
 Bytes InputEncoder::encodeHapticsEnabled(bool enabled) const {
     Bytes bytes(6);
     writeU32Le(bytes, 0, INPUT_HAPTICS_ENABLED);
     writeU16Be(bytes, 4, enabled ? 1 : 0);
-    return wrapSingleEvent(bytes, protocolVersion_);
+    return wrapSingleEvent(bytes, protocolVersion_, 0);
 }
 
 Bytes InputEncoder::encodeGamepadState(
@@ -184,10 +185,11 @@ Bytes InputEncoder::encodeGamepadState(
         return wrapGamepadPartiallyReliable(
             bytes,
             protocolVersion_,
+            payload.timestampUs,
             payload.controllerId,
             nextGamepadSequence(payload.controllerId));
     }
-    return wrapBatchedEvent(bytes, protocolVersion_);
+    return wrapBatchedEvent(bytes, protocolVersion_, payload.timestampUs);
 }
 
 std::uint16_t InputEncoder::nextGamepadSequence(std::uint16_t gamepadIndex) {
@@ -204,7 +206,7 @@ Bytes InputEncoder::encodeKey(std::uint32_t type, const KeyboardPayload& payload
     writeU16Be(bytes, 6, payload.modifiers);
     writeU16Be(bytes, 8, payload.scancode);
     writeU64Be(bytes, 10, payload.timestampUs);
-    return wrapSingleEvent(bytes, protocolVersion_);
+    return wrapSingleEvent(bytes, protocolVersion_, payload.timestampUs);
 }
 
 Bytes InputEncoder::encodeMouseButton(std::uint32_t type, const MouseButtonPayload& payload) const {
@@ -214,7 +216,7 @@ Bytes InputEncoder::encodeMouseButton(std::uint32_t type, const MouseButtonPaylo
     bytes[5] = 0;
     writeU32Be(bytes, 6, 0);
     writeU64Be(bytes, 10, payload.timestampUs);
-    return wrapSingleEvent(bytes, protocolVersion_);
+    return wrapSingleEvent(bytes, protocolVersion_, payload.timestampUs);
 }
 
 } // namespace opennow::gfn

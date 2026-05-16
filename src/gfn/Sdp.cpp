@@ -447,7 +447,7 @@ std::string preferCodec(const std::string& sdp, VideoCodec codec) {
 
 std::string mungeAnswerSdp(const std::string& sdp, std::uint32_t maxBitrateKbps) {
     const auto lineEnding = sdp.find("\r\n") != std::string::npos ? "\r\n" : "\n";
-    std::ostringstream out;
+    std::vector<std::string> output;
     const auto lines = splitLines(sdp);
 
     for (std::size_t i = 0; i < lines.size(); ++i) {
@@ -456,19 +456,17 @@ std::string mungeAnswerSdp(const std::string& sdp, std::uint32_t maxBitrateKbps)
             line += ";stereo=1";
         }
 
-        out << line;
-        if (i + 1 < lines.size()) {
-            out << lineEnding;
-        }
+        output.push_back(std::move(line));
 
-        if (line.rfind("m=video", 0) == 0 || line.rfind("m=audio", 0) == 0) {
+        const auto& pushedLine = output.back();
+        if (pushedLine.rfind("m=video", 0) == 0 || pushedLine.rfind("m=audio", 0) == 0) {
             const auto next = i + 1 < lines.size() ? lines[i + 1] : "";
             if (next.rfind("b=", 0) != 0) {
-                out << lineEnding << "b=AS:" << (line.rfind("m=video", 0) == 0 ? maxBitrateKbps : 128);
+                output.push_back("b=AS:" + std::to_string(pushedLine.rfind("m=video", 0) == 0 ? maxBitrateKbps : 128));
             }
         }
     }
-    return out.str();
+    return joinLines(output, lineEnding);
 }
 
 std::string buildNvstSdp(const NvstSdpParams& params) {
@@ -495,11 +493,36 @@ std::string buildNvstSdp(const NvstSdpParams& params) {
         << "a=vqos.fec.repairMinPercent:5\n"
         << "a=vqos.fec.repairPercent:5\n"
         << "a=vqos.fec.repairMaxPercent:35\n"
+        << "a=vqos.dynamicStreamingMode:0\n"
         << "a=vqos.drc.enable:0\n"
         << "a=vqos.dfc.enable:0\n"
+        << "a=vqos.dfc.adjustResAndFps:0\n"
         << "a=video.dx9EnableNv12:1\n"
+        << "a=video.dx9EnableHdr:1\n"
+        << "a=vqos.qpg.enable:1\n"
+        << "a=vqos.resControl.qp.qpg.featureSetting:7\n"
+        << "a=bwe.useOwdCongestionControl:1\n"
         << "a=video.enableRtpNack:1\n"
+        << "a=vqos.bw.txRxLag.minFeedbackTxDeltaMs:200\n"
+        << "a=vqos.drc.bitrateIirFilterFactor:18\n"
         << "a=video.packetSize:1140\n"
+        << "a=packetPacing.minNumPacketsPerGroup:15\n"
+        << "a=vqos.adjustStreamingFpsDuringOutOfFocus:1\n"
+        << "a=vqos.resControl.cpmRtc.ignoreOutOfFocusWindowState:1\n"
+        << "a=vqos.resControl.perfHistory.rtcIgnoreOutOfFocusWindowState:1\n"
+        << "a=vqos.resControl.cpmRtc.featureMask:0\n"
+        << "a=vqos.resControl.cpmRtc.enable:0\n"
+        << "a=vqos.resControl.cpmRtc.minResolutionPercent:100\n"
+        << "a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999\n"
+        << "a=packetPacing.numGroups:" << (params.fps == 120 ? 3 : 5) << "\n"
+        << "a=packetPacing.maxDelayUs:1000\n"
+        << "a=packetPacing.minNumPacketsFrame:10\n"
+        << "a=video.rtpNackQueueLength:1024\n"
+        << "a=video.rtpNackQueueMaxPackets:512\n"
+        << "a=video.rtpNackMaxPacketCount:25\n"
+        << "a=vqos.drc.qpMaxResThresholdAdj:4\n"
+        << "a=vqos.grc.qpMaxResThresholdAdj:4\n"
+        << "a=vqos.drc.iirFilterFactor:100\n"
         << "a=video.clientViewportWd:" << params.width << "\n"
         << "a=video.clientViewportHt:" << params.height << "\n"
         << "a=video.maxFPS:" << params.fps << "\n"
@@ -509,6 +532,14 @@ std::string buildNvstSdp(const NvstSdpParams& params) {
         << "a=vqos.bw.minimumBitrateKbps:" << minBitrate << "\n"
         << "a=vqos.bw.peakBitrateKbps:" << params.maxBitrateKbps << "\n"
         << "a=vqos.bw.serverPeakBitrateKbps:" << params.maxBitrateKbps << "\n"
+        << "a=vqos.bw.enableBandwidthEstimation:1\n"
+        << "a=vqos.bw.disableBitrateLimit:0\n"
+        << "a=vqos.grc.maximumBitrateKbps:" << params.maxBitrateKbps << "\n"
+        << "a=vqos.grc.enable:0\n"
+        << "a=video.maxNumReferenceFrames:4\n"
+        << "a=video.mapRtpTimestampsToFrames:1\n"
+        << "a=video.encoderCscMode:3\n"
+        << "a=video.dynamicRangeMode:0\n"
         << "a=video.codec:" << codecName(params.codec) << "\n"
         << "a=video.bitDepth:8\n"
         << "a=video.scalingFeature1:0\n"

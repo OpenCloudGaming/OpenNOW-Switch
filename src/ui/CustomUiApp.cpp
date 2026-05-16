@@ -44,6 +44,7 @@ namespace {
 
 constexpr float kUiW = 1280.0f;
 constexpr float kUiH = 720.0f;
+constexpr std::uint16_t kSingleXboxControllerBitmap = 0x0101;
 
 int gNxlinkFd = -1;
 
@@ -100,6 +101,14 @@ struct StreamLaunchState {
     std::uint32_t queuePosition = 0;
 };
 
+struct StreamInputSnapshot {
+    input::ControllerState controller;
+    bool touchDown = false;
+    float touchX = 0.0f;
+    float touchY = 0.0f;
+    std::uint64_t updatedUs = 0;
+};
+
 enum class Screen {
     Home,
     Library,
@@ -131,6 +140,8 @@ struct UiState {
     std::thread launchThread;
     std::mutex launchMutex;
     StreamLaunchState launch;
+    std::mutex streamInputMutex;
+    StreamInputSnapshot streamInput;
     int streamVideoImage = 0;
     std::uint64_t streamVideoFrameId = 0;
     int streamVideoWidth = 0;
@@ -359,8 +370,10 @@ float normalizeStickAxis(s32 value) {
     return std::clamp(static_cast<float>(value) / 32767.0f, -1.0f, 1.0f);
 }
 
-input::ControllerState controllerStateFromPad(PadState& pad) {
-    padUpdate(&pad);
+input::ControllerState controllerStateFromPad(PadState& pad, bool updatePad = true) {
+    if (updatePad) {
+        padUpdate(&pad);
+    }
     const auto buttons = padGetButtons(&pad);
     const auto left = padGetStickPos(&pad, 0);
     const auto right = padGetStickPos(&pad, 1);
@@ -389,6 +402,101 @@ input::ControllerState controllerStateFromPad(PadState& pad) {
     state.leftTrigger = state.zl ? 1.0f : 0.0f;
     state.rightTrigger = state.zr ? 1.0f : 0.0f;
     return state;
+}
+
+void updateStreamInputSnapshot(UiState& ui, PadState& pad) {
+    StreamInputSnapshot snapshot;
+    snapshot.controller = controllerStateFromPad(pad, false);
+    snapshot.updatedUs = nowUs();
+
+    HidTouchScreenState touch{};
+    const auto count = hidGetTouchScreenStates(&touch, 1);
+    snapshot.touchDown = count > 0 && touch.count > 0;
+    if (snapshot.touchDown) {
+        snapshot.touchX = static_cast<float>(touch.touches[0].x);
+        snapshot.touchY = static_cast<float>(touch.touches[0].y);
+    }
+
+    std::lock_guard<std::mutex> lock(ui.streamInputMutex);
+    ui.streamInput = snapshot;
+}
+
+StreamInputSnapshot streamInputSnapshot(UiState& ui) {
+    std::lock_guard<std::mutex> lock(ui.streamInputMutex);
+    return ui.streamInput;
+}
+
+std::int16_t clampMouseDelta(float value) {
+    const auto rounded = std::lround(value);
+    return static_cast<std::int16_t>(std::clamp<long>(rounded, -32768L, 32767L));
+}
+
+struct StreamTouchMouseState {
+    bool touching = false;
+    bool leftButtonDown = false;
+    bool hasServerPointer = false;
+    float serverX = 0.0f;
+    float serverY = 0.0f;
+};
+
+void sendTouchMouse(
+    media::NativeMediaPipeline& pipeline,
+    StreamTouchMouseState& touch,
+    const StreamSettings& settings,
+    bool down,
+    float screenX,
+    float screenY) {
+    if (!pipeline.inputReady()) {
+        touch.touching = false;
+        touch.leftButtonDown = false;
+        return;
+    }
+
+    constexpr std::uint8_t kMouseLeft = 1;
+
+    if (!down) {
+        if (touch.leftButtonDown) {
+            (void)pipeline.sendMouseButton({
+                .button = kMouseLeft,
+                .timestampUs = nowUs(),
+            }, false);
+        }
+        touch.touching = false;
+        touch.leftButtonDown = false;
+        return;
+    }
+
+    const float scaleX = static_cast<float>(settings.width) / kUiW;
+    const float scaleY = static_cast<float>(settings.height) / kUiH;
+    const float targetX = screenX * scaleX;
+    const float targetY = screenY * scaleY;
+
+    if (!touch.hasServerPointer) {
+        touch.serverX = static_cast<float>(settings.width) * 0.5f;
+        touch.serverY = static_cast<float>(settings.height) * 0.5f;
+        touch.hasServerPointer = true;
+    }
+
+    const std::int16_t dx = clampMouseDelta(targetX - touch.serverX);
+    const std::int16_t dy = clampMouseDelta(targetY - touch.serverY);
+    if (dx != 0 || dy != 0) {
+        (void)pipeline.sendMouseMove({
+            .dx = dx,
+            .dy = dy,
+            .timestampUs = nowUs(),
+        });
+        touch.serverX += static_cast<float>(dx);
+        touch.serverY += static_cast<float>(dy);
+    }
+
+    if (!touch.leftButtonDown) {
+        (void)pipeline.sendMouseButton({
+            .button = kMouseLeft,
+            .timestampUs = nowUs(),
+        }, true);
+        touch.leftButtonDown = true;
+    }
+    touch.touching = true;
 }
 
 void patchLaunch(UiState& ui, const std::string& stage, const std::string& message) {
@@ -886,23 +994,6 @@ void drawStreamScreen(UiState& ui) {
     const auto launch = launchSnapshot(ui);
     if (ui.streamVideoImage && launch.ready) {
         drawImageCover(ui, ui.streamVideoImage, 0, 0, kUiW, kUiH, 1.0f);
-        const auto topShade = nvgLinearGradient(ui.vg, 0, 0, 0, 150, rgb(0, 0, 0, 210), rgb(0, 0, 0, 0));
-        nvgBeginPath(ui.vg);
-        nvgRect(ui.vg, 0, 0, kUiW, 170);
-        nvgFillPaint(ui.vg, topShade);
-        nvgFill(ui.vg);
-        const auto bottomShade = nvgLinearGradient(ui.vg, 0, 560, 0, 720, rgb(0, 0, 0, 0), rgb(0, 0, 0, 230));
-        nvgBeginPath(ui.vg);
-        nvgRect(ui.vg, 0, 530, kUiW, 190);
-        nvgFillPaint(ui.vg, bottomShade);
-        nvgFill(ui.vg);
-        text(ui, 40, 38, 15, rgb(105, 232, 151), "NATIVE STREAM");
-        text(ui, 40, 66, 30, rgb(248, 250, 252), shortText(launch.gameTitle.empty() ? "Streaming" : launch.gameTitle, 42));
-        text(ui, 40, 106, 16, rgb(190, 202, 219), shortText(launch.mediaMessage.empty() ? "H264 video and Opus audio active" : launch.mediaMessage, 80));
-        rounded(ui, 40, 580, 150, 42, 10, rgb(74, 232, 117));
-        text(ui, 115, 593, 18, rgb(4, 18, 10), "Streaming", NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-        rounded(ui, 210, 580, 140, 42, 10, rgb(24, 31, 42, 235));
-        text(ui, 280, 593, 18, rgb(235, 240, 249), "Back", NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         return;
     }
 
@@ -1286,17 +1377,23 @@ void draw(UiState& ui, int fbW, int fbH) {
     nvgFillPaint(ui.vg, bg);
     nvgFill(ui.vg);
 
-    drawTopNav(ui);
-    if (ui.screen == Screen::Settings) {
-        drawSettings(ui);
-    } else if (ui.screen == Screen::Details) {
-        drawGameDetails(ui);
-    } else if (ui.screen == Screen::Stream) {
+    const auto launch = ui.screen == Screen::Stream ? launchSnapshot(ui) : StreamLaunchState{};
+    const bool fullscreenStream = ui.screen == Screen::Stream && ui.streamVideoImage && launch.ready;
+    if (ui.screen == Screen::Stream) {
         drawStreamScreen(ui);
     } else {
-        drawLibrary(ui);
+        drawTopNav(ui);
+        if (ui.screen == Screen::Settings) {
+            drawSettings(ui);
+        } else if (ui.screen == Screen::Details) {
+            drawGameDetails(ui);
+        } else {
+            drawLibrary(ui);
+        }
     }
-    drawFooter(ui);
+    if (!fullscreenStream) {
+        drawFooter(ui);
+    }
     if (ui.loading) {
         rounded(ui, 510, 318, 260, 76, 14, rgb(8, 12, 18, 235));
         strokeRounded(ui, 510, 318, 260, 76, 14, rgb(74, 232, 117), 1.4f);
@@ -1766,23 +1863,34 @@ void launchStreamWorker(
         state.message = "Native media pipeline is active.";
         updateLaunch(*ui, state);
 
-        log(*ui, "[INFO][MEDIA] Native stream loop active. Press B to stop.");
-        PadState streamPad;
-        padInitializeDefault(&streamPad);
+        log(*ui, "[INFO][MEDIA] Native stream loop active. Press Minus to stop.");
         input::ControllerMapper controllerMapper;
+        StreamTouchMouseState touchMouse;
         auto nextUiStats = std::chrono::steady_clock::now();
         auto nextInput = std::chrono::steady_clock::now();
+        auto lastMediaProgress = std::chrono::steady_clock::now();
+        std::size_t lastMediaBytes = 0;
+        bool sawMedia = false;
+        bool mediaClosed = false;
         bool inputReadyLogged = false;
         bool inputWaitLogged = false;
+        int gamepadPacketLogs = 0;
         while (!launchStopRequested(*ui)) {
             const auto now = std::chrono::steady_clock::now();
+            const auto inputSnapshot = streamInputSnapshot(*ui);
+            if (inputSnapshot.controller.minus) {
+                log(*ui, "[INFO][INPUT] Minus pressed locally; stopping native stream.");
+                requestLaunchStop(*ui);
+                break;
+            }
             if (now >= nextInput) {
                 if (pipeline.inputReady()) {
                     if (!inputReadyLogged) {
-                        log(*ui, "[INFO][INPUT] GFN input datachannel ready; forwarding Switch controller state.");
+                        log(*ui, "[INFO][INPUT] GFN input datachannel ready; forwarding Joy-Con pair/Pro Controller as Xbox controller 0 and touch as mouse.");
                         inputReadyLogged = true;
                     }
-                    auto controller = controllerStateFromPad(streamPad);
+                    auto controller = inputSnapshot.controller;
+                    controller.minus = false;
                     auto packet = controllerMapper.map(controller, {
                         .swapNintendoFaceButtons = true,
                         .leftDeadzone = 0.15f,
@@ -1790,7 +1898,34 @@ void launchStreamWorker(
                         .controllerId = 0,
                         .timestampUs = nowUs(),
                     });
-                    (void)pipeline.sendGamepadInput(packet, 0x0101);
+                    const bool sent = pipeline.sendGamepadInput(packet, kSingleXboxControllerBitmap);
+                    if (sent && gamepadPacketLogs < 12 && (gamepadPacketLogs == 0 || packet.buttons != 0
+                        || packet.leftTrigger != 0 || packet.rightTrigger != 0
+                        || packet.leftStickX != 0 || packet.leftStickY != 0
+                        || packet.rightStickX != 0 || packet.rightStickY != 0)) {
+                        char inputLog[256];
+                        std::snprintf(inputLog,
+                            sizeof(inputLog),
+                            "[INFO][INPUT] Gamepad packet #%d sent bitmap=0x%04x buttons=0x%04x lt=%u rt=%u lx=%d ly=%d rx=%d ry=%d.",
+                            gamepadPacketLogs + 1,
+                            static_cast<unsigned>(kSingleXboxControllerBitmap),
+                            static_cast<unsigned>(packet.buttons),
+                            static_cast<unsigned>(packet.leftTrigger),
+                            static_cast<unsigned>(packet.rightTrigger),
+                            static_cast<int>(packet.leftStickX),
+                            static_cast<int>(packet.leftStickY),
+                            static_cast<int>(packet.rightStickX),
+                            static_cast<int>(packet.rightStickY));
+                        log(*ui, inputLog);
+                        ++gamepadPacketLogs;
+                    }
+                    sendTouchMouse(
+                        pipeline,
+                        touchMouse,
+                        settings,
+                        inputSnapshot.touchDown,
+                        inputSnapshot.touchX,
+                        inputSnapshot.touchY);
                 } else if (!inputWaitLogged && pipeline.mediaConnected()) {
                     log(*ui, "[INFO][INPUT] Waiting for GFN input datachannel handshake.");
                     inputWaitLogged = true;
@@ -1798,24 +1933,44 @@ void launchStreamWorker(
                 nextInput = now + std::chrono::milliseconds(16);
             }
             if (std::chrono::steady_clock::now() >= nextUiStats) {
+                const auto videoBytes = pipeline.videoBytesReceived();
+                const auto audioBytes = pipeline.audioBytesReceived();
+                const auto totalBytes = videoBytes + audioBytes;
+                if (totalBytes > lastMediaBytes) {
+                    lastMediaBytes = totalBytes;
+                    lastMediaProgress = std::chrono::steady_clock::now();
+                    sawMedia = true;
+                }
+                const auto connection = pipeline.connectionState();
                 state.mediaMessage = "state=" + pipeline.connectionState()
-                    + " video=" + std::to_string(pipeline.videoBytesReceived())
-                    + "B audio=" + std::to_string(pipeline.audioBytesReceived()) + "B";
+                    + " video=" + std::to_string(videoBytes)
+                    + "B audio=" + std::to_string(audioBytes) + "B";
                 state.message = state.mediaMessage;
                 updateLaunch(*ui, state);
                 nextUiStats = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                const bool closedState = connection.find("closed") != std::string::npos
+                    || connection.find("failed") != std::string::npos
+                    || connection.find("disconnected") != std::string::npos;
+                if (sawMedia && closedState
+                    && std::chrono::steady_clock::now() - lastMediaProgress > std::chrono::seconds(2)) {
+                    mediaClosed = true;
+                    log(*ui, "[WARN][MEDIA] Native media stopped receiving packets; closing stream cleanly.");
+                    break;
+                }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
         state.inFlight = false;
         state.ready = false;
-        state.stage = "Stopping stream";
-        state.message = "Closing native media pipeline and stopping the GFN session.";
+        state.stage = mediaClosed ? "Stream ended" : "Stopping stream";
+        state.message = mediaClosed
+            ? "The native WebRTC media path stopped receiving packets."
+            : "Closing native media pipeline and stopping the GFN session.";
         updateLaunch(*ui, state);
         pipeline.close();
         media::clearVideoFrames();
-        stopCloudMatchSession(*ui, http, builder, token, clientId, deviceId, latest, "user stopped stream");
+        stopCloudMatchSession(*ui, http, builder, token, clientId, deviceId, latest, mediaClosed ? "media transport closed" : "user stopped stream");
         stopOnExit = false;
         state.stage = "Stream stopped";
         state.message = "Cloud session stopped.";
@@ -2165,9 +2320,6 @@ void pollDeviceLogin(UiState& ui) {
 }
 
 void handleInput(UiState& ui, u64 down) {
-    if (down & HidNpadButton_Plus) {
-        glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
-    }
     if (ui.authPopupVisible || ui.authPending) {
         if (down & HidNpadButton_B) {
             if (ui.authPending) {
@@ -2185,11 +2337,14 @@ void handleInput(UiState& ui, u64 down) {
         return;
     }
     if (ui.screen == Screen::Stream) {
-        if (down & HidNpadButton_B) {
+        if (down & HidNpadButton_Minus) {
             requestLaunchStop(ui);
             ui.screen = ui.previousScreen == Screen::Stream ? Screen::Details : ui.previousScreen;
         }
         return;
+    }
+    if (down & HidNpadButton_Plus) {
+        glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
     }
     if (ui.screen == Screen::Details) {
         if (down & HidNpadButton_B) {
@@ -2338,6 +2493,16 @@ void handleInput(UiState& ui, u64 down) {
 }
 
 void handleTouch(UiState& ui) {
+    if (ui.screen == Screen::Stream) {
+        ui.touchWasDown = false;
+        ui.swipeStartX = -1.0f;
+        ui.swipeStartY = -1.0f;
+        ui.lastTouchX = -1.0f;
+        ui.lastTouchY = -1.0f;
+        ui.swipeOffset = 0.0f;
+        return;
+    }
+
     HidTouchScreenState state{};
     const auto count = hidGetTouchScreenStates(&state, 1);
     const bool down = count > 0 && state.count > 0;
@@ -2380,6 +2545,11 @@ void handleTouch(UiState& ui) {
 }
 
 void handleMouse(UiState& ui, GLFWwindow* window) {
+    if (ui.screen == Screen::Stream) {
+        ui.mouseWasDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+        return;
+    }
+
     const bool down = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     if (down && !ui.mouseWasDown) {
         double x = 0.0;
@@ -2451,6 +2621,7 @@ int runCustomUiApp() {
     }
 
     PadState pad;
+    padConfigureInput(1, HidNpadStyleSet_NpadFullCtrl);
     padInitializeDefault(&pad);
     PadRepeater repeater;
     padRepeaterInitialize(&repeater, 18, 5);
@@ -2460,6 +2631,7 @@ int runCustomUiApp() {
     while (appletMainLoop() && !glfwWindowShouldClose(window)) {
         glfwPollEvents();
         padUpdate(&pad);
+        updateStreamInputSnapshot(ui, pad);
         padRepeaterUpdate(&repeater, padGetButtons(&pad) & (HidNpadButton_AnyLeft | HidNpadButton_AnyRight | HidNpadButton_AnyUp | HidNpadButton_AnyDown | HidNpadButton_L | HidNpadButton_R));
         const auto buttons = padGetButtonsDown(&pad) | padRepeaterGetButtons(&repeater);
         if (buttons) {

@@ -109,8 +109,7 @@ std::string signalingSignInUrl(const SessionInfo& session, const std::string& pe
 }
 
 std::string peerInfoJson(std::uint32_t ackId, std::uint32_t peerId, const std::string& peerName, const StreamSettings& settings) {
-    std::ostringstream resolution;
-    resolution << settings.width << "x" << settings.height;
+    (void)settings;
     std::ostringstream json;
     json
         << "{\"ackid\":" << ackId << ",\"peer_info\":{"
@@ -120,7 +119,7 @@ std::string peerInfoJson(std::uint32_t ackId, std::uint32_t peerId, const std::s
         << "\"id\":" << peerId << ","
         << "\"name\":\"" << jsonEscape(peerName) << "\","
         << "\"peerRole\":0,"
-        << "\"resolution\":\"" << resolution.str() << "\","
+        << "\"resolution\":\"1920x1080\","
         << "\"version\":2"
         << "}}";
     return json.str();
@@ -312,6 +311,24 @@ void appendRtcLog(const std::string& message) {
 #endif
 }
 
+void appendRtcSdpBlock(const char* title, const std::string& sdp) {
+    appendRtcLog(std::string("[RTC] === ") + title + " START ===");
+    std::string line;
+    for (std::size_t i = 0; i <= sdp.size(); ++i) {
+        const char c = i < sdp.size() ? sdp[i] : '\n';
+        if (c == '\r') {
+            continue;
+        }
+        if (c != '\n') {
+            line.push_back(c);
+            continue;
+        }
+        appendRtcLog("[RTC] SDP> " + line);
+        line.clear();
+    }
+    appendRtcLog(std::string("[RTC] === ") + title + " END ===");
+}
+
 std::vector<std::string> mediaMidsFromSdp(const std::string& sdp) {
     std::vector<std::string> mids;
     std::string line;
@@ -477,6 +494,12 @@ std::string iceStatsText(PeerConnection* pc) {
 } // namespace
 
 struct GfnWebRtcClient::Impl {
+    struct QueuedIceCandidate {
+        std::string candidate;
+        std::string mid = "0";
+        std::uint32_t mLineIndex = 0;
+    };
+
 #if defined(OPENNOW_HAS_LIBDATACHANNEL)
     struct PendingIceCandidate {
         std::string candidate;
@@ -488,6 +511,7 @@ struct GfnWebRtcClient::Impl {
     std::shared_ptr<rtc::DataChannel> reliableInput;
     std::shared_ptr<rtc::DataChannel> partialInput;
     std::shared_ptr<rtc::DataChannel> controlChannel;
+    std::vector<std::shared_ptr<rtc::Track>> remoteTracks;
     std::atomic<bool> rtcInitialized{false};
     std::atomic<bool> closing{false};
     std::atomic<rtc::PeerConnection::State> state{rtc::PeerConnection::State::Closed};
@@ -520,9 +544,13 @@ struct GfnWebRtcClient::Impl {
             return;
         }
         videoBytes += frame.size();
-        std::lock_guard<std::mutex> lock(callbackMutex);
-        if (!closing.load() && videoNal && !frame.empty()) {
-            videoNal(reinterpret_cast<const std::uint8_t*>(frame.data()), frame.size());
+        std::function<void(const std::uint8_t*, std::size_t)> callback;
+        {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            callback = videoNal;
+        }
+        if (!closing.load() && callback && !frame.empty()) {
+            callback(reinterpret_cast<const std::uint8_t*>(frame.data()), frame.size());
         }
     }
 
@@ -531,9 +559,13 @@ struct GfnWebRtcClient::Impl {
             return;
         }
         audioBytes += frame.size();
-        std::lock_guard<std::mutex> lock(callbackMutex);
-        if (!closing.load() && opusPacket && !frame.empty()) {
-            opusPacket(reinterpret_cast<const std::uint8_t*>(frame.data()), frame.size());
+        std::function<void(const std::uint8_t*, std::size_t)> callback;
+        {
+            std::lock_guard<std::mutex> lock(callbackMutex);
+            callback = opusPacket;
+        }
+        if (!closing.load() && callback && !frame.empty()) {
+            callback(reinterpret_cast<const std::uint8_t*>(frame.data()), frame.size());
         }
     }
 
@@ -600,6 +632,9 @@ struct GfnWebRtcClient::Impl {
     }
 
     bool canUsePartiallyReliableForInput(std::uint32_t inputType, std::uint16_t controllerId = 0) const {
+        if (!partialInput || !partialInput->isOpen()) {
+            return false;
+        }
         if (inputType == gfn::INPUT_GAMEPAD) {
             if (controllerId >= 4) {
                 return false;
@@ -631,6 +666,20 @@ struct GfnWebRtcClient::Impl {
 
     void handleInputHandshake(const rtc::message_variant& data) {
         const auto bytes = messageBytes(data);
+        if (!inputReady.load()) {
+            std::ostringstream hex;
+            const auto count = std::min<std::size_t>(bytes.size(), 16);
+            for (std::size_t i = 0; i < count; ++i) {
+                if (i != 0) {
+                    hex << ' ';
+                }
+                hex << std::hex << std::nouppercase;
+                hex.width(2);
+                hex.fill('0');
+                hex << static_cast<unsigned>(bytes[i]);
+            }
+            appendRtcLog("[RTC] Input channel message: " + std::to_string(bytes.size()) + " bytes [" + hex.str() + "].");
+        }
         const auto version = parseInputHandshakeVersion(bytes);
         if (version == 0) {
             appendRtcLog("[RTC] Input datachannel message was not a GFN handshake.");
@@ -642,6 +691,8 @@ struct GfnWebRtcClient::Impl {
             appendRtcLog("[RTC] Input handshake complete (protocol v" + std::to_string(version) + ").");
             sendReliableBytes(inputEncoder.encodeHeartbeat());
             startInputHeartbeat();
+        } else {
+            appendRtcLog("[RTC] Input protocol version refreshed from handshake: v" + std::to_string(version) + ".");
         }
     }
 
@@ -669,7 +720,7 @@ struct GfnWebRtcClient::Impl {
 
     void wireInputDataChannelCallbacks() {
         if (reliableInput) {
-            reliableInput->onOpen([] {
+            reliableInput->onOpen([this] {
                 appendRtcLog("[RTC] Reliable input datachannel open.");
             });
             reliableInput->onClosed([this] {
@@ -714,7 +765,7 @@ struct GfnWebRtcClient::Impl {
             wireInputDataChannelCallbacks();
             inputChannelsOpened = static_cast<bool>(reliableInput) || static_cast<bool>(partialInput);
             appendRtcLog(std::string("[RTC] GFN input datachannels ")
-                + (inputChannelsOpened ? "created before answer with DCEP." : "not created."));
+                + (inputChannelsOpened ? "created for answer negotiation with DCEP." : "not created."));
             return inputChannelsOpened;
         } catch (const std::exception& e) {
             appendRtcLog(std::string("[RTC] Failed to create input datachannels: ") + e.what());
@@ -740,18 +791,26 @@ struct GfnWebRtcClient::Impl {
     static void onVideo(uint8_t* data, size_t size, void* userdata) {
         auto* self = static_cast<Impl*>(userdata);
         self->videoBytes += size;
-        std::lock_guard<std::mutex> lock(self->callbackMutex);
-        if (self->videoNal) {
-            self->videoNal(data, size);
+        std::function<void(const std::uint8_t*, std::size_t)> callback;
+        {
+            std::lock_guard<std::mutex> lock(self->callbackMutex);
+            callback = self->videoNal;
+        }
+        if (callback) {
+            callback(data, size);
         }
     }
 
     static void onAudio(uint8_t* data, size_t size, void* userdata) {
         auto* self = static_cast<Impl*>(userdata);
         self->audioBytes += size;
-        std::lock_guard<std::mutex> lock(self->callbackMutex);
-        if (self->opusPacket) {
-            self->opusPacket(data, size);
+        std::function<void(const std::uint8_t*, std::size_t)> callback;
+        {
+            std::lock_guard<std::mutex> lock(self->callbackMutex);
+            callback = self->opusPacket;
+        }
+        if (callback) {
+            callback(data, size);
         }
     }
 
@@ -761,7 +820,7 @@ struct GfnWebRtcClient::Impl {
     std::size_t audioBytes = 0;
 #endif
     std::string peerName = defaultPeerName();
-    std::vector<std::string> queuedRemoteCandidates;
+    std::vector<QueuedIceCandidate> queuedRemoteCandidates;
 };
 
 GfnWebRtcClient::GfnWebRtcClient() : impl_(new Impl()) {}
@@ -790,6 +849,7 @@ GfnWebRtcStartResult GfnWebRtcClient::startFromRemoteOffer(const GfnWebRtcConfig
         impl_->audioBytes = 0;
         impl_->inputChannelsOpened = false;
         impl_->inputReady = false;
+        impl_->remoteTracks.clear();
         impl_->heartbeatStop = true;
         impl_->remoteMids = mediaMidsFromSdp(offerSdp);
         impl_->partialReliableThresholdMs =
@@ -799,6 +859,9 @@ GfnWebRtcStartResult GfnWebRtcClient::startFromRemoteOffer(const GfnWebRtcConfig
             parseRiIntegerAttribute(offerSdp, "ri.enablePartiallyReliableTransferGamepad", 0x0fu);
         impl_->enablePartiallyReliableTransferHid =
             parseRiIntegerAttribute(offerSdp, "ri.enablePartiallyReliableTransferHid", 0xffffffffu);
+#if defined(OPENNOW_PLATFORM_SWITCH)
+        appendRtcLog("[RTC] Switch input transport: matching OpenNOW desktop reliable + partially reliable datachannels.");
+#endif
         {
             std::lock_guard<std::mutex> lock(impl_->localCandidateMutex);
             impl_->localCandidates.clear();
@@ -897,6 +960,7 @@ GfnWebRtcStartResult GfnWebRtcClient::startFromRemoteOffer(const GfnWebRtcConfig
             if (self->closing.load()) {
                 return;
             }
+            self->remoteTracks.push_back(track);
             const auto desc = track->description().description();
             const auto descLower = lower(desc);
             if (descLower.find("h264") != std::string::npos || track->description().type() == "video") {
@@ -1185,6 +1249,13 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
             nextProgressLog = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         }
 
+        if (result.ok && (videoBytesReceived() > 0 || audioBytesReceived() > 0)) {
+            socket.close();
+            log("[INFO][SIGNALING] GFN media started; handing stream loop to native pipeline. Peer state="
+                + connectionState() + ".");
+            return result;
+        }
+
         if (std::chrono::steady_clock::now() >= nextHeartbeat) {
             if (!send(heartbeatJson(), "heartbeat")) {
                 socket.close();
@@ -1280,16 +1351,18 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
             }
 
             log("[INFO][SIGNALING] Received GFN WebRTC offer SDP bytes=" + std::to_string(offerSdp.size()) + ".");
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+            appendRtcSdpBlock("GFN REMOTE OFFER ORIGINAL", offerSdp);
+#endif
             const auto mediaIp = config.session.mediaConnectionInfo.ip.empty()
                 ? config.session.serverIp
                 : config.session.mediaConnectionInfo.ip;
             if (!mediaIp.empty()) {
                 offerSdp = gfn::fixServerIp(offerSdp, mediaIp);
             }
+            offerSdp = gfn::duplicateSessionWebrtcAttributesToMedia(offerSdp);
 #if defined(OPENNOW_HAS_LIBDATACHANNEL)
             log("[INFO][SIGNALING] Keeping WebRTC application/datachannel m-line for GFN stream startup.");
-            offerSdp = ensureIceLite(offerSdp);
-            log("[INFO][SIGNALING] Marked GFN offer as ICE-lite for native libjuice role parity.");
 #endif
             offerSdp = gfn::preferCodec(offerSdp, config.settings.codec);
             const auto candidateIp = endpointIpForCandidate(config.session);
@@ -1304,6 +1377,9 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
                 offerSdp = normalizeSdpForLibpeer(offerSdp);
             }
             log("[INFO][SIGNALING] Processed offer SDP: " + gfn::summarizeMediaTransportAttributes(offerSdp) + ".");
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+            appendRtcSdpBlock("GFN REMOTE OFFER PROCESSED", offerSdp);
+#endif
 
             const auto start = startFromRemoteOffer({.session = config.session}, offerSdp);
             if (!start.ok) {
@@ -1334,8 +1410,18 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
             nvstParams.enablePartiallyReliableTransferHid = impl_->enablePartiallyReliableTransferHid;
 #endif
             const auto nvstSdp = gfn::buildNvstSdpForAnswer(nvstParams, answerSdp);
+            if (nvstSdp.empty()) {
+                result.error = "Local answer SDP did not contain credentials required for nvstSdp";
+                log("[ERROR][SIGNALING] " + result.error);
+                socket.close();
+                return result;
+            }
             log("[INFO][SIGNALING] Created SDP answer bytes=" + std::to_string(answerSdp.size())
                 + " nvstSdp bytes=" + std::to_string(nvstSdp.size()) + ".");
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+            appendRtcSdpBlock("GFN LOCAL ANSWER", answerSdp);
+            appendRtcSdpBlock("GFN NVST SDP", nvstSdp);
+#endif
 
             if (localPeerId == 0) {
                 localPeerId = 1;
@@ -1361,6 +1447,7 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
                     if (addRemoteCandidateForMid(manualCandidate, manualMid)) {
                         injectedManualCandidate = true;
                         log("[INFO][SIGNALING] Injected manual server ICE candidate after answer for mid " + manualMid + ".");
+                        break;
                     }
                 }
 #else
@@ -1377,11 +1464,7 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
                 }
             }
             for (const auto& candidate : impl_->queuedRemoteCandidates) {
-                std::string queuedMid;
-#if defined(OPENNOW_HAS_LIBDATACHANNEL)
-                queuedMid = impl_->remoteMids.empty() ? std::string("0") : impl_->remoteMids.front();
-#endif
-                (void)addRemoteCandidateForMid(candidate, queuedMid);
+                (void)addRemoteCandidateForMid(candidate.candidate, candidate.mid);
             }
             impl_->queuedRemoteCandidates.clear();
             continue;
@@ -1395,7 +1478,13 @@ GfnWebRtcSignalingResult GfnWebRtcClient::connectWithGfnSignaling(const GfnWebRt
             mid = candidateMidFromPayload(peerPayload.value, impl_->remoteMids);
 #endif
             if (!addRemoteCandidateForMid(candidate, mid)) {
-                impl_->queuedRemoteCandidates.push_back(candidate);
+                Impl::QueuedIceCandidate queued;
+                queued.candidate = candidate;
+                queued.mid = mid;
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+                queued.mLineIndex = midToMLineIndex(mid, impl_->remoteMids);
+#endif
+                impl_->queuedRemoteCandidates.push_back(std::move(queued));
             } else {
 #if defined(OPENNOW_HAS_LIBPEER)
                 log("[INFO][MEDIA] " + iceStatsText(impl_->pc) + ".");
@@ -1544,6 +1633,30 @@ bool GfnWebRtcClient::sendGamepadInput(const gfn::GamepadInput& input, std::uint
 #endif
 }
 
+bool GfnWebRtcClient::sendMouseMove(const gfn::MouseMovePayload& input) {
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+    const bool partiallyReliable = impl_->canUsePartiallyReliableForInput(gfn::INPUT_MOUSE_REL);
+    auto bytes = impl_->inputEncoder.encodeMouseMove(input);
+    return impl_->sendBytes(bytes, partiallyReliable);
+#else
+    (void)input;
+    return false;
+#endif
+}
+
+bool GfnWebRtcClient::sendMouseButton(const gfn::MouseButtonPayload& input, bool pressed) {
+#if defined(OPENNOW_HAS_LIBDATACHANNEL)
+    auto bytes = pressed
+        ? impl_->inputEncoder.encodeMouseButtonDown(input)
+        : impl_->inputEncoder.encodeMouseButtonUp(input);
+    return impl_->sendBytes(bytes, false);
+#else
+    (void)input;
+    (void)pressed;
+    return false;
+#endif
+}
+
 std::string GfnWebRtcClient::connectionState() const {
 #if defined(OPENNOW_HAS_LIBDATACHANNEL)
     if (!impl_->pc) {
@@ -1605,6 +1718,7 @@ void GfnWebRtcClient::close() {
     auto reliableInput = std::move(impl_->reliableInput);
     auto partialInput = std::move(impl_->partialInput);
     auto controlChannel = std::move(impl_->controlChannel);
+    auto remoteTracks = std::move(impl_->remoteTracks);
     auto pc = std::move(impl_->pc);
 
     if (reliableInput) {
@@ -1618,6 +1732,12 @@ void GfnWebRtcClient::close() {
     if (controlChannel) {
         controlChannel->resetCallbacks();
         controlChannel->close();
+    }
+    for (auto& track : remoteTracks) {
+        if (track) {
+            track->resetCallbacks();
+            track->close();
+        }
     }
     if (pc) {
         pc->resetCallbacks();
