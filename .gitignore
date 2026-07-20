@@ -1,0 +1,31 @@
+# Build and packaging output
+/build/
+/dist/
+/SwitchNOW-main/
+/SwitchNOW-release/
+*.elf
+*.nacp
+*.nro
+*.o
+*.obj
+*.pdb
+
+# Local runtime state and diagnostics
+*.log
+*.tmp
+*.bak
+auth_session.json
+stream_settings.json
+nte.txt
+first_frame.ppm
+
+# IDE and operating-system metadata
+.codex_refs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.user
+*.suo
+__pycache__/
+node_modules/

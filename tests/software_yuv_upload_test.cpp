@@ -1,0 +1,38 @@
+#include "../app/src/stream/deko3d/SoftwareYuvUpload.hpp"
+
+#include <array>
+#include <cassert>
+
+int main()
+{
+    constexpr int width = 4;
+    constexpr int height = 4;
+    const std::array<uint8_t, 24> y = {
+        1, 2, 3, 4, 99, 99,
+        5, 6, 7, 8, 99, 99,
+        9, 10, 11, 12, 99, 99,
+        13, 14, 15, 16, 99, 99,
+    };
+    const std::array<uint8_t, 6> u = {21, 22, 99, 23, 24, 99};
+    const std::array<uint8_t, 6> v = {31, 32, 99, 33, 34, 99};
+    std::array<uint8_t, 16> output_y {};
+    std::array<uint8_t, 8> output_uv {};
+
+    assert(opennow::video::CopyYuv420ToNv12(
+        width, height, y.data(), 6, u.data(), 3, v.data(), 3, false,
+        output_y.data(), output_uv.data()));
+    assert((output_y == std::array<uint8_t, 16>{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}));
+    assert((output_uv == std::array<uint8_t, 8>{21, 31, 22, 32, 23, 33, 24, 34}));
+
+    const std::array<uint8_t, 12> nv12 = {
+        41, 51, 42, 52, 99, 99,
+        43, 53, 44, 54, 99, 99,
+    };
+    output_uv.fill(0);
+    assert(opennow::video::CopyYuv420ToNv12(
+        width, height, y.data(), 6, nv12.data(), 6, nullptr, 0, true,
+        output_y.data(), output_uv.data()));
+    assert((output_uv == std::array<uint8_t, 8>{41, 51, 42, 52, 43, 53, 44, 54}));
+    return 0;
+}
