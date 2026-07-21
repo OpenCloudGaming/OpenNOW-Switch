@@ -19,6 +19,20 @@ The interface language is selected in `Settings > Interface > Language`. Press
 `X` to save. Existing installations are migrated automatically from
 `sdmc:/switch/OpenNOWSwitch` to `sdmc:/switch/SwitchNOW` on first launch.
 
+## Screenshots
+
+### Library
+
+![SwitchNOW game library](docs/screenshots/library.jpg)
+
+### Game details
+
+![SwitchNOW game details](docs/screenshots/game-details.jpg)
+
+### Session launch
+
+![SwitchNOW cloud session launch screen](docs/screenshots/session-launch.jpg)
+
 ## Install
 
 1. Copy `SwitchNOW.nro` and the icons to `sdmc:/switch/SwitchNOW/`.
