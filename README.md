@@ -195,8 +195,58 @@ The repository contains no accounts, passwords, tokens, logs or device data.
 Saved credentials are created only at runtime on the user's SD card. Password
 storage is optional and uses the encrypted local credential vault.
 
-## License and upstream
+## Projects and acknowledgements
 
-SwitchNOW is based on the OpenCloudGaming/OpenNOW concepts and uses open-source
-components listed in the dependency directories. Review dependency licenses
-before redistribution.
+SwitchNOW would not exist without the following open-source projects. Reference
+projects inspired the architecture and user experience; they are not copied into
+or linked directly with the SwitchNOW binary.
+
+### Architecture and UX references
+
+- [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW) - GeForce NOW client,
+  service flow and desktop UX reference.
+- [OpenNOW-Switch](https://github.com/OpenCloudGaming/OpenNOW-Switch) - earlier
+  Nintendo Switch research and implementation reference.
+- [Moonlight-Switch](https://github.com/XITRIX/Moonlight-Switch) - Switch-native
+  streaming, controller, rendering and hardware-decoding reference.
+
+### Core build and runtime dependencies
+
+- [devkitPro](https://devkitpro.org/),
+  [libnx](https://github.com/switchbrew/libnx) and
+  [deko3d](https://github.com/devkitPro/deko3d) - Nintendo Switch toolchain,
+  platform services and graphics API.
+- [Borealis](https://github.com/xfangfang/borealis) - console-oriented UI,
+  navigation and rendering framework.
+- [libpeer](https://github.com/sepfy/libpeer) - embedded WebRTC, ICE, DTLS,
+  SRTP and data-channel foundation.
+- [FFmpeg](https://github.com/FFmpeg/FFmpeg) and Averne's
+  [NVTEGRA branch](https://github.com/averne/FFmpeg/tree/nvtegra) - H.264/Opus
+  media processing and Tegra X1 hardware decoding support.
+- [curl](https://github.com/curl/curl) - HTTPS and service requests.
+- [Jansson](https://github.com/akheron/jansson) - JSON parsing and generation.
+- [zlib](https://github.com/madler/zlib) - compression support.
+
+### Bundled upstream components
+
+The vendored Borealis and libpeer trees also contain components from
+[GLFW](https://github.com/xfangfang/glfw),
+[SDL](https://github.com/XITRIX/SDL),
+[fmt](https://github.com/fmtlib/fmt),
+[Tweeny](https://github.com/mobius3/tweeny),
+[Yoga](https://github.com/facebook/yoga),
+[NanoVG](https://github.com/memononen/nanovg),
+[tinyxml2](https://github.com/leethomason/tinyxml2),
+[libromfs](https://github.com/averne/libromfs),
+[switch-libpulsar](https://github.com/p-sam/switch-libpulsar),
+[libsrtp](https://github.com/cisco/libsrtp),
+[usrsctp](https://github.com/sctplab/usrsctp),
+[Mbed TLS](https://github.com/Mbed-TLS/mbedtls),
+[cJSON](https://github.com/DaveGamble/cJSON),
+[FreeRTOS coreHTTP](https://github.com/FreeRTOS/coreHTTP) and
+[FreeRTOS coreMQTT](https://github.com/FreeRTOS/coreMQTT). Platform-specific and
+optional components are selected by the build configuration.
+
+Each upstream project remains subject to its own license and copyright notices.
+This acknowledgement list does not replace the license files shipped with the
+source and dependency trees.
