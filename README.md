@@ -1,22 +1,132 @@
+<p align="center">
+  <img src="docs/branding/switchnow-hero-2048.png" width="560" alt="SwitchNOW logo">
+</p>
+
 # SwitchNOW
 
 SwitchNOW is a native Nintendo Switch homebrew client for GeForce NOW. It is
-distributed as an `.nro`, uses a controller-first Borealis interface and has a
-native WebRTC, video, audio and input pipeline.
+distributed as an `.nro` and combines a controller-first Borealis launcher with
+native WebRTC signaling, H.264 video, Opus audio and low-latency input delivery.
 
-## Version 1.0
+> [!IMPORTANT]
+> SwitchNOW is an unofficial community project. It is not affiliated with or
+> endorsed by NVIDIA or Nintendo. A valid GeForce NOW account is required, and
+> game availability, session duration and queues depend on the selected NVIDIA
+> membership and region.
 
-- Unified H.264 streaming client with Tegra X1 NVDEC and software fallback.
-- GeForce NOW catalog, owned library, covers, sorting, store selection and
-  persistent multi-account sign-in.
-- Xbox/Switch controller layouts, touch mouse input and an in-stream keyboard.
-- Synchronized Opus audio, configurable stream quality and diagnostics.
-- Interface languages: English, Simplified Chinese, Spanish, Russian, Italian,
-  French, Polish and Ukrainian.
-- In-game language selection remains separate from the launcher language.
+## Main features
 
-The interface language is selected in `Settings > Interface > Language`. Press
-`X` to save. Existing installations are migrated automatically from
+- Browse the GeForce NOW catalog and the games linked to the current account.
+- Cover-art cache, incremental catalog paging, search, filters and sorting.
+- Per-game store selection for titles available through multiple storefronts.
+- Persistent multi-account sign-in, token refresh and optional encrypted local
+  password storage for quick sign-in and automatic account recovery.
+- Animated queue, setup and connection stages while a cloud rig is prepared.
+- Tegra X1 NVDEC hardware decoding with automatic software-decoder fallback.
+- Bounded low-latency decode queues, damaged-frame suppression, RTCP recovery
+  and keyframe resynchronization after packet loss.
+- Synchronized Opus audio with configurable buffering and volume amplification.
+- Xbox-compatible virtual gamepad, optional Switch-labelled face-button layout,
+  touch-to-mouse input and an in-stream Nintendo keyboard.
+- Adaptive stream-quality modes for motion resilience, clarity or untouched
+  server output.
+- Free-tier session warnings and automatic return to the game page after a
+  session ends or the connection is lost.
+- Opt-in flight-recorder diagnostics. Detailed logs and overlays are disabled
+  by default during normal gameplay.
+- Dedicated Neverness to Everness credential helper and guided in-game login.
+
+## Technical specification
+
+| Component | Implementation |
+| --- | --- |
+| Target platform | Nintendo Switch homebrew / Horizon OS |
+| Package | Native `.nro` application |
+| UI | Borealis, controller-first navigation, touch support |
+| Signaling and media | Secure WebSocket signaling and WebRTC with ICE |
+| Video codec | H.264 |
+| Video decoder | Tegra X1 NVDEC, software FFmpeg fallback, automatic safe mode |
+| Stream presets | Safe: 720p30 at 8 Mbps; Balanced: 720p60 at 12 Mbps; Quality: 1080p60 at 20 Mbps |
+| Custom bitrate steps | 8, 12, 16, 20 or 25 Mbps |
+| Quality modes | Adaptive, Clarity and Original |
+| Audio | Opus, 30-100 ms configurable buffer, 8x-16x gain options |
+| Input | Xbox-compatible gamepad reports, relative mouse and keyboard over the stream data channel |
+| Interface languages | English, Simplified Chinese, Spanish, Russian, Italian, French, Polish and Ukrainian |
+| In-game languages | 30 selectable locale profiles, sent when supported by the game |
+| Local data | `sdmc:/switch/SwitchNOW/` |
+
+### Video quality modes
+
+- **Adaptive** is the recommended default. It balances minimum and initial
+  bitrate, packet-loss resilience, light denoising and restrained sharpening.
+- **Clarity** prioritizes a cleaner image and stronger detail recovery while
+  retaining the same maximum bitrate selected in settings.
+- **Original** disables the local image-enhancement pass and keeps the decoded
+  server image as-is.
+
+`Auto` selects NVDEC first and falls back to software decoding if hardware
+initialization fails or the previous hardware session did not shut down cleanly.
+The app avoids building an unlimited frame backlog: on congestion it drops stale
+work, requests a clean reference frame and resumes from the newest valid image.
+
+## Controls
+
+### Launcher
+
+| Input | Action |
+| --- | --- |
+| Left stick / D-pad | Move focus through buttons, settings and game tiles |
+| `A` | Select or activate the focused item |
+| `B` | Go back or close a dialog |
+| `L` / `R` | Switch between Store, Library and Settings |
+| `Y` | Open search in Store or Library |
+| `ZL` / `ZR` / `X` | Context actions shown in the toolbar, such as filter, sort and load more |
+
+Vertical game-grid movement keeps the closest column instead of returning to
+the first tile in every row.
+
+### In-stream gamepad
+
+| Switch input | Xbox-compatible action sent to the game |
+| --- | --- |
+| `A`, `B`, `X`, `Y` | Xbox face buttons according to the selected layout |
+| `L` / `R` | `LB` / `RB` |
+| `ZL` / `ZR` | Full-value `LT` / `RT` |
+| Left / right stick | Left / right analog stick |
+| Stick clicks | `L3` / `R3` |
+| D-pad | Xbox D-pad |
+| `-` | View / Select |
+| Short `+` press | Menu / Start |
+| Hold `+` for at least 500 ms | Nexus / Guide |
+| `ZL + ZR + -` | Safely stop streaming and return to the game page |
+
+The default **Xbox** layout maps the physical Switch positions to Xbox labels:
+`A -> B`, `B -> A`, `X -> Y`, `Y -> X`. Select **Switch** in
+`Settings > Controls` to send matching letters instead.
+
+### Keyboard, touch and NTE helper
+
+| Input | Action |
+| --- | --- |
+| `- + Y` | Open the transparent in-stream keyboard |
+| `A` | Select a key / confirm inside the keyboard |
+| `+` | Submit the entered text and close the keyboard |
+| `B` | Close the keyboard without submitting |
+| Touch | Reposition the remote cursor to the touched point and perform a left click |
+| Touch drag | Hold the left mouse button and move the remote cursor |
+| `L + X` in NTE | Start the configured Neverness to Everness auto-login sequence |
+| `B` during NTE auto-login | Cancel the sequence |
+
+Game input is blocked while the keyboard or NTE login automation owns input, so
+typing cannot accidentally trigger gameplay actions.
+
+## Languages and settings
+
+Select the launcher language in `Settings > Interface > Language` and press `X`
+to save. The in-game language is configured separately in `Settings > Game`.
+Supported games can also preserve graphics options changed inside a stream.
+
+Existing installations are migrated automatically from
 `sdmc:/switch/OpenNOWSwitch` to `sdmc:/switch/SwitchNOW` on first launch.
 
 ## Screenshots
