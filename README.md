@@ -195,6 +195,20 @@ The repository contains no accounts, passwords, tokens, logs or device data.
 Saved credentials are created only at runtime on the user's SD card. Password
 storage is optional and uses the encrypted local credential vault.
 
+## Support SwitchNOW
+
+SwitchNOW is free and open source. If you enjoy the project and would like to
+support its continued development, you can make an optional cryptocurrency
+contribution through NOWPayments.
+
+<a href="https://nowpayments.io/payment/?iid=4924980734&source=button" target="_blank" rel="noreferrer noopener"><img src="https://nowpayments.io/images/embeds/payments-button-black.svg" alt="Support SwitchNOW with cryptocurrency through NOWPayments"></a>
+
+[Open the SwitchNOW contribution page](https://nowpayments.io/payment/?iid=4924980734)
+
+Contributions are entirely voluntary, are processed by the third-party
+NOWPayments service, and do not unlock features or create any obligation or
+warranty.
+
 ## Projects and acknowledgements
 
 SwitchNOW would not exist without the following open-source projects. Reference
