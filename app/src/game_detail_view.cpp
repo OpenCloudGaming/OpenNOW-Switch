@@ -2,6 +2,7 @@
 
 #include "app_state.hpp"
 #include "cover_image_cache.hpp"
+#include "game_detail_policy.hpp"
 #include "nte_credentials.hpp"
 #include "ui_helpers.hpp"
 #include "localization.hpp"
@@ -33,9 +34,9 @@ brls::Label* MakeLabel(const std::string& text, float size, NVGcolor color, floa
 std::string PrimaryStore(const GameInfo& game)
 {
     if (!game.available_stores.empty())
-        return game.available_stores.front();
+        return game_detail::DisplayStore(game.available_stores.front());
 
-    if (!game.publisher.empty())
+    if (!game_detail::IsUnknownMetadata(game.publisher))
         return game.publisher;
 
     return "GeForce NOW";
@@ -51,7 +52,7 @@ std::string JoinStores(const GameInfo& game)
     {
         if (i > 0)
             stream << ", ";
-        stream << game.available_stores[i];
+        stream << game_detail::DisplayStore(game.available_stores[i]);
     }
     return stream.str();
 }
@@ -131,6 +132,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     }
 
     setPadding(28, 40, 28, 40);
+    setBackgroundColor(nvgRGB(16, 16, 20));
 
     auto* header = new brls::Header();
     header->setTitle(data_.title);
@@ -142,13 +144,13 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     content->setMarginTop(16);
 
     auto* poster_column = new brls::Box(brls::Axis::COLUMN);
-    poster_column->setWidth(350);
-    poster_column->setMarginRight(32);
+    poster_column->setWidth(330);
+    poster_column->setMarginRight(28);
 
     auto* poster = new brls::Image();
-    poster->setWidth(330);
-    poster->setHeight(470);
-    poster->setCornerRadius(12);
+    poster->setWidth(310);
+    poster->setHeight(420);
+    poster->setCornerRadius(14);
     poster->setScalingType(brls::ImageScalingType::FILL);
     poster->setMarginBottom(16);
     SetCachedCoverImage(poster, data_.image_url);
@@ -157,6 +159,8 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     auto* play_button = new brls::Button();
     play_button->setStyle(&brls::BUTTONSTYLE_PRIMARY);
     play_button->setText(Tr(data_.owned ? "Play on GeForce NOW" : "Play from Store"));
+    play_button->setHeight(52);
+    play_button->setCornerRadius(10);
     play_button->registerClickAction([this](brls::View* view) {
         (void)view;
         Play();
@@ -166,6 +170,8 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
 
     store_button_ = new brls::Button();
     store_button_->setMarginTop(10);
+    store_button_->setHeight(46);
+    store_button_->setCornerRadius(10);
     store_button_->registerClickAction([this](brls::View*) {
         ShowStoreSelector(false);
         return true;
@@ -178,19 +184,35 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     auto* info_column = new brls::Box(brls::Axis::COLUMN);
     info_column->setGrow(1.0f);
 
-    info_column->addView(MakeLabel(data_.title, 34.0f, nvgRGB(245, 246, 248), 8.0f));
-    info_column->addView(MakeLabel(Tr(data_.owned ? "In your library" : "Supported in GeForce NOW"), 20.0f, nvgRGB(88, 230, 146), 22.0f));
-    info_column->addView(MakeLabel("Stores: " + SafeText(data_.stores, "Unknown"), 19.0f, nvgRGB(210, 214, 220)));
+    info_column->addView(MakeLabel(data_.title, 32.0f, nvgRGB(236, 236, 239), 6.0f));
+    info_column->addView(MakeLabel(
+        game_detail::DetailSubtitle(data_.owned), 17.0f, nvgRGB(88, 217, 138), 18.0f));
+
+    auto* metadata = new brls::Box(brls::Axis::COLUMN);
+    metadata->setPadding(16, 18, 14, 18);
+    metadata->setMarginBottom(18);
+    metadata->setCornerRadius(12);
+    metadata->setBorderThickness(1);
+    metadata->setBorderColor(nvgRGB(42, 42, 48));
+    metadata->setBackgroundColor(nvgRGB(21, 21, 24));
+    metadata->addView(MakeLabel("GAME DETAILS", 12.0f, nvgRGB(112, 119, 130), 10.0f));
+    metadata->addView(MakeLabel(
+        "Store  ·  " + game_detail::DisplayStore(data_.stores),
+        17.0f, nvgRGB(220, 220, 225), 6.0f));
     if (!data_.membership_tier_label.empty())
     {
-        info_column->addView(MakeLabel(
-            "Membership: " + data_.membership_tier_label,
-            19.0f,
-            nvgRGB(246, 196, 80)));
+        metadata->addView(MakeLabel(
+            "Membership  ·  " + data_.membership_tier_label,
+            17.0f, nvgRGB(246, 196, 80), 6.0f));
     }
-    info_column->addView(MakeLabel("Publisher: " + SafeText(data_.publisher, "Unknown"), 19.0f, nvgRGB(210, 214, 220)));
-    info_column->addView(MakeLabel("Last played: " + SafeText(data_.last_played, "Never"), 19.0f, nvgRGB(210, 214, 220)));
-    info_column->addView(MakeLabel("Launch App ID: " + SafeText(data_.launch_app_id, "Unavailable"), 17.0f, nvgRGB(140, 148, 158), 24.0f));
+    if (!game_detail::IsUnknownMetadata(data_.publisher))
+        metadata->addView(MakeLabel(
+            "Publisher  ·  " + data_.publisher,
+            17.0f, nvgRGB(220, 220, 225), 6.0f));
+    metadata->addView(MakeLabel(
+        "Last played  ·  " + game_detail::FormatLastPlayed(data_.last_played),
+        17.0f, nvgRGB(220, 220, 225), 0.0f));
+    info_column->addView(metadata);
 
     if (IsNevernessToEverness(data_.title))
     {
@@ -204,10 +226,11 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
         info_column->addView(nte_button_);
     }
 
+    info_column->addView(MakeLabel("ABOUT", 12.0f, nvgRGB(112, 119, 130), 8.0f));
     auto* description = MakeLabel(
         SafeText(data_.description, "No description is available yet for this title."),
-        20.0f,
-        nvgRGB(232, 235, 240),
+        18.0f,
+        nvgRGB(206, 206, 214),
         0.0f);
     description->setSingleLine(false);
 
@@ -255,8 +278,8 @@ void GameDetailView::UpdateStoreButton()
     if (!store_button_)
         return;
     const std::string store = selected_variant_index_ < data_.variants.size()
-        ? SafeText(data_.variants[selected_variant_index_].store, "Unknown")
-        : SafeText(data_.stores, "Unknown");
+        ? game_detail::DisplayStore(data_.variants[selected_variant_index_].store)
+        : game_detail::DisplayStore(data_.stores);
     store_button_->setText(Tr("Store") + ": " + store + (data_.variants.size() > 1 ? " (" + Tr("change") + ")" : ""));
 }
 
@@ -383,7 +406,7 @@ GameDetailData MakeLibraryGameDetail(const GameInfo& game)
     GameDetailData data;
     data.title         = game.title;
     data.game_id       = game.uuid.empty() ? game.id : game.uuid;
-    data.subtitle      = PrimaryStore(game) + " library title";
+    data.subtitle      = game_detail::HeaderSubtitle(true);
     data.image_url     = game.image_url;
     data.launch_app_id = game.launch_app_id;
     data.publisher     = game.publisher;
@@ -406,7 +429,7 @@ GameDetailData MakeCatalogGameDetail(const PublicGame& game)
     GameDetailData data;
     data.title         = game.title;
     data.game_id       = game.uuid.empty() ? game.id : game.uuid;
-    data.subtitle      = game.store + (game.is_in_library ? " library title" : " catalog title");
+    data.subtitle      = game_detail::HeaderSubtitle(game.is_in_library);
     data.image_url     = game.image_url;
     data.launch_app_id = game.launch_app_id.empty() ? game.id : game.launch_app_id;
     data.publisher     = game.publisher;

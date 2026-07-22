@@ -6,6 +6,7 @@
 #include "game_grid_navigation.hpp"
 #include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
+#include "ui_text_policy.hpp"
 #include "localization.hpp"
 
 #include <algorithm>
@@ -40,7 +41,7 @@ brls::Button* MakeToolbarButton(const std::string& text)
     button->setFontSize(15);
     button->setStyle(&brls::BUTTONSTYLE_BORDERED);
     button->setHeight(42);
-    button->setWidth(static_cast<float>(std::max<size_t>(170, localized.size() * 9 + 38)));
+    button->setWidth(ui::ToolbarButtonWidth(localized));
     button->setMarginRight(10);
     return button;
 }
@@ -79,7 +80,7 @@ CatalogTab::CatalogTab()
     : brls::Box(brls::Axis::COLUMN)
 {
     setPadding(18, 32, 18, 32);
-    setBackgroundColor(nvgRGB(11, 12, 15));
+    setBackgroundColor(nvgRGB(16, 16, 20));
 
     auto* heading = new brls::Box(brls::Axis::ROW);
     heading->setAlignItems(brls::AlignItems::CENTER);
@@ -88,7 +89,7 @@ CatalogTab::CatalogTab()
     accent->setWidth(4);
     accent->setHeight(30);
     accent->setMarginRight(12);
-    accent->setColor(nvgRGB(92, 238, 139));
+    accent->setColor(nvgRGB(88, 217, 138));
     heading->addView(accent);
     auto* title = MakeParagraph("Store", 0.0f);
     title->setFontSize(28);

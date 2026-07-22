@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <cstdint>
 #include <curl/curl.h>
 
 class WebSocketClient {
