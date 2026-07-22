@@ -2,17 +2,28 @@
   <img src="docs/branding/switchnow-hero-2048.png" width="560" alt="SwitchNOW logo">
 </p>
 
-# SwitchNOW
+# OpenNOW for Nintendo Switch
 
-SwitchNOW is a native Nintendo Switch homebrew client for GeForce NOW. It is
-distributed as an `.nro` and combines a controller-first Borealis launcher with
-native WebRTC signaling, H.264 video, Opus audio and low-latency input delivery.
+This repository is the Nintendo Switch foundation for
+[OpenNOW](https://github.com/OpenCloudGaming/OpenNOW). It is forked from
+[Blade-Punisher/SwitchNOW](https://github.com/Blade-Punisher/SwitchNOW), a native
+Nintendo Switch homebrew client for GeForce NOW.
+
+> [!WARNING]
+> The OpenNOW integration is under active development. The current codebase still
+> uses the inherited SwitchNOW name, assets, package paths and `.nro` filename.
+> The documentation below describes that working baseline and will be updated as
+> the OpenNOW implementation replaces it.
+
+The inherited client combines a controller-first Borealis launcher with native
+WebRTC signaling, H.264 video, Opus audio and low-latency input delivery.
 
 > [!IMPORTANT]
-> SwitchNOW is an unofficial community project. It is not affiliated with or
-> endorsed by NVIDIA or Nintendo. A valid GeForce NOW account is required, and
-> game availability, session duration and queues depend on the selected NVIDIA
-> membership and region.
+> OpenNOW and SwitchNOW are independent community projects. They are not
+> affiliated with, endorsed by or sponsored by NVIDIA or Nintendo. NVIDIA and
+> GeForce NOW are trademarks of NVIDIA Corporation. A valid GeForce NOW account
+> is required, and game availability, session duration and queues depend on the
+> selected NVIDIA membership and region.
 
 ## Main features
 
@@ -195,15 +206,14 @@ The repository contains no accounts, passwords, tokens, logs or device data.
 Saved credentials are created only at runtime on the user's SD card. Password
 storage is optional and uses the encrypted local credential vault.
 
-## Support SwitchNOW
+## Support the upstream SwitchNOW project
 
-SwitchNOW is free and open source. If you enjoy the project and would like to
-support its continued development, you can make an optional cryptocurrency
-contribution through NOWPayments.
+The payment links below belong to the upstream SwitchNOW project and support its
+original developer. They do not fund OpenNOW.
 
 <a href="https://nowpayments.io/payment/?iid=5035597688&source=button" target="_blank" rel="noreferrer noopener"><img src="https://nowpayments.io/images/embeds/payments-button-black.svg" alt="Support SwitchNOW with cryptocurrency through NOWPayments"></a>
 
-[Open the SwitchNOW contribution page](https://nowpayments.io/payment/?iid=5035597688)
+[Open the upstream SwitchNOW contribution page](https://nowpayments.io/payment/?iid=5035597688)
 
 Contributions are entirely voluntary, are processed by the third-party
 NOWPayments service, and do not unlock features or create any obligation or
@@ -211,9 +221,15 @@ warranty.
 
 ## Projects and acknowledgements
 
-SwitchNOW would not exist without the following open-source projects. Reference
-projects inspired the architecture and user experience; they are not copied into
-or linked directly with the SwitchNOW binary.
+This fork is built on
+[SwitchNOW](https://github.com/Blade-Punisher/SwitchNOW) by
+[Blade-Punisher](https://github.com/Blade-Punisher). The original project's
+architecture, implementation and documentation provide the working Nintendo
+Switch baseline while OpenNOW integration is developed.
+
+The inherited client also depends on the following open-source projects.
+Reference projects inspired its architecture and user experience; they are not
+copied into or linked directly with the SwitchNOW binary.
 
 ### Architecture and UX references
 
