@@ -21,7 +21,7 @@ extern "C"
 
 class GLVideoRenderer : public IVideoRenderer {
   public:
-    GLVideoRenderer(){};
+    GLVideoRenderer() = default;
     ~GLVideoRenderer();
 
     void draw(NVGcontext* vg, int width, int height, AVFrame* frame, int imageFormat) override;
@@ -57,19 +57,19 @@ class GLVideoRenderer : public IVideoRenderer {
     uint64_t m_rendered_frame_count = 0;
     uint64_t m_uploaded_generation = 0;
     uint64_t m_unique_frame_count = 0;
-    int m_yuvmat_location;
-    int m_offset_location;
-    int m_uv_data_location;
-    int textureWidth[PLANES_NUM_MAX];
-    int textureHeight[PLANES_NUM_MAX];
+    int m_yuvmat_location = -1;
+    int m_offset_location = -1;
+    int m_uv_data_location = -1;
+    int textureWidth[PLANES_NUM_MAX] = {};
+    int textureHeight[PLANES_NUM_MAX] = {};
     float borderColor[PLANES_NUM_MAX] = {0.0f, 0.5f, 0.5f};
     VideoRenderStats m_video_render_stats_progress = {};
     VideoRenderStats m_video_render_stats_cache = {};
     uint64_t timeCount = 0;
 
     int currentFrameTypePlanesNum = 0;
-    const int (*currentPlanes)[5];
-    int currentFormat;
+    const int (*currentPlanes)[5] = nullptr;
+    int currentFormat = 0;
 };
 
 #endif // USE_GL_RENDERER
