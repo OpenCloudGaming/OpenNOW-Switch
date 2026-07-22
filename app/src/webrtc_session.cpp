@@ -1,4 +1,5 @@
 #include "webrtc_session.hpp"
+#include "network_loop_policy.hpp"
 #include "stream/RemoteCandidatePolicy.hpp"
 #include "borealis.hpp"
 #include "stream/audio/AudioRtpUtils.hpp"
@@ -1578,6 +1579,7 @@ void WebRtcSession::start_network_worker() {
 void WebRtcSession::network_loop() {
     while (network_running_.load(std::memory_order_acquire)) {
         bool can_run = false;
+        int batch_size = 0;
         {
             std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
             can_run = pc_ && signaling_ready_ && remote_description_set_ &&
@@ -1589,7 +1591,6 @@ void WebRtcSession::network_loop() {
                 constexpr int kMaximumDatagramsPerBatch = 24;
                 constexpr auto kMaximumBatchTime = std::chrono::microseconds(1000);
                 const auto batch_started_at = std::chrono::steady_clock::now();
-                int batch_size = 0;
                 for (int packet = 0; packet < kMaximumDatagramsPerBatch; ++packet) {
                     if (peer_connection_loop(pc_) == 0)
                         break;
@@ -1609,8 +1610,10 @@ void WebRtcSession::network_loop() {
             }
         }
 
-        if (!can_run)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const int backoff_ms =
+            opennow::network::LoopBackoffMilliseconds(can_run, batch_size);
+        if (backoff_ms > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
         else
             std::this_thread::yield();
     }
@@ -1883,12 +1886,13 @@ void WebRtcSession::stop() {
 void WebRtcSession::handle_signaling_message(const std::string& msg) {
     signaling_rx_count_++;
     AppendStreamLog("RX " + msg);
-    AppendTraceLog(CompactSignalingMessage(msg));
+    const std::string compact_message = CompactSignalingMessage(msg);
+    AppendTraceLog(compact_message);
 
     if (last_messages_.size() >= 3) {
         last_messages_.erase(last_messages_.begin());
     }
-    last_messages_.push_back(CompactSignalingMessage(msg));
+    last_messages_.push_back(compact_message);
 
     json_error_t error;
     json_t* root = json_loads(msg.c_str(), 0, &error);
