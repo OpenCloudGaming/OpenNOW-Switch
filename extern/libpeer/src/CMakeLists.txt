@@ -22,8 +22,19 @@ include_directories(peer PUBLIC
 
 add_dependencies(peer cjson mbedtls usrsctp srtp2)
 
-target_link_libraries(peer ${DEP_LIBS})
-target_link_directories(peer INTERFACE ${CMAKE_BINARY_DIR}/dist/lib)
+# Use absolute archives so the Switch toolchain's early -Lportlibs path cannot
+# resolve -lmbedtls/-lmbedcrypto to the older portlibs copies.
+set(_OPENNOW_PEER_DIST_LIBDIR "${CMAKE_BINARY_DIR}/dist/lib")
+set(_OPENNOW_PEER_ABS_LIBS
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libsrtp2.a"
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libusrsctp.a"
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libmbedtls.a"
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libmbedx509.a"
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libmbedcrypto.a"
+  "${_OPENNOW_PEER_DIST_LIBDIR}/libcjson.a"
+)
+target_link_libraries(peer INTERFACE ${_OPENNOW_PEER_ABS_LIBS})
+target_link_directories(peer INTERFACE ${_OPENNOW_PEER_DIST_LIBDIR})
 
 set_target_properties(peer PROPERTIES PUBLIC_HEADER "${HEADERS}")
 
