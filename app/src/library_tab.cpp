@@ -551,6 +551,7 @@ void LibraryTab::LoadMore()
             auto* card = new GameCardView(display, [this, index]() {
                 OpenGameDialog(index);
             });
+            card->setMarginRight(i + 1 < end ? 24.0f : 0.0f);
 
             if (!first_new_card)
                 first_new_card = card;
