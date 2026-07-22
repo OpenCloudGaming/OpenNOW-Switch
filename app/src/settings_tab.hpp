@@ -73,7 +73,6 @@ class SettingsTab : public brls::Box
     bool ClearSavedLogin(brls::View* view);
     bool SwitchSavedAccount(brls::View* view);
     bool ClearAllSavedLogins(brls::View* view);
-    bool ClearSavedPasswords(brls::View* view);
     bool ShowCacheState(brls::View* view);
     bool ClearCoverCache(brls::View* view);
     bool CycleStreamPreset(brls::View* view);

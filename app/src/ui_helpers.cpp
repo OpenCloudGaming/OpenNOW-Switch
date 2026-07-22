@@ -317,30 +317,11 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
         try {
             post_progress(0, "Checking your NVIDIA account",
                           "Renewing authorization and checking previous sessions.", 0.10f);
-            SessionInfo info;
-            try {
-                bg_client.CleanupStaleCloudSession(bg_auth);
-                post_progress(1, "Requesting a cloud rig",
-                              "GeForce NOW is allocating hardware for your game.", 0.24f);
-                info = bg_client.StartSession(bg_auth, bg_app_id, bg_store, bg_internal_title);
-            }
-            catch (const ReauthenticationRequired&)
-            {
-                post_progress(0, "Signing in automatically",
-                              "The saved session expired. Using your remembered NVIDIA account.", 0.14f);
-                bg_auth = bg_client.ReauthenticateWithSavedCredentials(
-                    bg_auth,
-                    [post_progress](const std::string& status) {
-                        post_progress(0, "Confirming your NVIDIA account", status, 0.18f);
-                    },
-                    [launch_state]() { return !launch_state->running.load(); });
-                if (!launch_state->running)
-                    return;
-                post_progress(1, "Account restored - requesting a rig",
-                              "Quick sign-in completed successfully.", 0.26f);
-                bg_client.CleanupStaleCloudSession(bg_auth);
-                info = bg_client.StartSession(bg_auth, bg_app_id, bg_store, bg_internal_title);
-            }
+            bg_client.CleanupStaleCloudSession(bg_auth);
+            post_progress(1, "Requesting a cloud rig",
+                          "GeForce NOW is allocating hardware for your game.", 0.24f);
+            SessionInfo info = bg_client.StartSession(
+                bg_auth, bg_app_id, bg_store, bg_internal_title);
             {
                 std::lock_guard<std::mutex> lock(launch_state->mutex);
                 launch_state->session_id = info.session_id;

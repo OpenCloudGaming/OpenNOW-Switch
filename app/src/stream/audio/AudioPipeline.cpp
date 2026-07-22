@@ -1,4 +1,5 @@
 #include "AudioPipeline.hpp"
+#include "AudioLatencyPolicy.hpp"
 #include "AudioRtpUtils.hpp"
 #include "../../stream_diagnostics.hpp"
 
@@ -27,8 +28,6 @@ constexpr int kMaxPackets = 12;
 constexpr int kOutputBufferCount = 24;
 constexpr size_t kOutputBufferBytes = 0x4000;
 constexpr int kOutputStartBuffers = 4;
-constexpr uint64_t kInitialJitterHoldUs = 450000;
-constexpr uint64_t kResyncJitterHoldUs = 120000;
 constexpr int kFadeSilenceFrames = 2400; // 50 ms
 constexpr int kFadeTotalFrames = 12000;  // 250 ms
 constexpr const char* kAudioLogPath = "sdmc:/switch/SwitchNOW/audio.log";
@@ -76,7 +75,10 @@ struct AudioPipeline::Impl {
     std::atomic<int> last_applied_gain_x100 {100};
     std::atomic<uint64_t> limited_frames {0};
     int prime_packets = kPrimePackets;
+    int output_start_buffers = kOutputStartBuffers;
     int output_queue_limit = 8;
+    uint64_t initial_jitter_hold_us = 40000;
+    uint64_t resync_jitter_hold_us = 30000;
     uint64_t jitter_hold_until_us = 0;
     int fade_frames_processed = 0;
 
@@ -177,7 +179,7 @@ struct AudioPipeline::Impl {
         log("INIT ok backend=audout rate=48000 channels=2 frameSamples=480 prebuffer=" +
             std::to_string(prime_packets) + " buffers=24 outputLimit=" +
             std::to_string(output_queue_limit) + " startupHoldMs=" +
-            std::to_string(kInitialJitterHoldUs / 1000) + " gain=" +
+            std::to_string(initial_jitter_hold_us / 1000) + " gain=" +
             std::to_string(volume_percent));
         return true;
     }
@@ -246,7 +248,7 @@ struct AudioPipeline::Impl {
     }
 
     bool ensure_output_started() {
-        if (output_started || queued_output_buffers < kOutputStartBuffers)
+        if (output_started || queued_output_buffers < static_cast<size_t>(output_start_buffers))
             return true;
         const Result rc = audoutStartAudioOut();
         if (R_FAILED(rc)) {
@@ -598,8 +600,11 @@ AudioPipeline::~AudioPipeline() { stop(); }
 
 void AudioPipeline::configure(int volume_percent, int target_buffer_ms) {
     impl_->volume_percent = std::max(800, std::min(1600, volume_percent));
-    impl_->prime_packets = std::max(3, std::min(10, target_buffer_ms / 10));
-    impl_->output_queue_limit = std::max(kOutputStartBuffers,
+    impl_->prime_packets = opennow::audio::PrimePacketCount(target_buffer_ms);
+    impl_->output_start_buffers = impl_->prime_packets;
+    impl_->initial_jitter_hold_us = opennow::audio::InitialJitterHoldUs(target_buffer_ms);
+    impl_->resync_jitter_hold_us = opennow::audio::ResyncJitterHoldUs(target_buffer_ms);
+    impl_->output_queue_limit = std::max(impl_->output_start_buffers,
         std::min(12, impl_->prime_packets + 2));
 }
 
@@ -684,13 +689,13 @@ void AudioPipeline::submit(const PeerAudioPacket& source) {
 
     std::lock_guard<std::mutex> lock(impl_->mutex);
     if (impl_->jitter_hold_until_us == 0 && !impl_->primed)
-        impl_->jitter_hold_until_us = now_us + kInitialJitterHoldUs;
+        impl_->jitter_hold_until_us = now_us + impl_->initial_jitter_hold_us;
     if (opennow::audio::ShouldResetEpoch(previous_receive_us, now_us, impl_->have_expected,
                                           impl_->expected_sequence, packet.sequence, kMaxPackets)) {
         impl_->packets.clear();
         impl_->primed = false;
         impl_->have_expected = false;
-        impl_->jitter_hold_until_us = now_us + kResyncJitterHoldUs;
+        impl_->jitter_hold_until_us = now_us + impl_->resync_jitter_hold_us;
         impl_->reset_epoch_requested.store(true);
     }
     if (impl_->have_expected && int16_t(packet.sequence - impl_->expected_sequence) < 0) {

@@ -1,5 +1,6 @@
 #include "webrtc_session.hpp"
 #include "stream/audio/AudioRtpUtils.hpp"
+#include "stream/DecodeQueuePolicy.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "internal.hpp"
 
@@ -129,9 +130,11 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
         return;
     }
 
-    // Absorb short dynamic-scene bursts without immediately discarding the
-    // reference chain. Eight 60 fps pictures cap reserve latency near 133 ms.
-    constexpr size_t kMaxQueuedAccessUnits = 8;
+    // Keep the queue bounded to about 67 ms. Crossing the bound means the
+    // decoder is no longer at the live edge, so clear the dependent chain and
+    // resume at an IDR instead of accumulating visible input latency.
+    const size_t kMaxQueuedAccessUnits =
+        opennow::video::MaximumQueuedAccessUnits(settings_.fps);
     if (decoder_queue_.size() >= kMaxQueuedAccessUnits) {
         decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
         clear_decoder_queue_locked();

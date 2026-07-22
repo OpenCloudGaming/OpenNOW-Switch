@@ -13,6 +13,7 @@
 
 #include "main_activity.hpp"
 #include "app_paths.hpp"
+#include "gfn_client.hpp"
 #include "localization.hpp"
 #include "stream_diagnostics.hpp"
 #include "stream_settings.hpp"
@@ -24,6 +25,9 @@ namespace
 void EnsureLogDirectory()
 {
     opennow::PrepareAppStorage();
+    // QR device authorization never needs an account password. Remove any
+    // legacy quick-login vault left by older builds before the UI starts.
+    opennow::GfnClient().ClearAllNativeCredentials();
 }
 
 void AppendBootLog(const std::string& line)

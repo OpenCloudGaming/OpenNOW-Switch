@@ -22,6 +22,7 @@ struct AuthTokens
     std::string refresh_token;
     std::string id_token;
     std::string client_token;
+    std::string auth_client_id;
     std::int64_t expires_at_ms              = 0;
     std::int64_t client_token_expires_at_ms = 0;
 };
@@ -36,6 +37,15 @@ struct AuthUser
     bool membership_tier_verified = false;
 };
 
+struct QrLoginChallenge
+{
+    std::string user_code;
+    std::string verification_uri;
+    std::string verification_uri_complete;
+    std::int64_t expires_at_ms = 0;
+    int interval_seconds = 5;
+};
+
 struct AuthSession
 {
     LoginProvider provider;
@@ -45,13 +55,6 @@ struct AuthSession
     std::int64_t membership_checked_at_ms = 0;
     bool persistence_enabled = true; // Runtime-only; vault sessions are persistent.
     bool reauthentication_required = false; // Runtime-only; set after invalid_grant/401 refresh failure.
-};
-
-struct NativeCredentials
-{
-    std::string provider_id;
-    std::string email;
-    std::string password;
 };
 
 struct GameVariant

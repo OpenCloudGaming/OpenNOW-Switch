@@ -16,7 +16,6 @@ namespace opennow
 
 MainTabsView::MainTabsView()
 {
-    bool automatic_sign_in_needed = false;
     auto& state = AppState::Instance();
     if (!state.IsSessionLoaded())
     {
@@ -31,11 +30,8 @@ MainTabsView::MainTabsView()
             catch (const ReauthenticationRequired&)
             {
                 session.reauthentication_required = true;
-                automatic_sign_in_needed =
-                    client.LoadNativeCredentials(session.provider.idp_id).has_value();
-                brls::Application::notify(automatic_sign_in_needed
-                    ? "NVIDIA session expired; quick sign-in will start automatically"
-                    : "NVIDIA requires this account to sign in again");
+                brls::Application::notify(
+                    "NVIDIA session expired; reconnect with a QR code from Library");
             }
             catch (const std::exception&)
             {
@@ -47,20 +43,11 @@ MainTabsView::MainTabsView()
         else
             state.MarkSessionLoaded();
     }
-    else if (state.HasSession() && state.session()->reauthentication_required)
-    {
-        GfnClient client;
-        automatic_sign_in_needed =
-            client.LoadNativeCredentials(state.session()->provider.idp_id).has_value();
-    }
-
     addTab(Tr("Store"), []() { return new CatalogTab(); });
     addTab(Tr("Library"), []() { return new LibraryTab(); });
     addTab(Tr("Settings"), []() { return new SettingsTab(); });
     focusTab(1);
-    last_auth_check_ = automatic_sign_in_needed
-        ? std::chrono::steady_clock::time_point {}
-        : std::chrono::steady_clock::now();
+    last_auth_check_ = std::chrono::steady_clock::now();
 }
 
 void MainTabsView::MaybeRefreshAuthentication()
@@ -75,68 +62,45 @@ void MainTabsView::MaybeRefreshAuthentication()
         return;
 
     const AuthSession session = *state.session();
-    const bool automatic_sign_in = session.reauthentication_required;
-    if (automatic_sign_in)
-    {
-        if (now < auto_reauth_backoff_until_)
-            return;
-        GfnClient credential_probe;
-        if (!credential_probe.LoadNativeCredentials(session.provider.idp_id))
-            return;
-    }
+    if (session.reauthentication_required)
+        return;
 
     if (auth_refresh_running_->exchange(true))
         return;
     const auto guard = auth_refresh_running_;
-    if (automatic_sign_in)
-        brls::Application::notify("Signing in to NVIDIA automatically...");
-    brls::async([this, session, guard, automatic_sign_in]() mutable {
+    brls::async([session, guard]() mutable {
         try
         {
             GfnClient client;
             AuthSession refreshed = client.RecoverSavedSession(session);
-            brls::sync([this, refreshed = std::move(refreshed), guard, automatic_sign_in]() mutable {
+            brls::sync([refreshed = std::move(refreshed), guard]() mutable {
                 auto& current = AppState::Instance();
                 if (current.HasSession() &&
                     current.session()->user.user_id == refreshed.user.user_id)
                 {
                     current.SetSession(std::move(refreshed));
-                    auto_reauth_backoff_until_ = {};
-                    if (automatic_sign_in)
-                        brls::Application::notify("NVIDIA quick sign-in completed");
                 }
                 guard->store(false);
             });
         }
         catch (const ReauthenticationRequired&)
         {
-            brls::sync([this, session, guard]() mutable {
+            brls::sync([session, guard]() mutable {
                 auto& current = AppState::Instance();
                 if (current.HasSession() && current.session()->user.user_id == session.user.user_id)
                 {
                     AuthSession invalid = *current.session();
                     invalid.reauthentication_required = true;
                     current.SetSession(std::move(invalid));
-                    last_auth_check_ = {};
-                    GfnClient credential_probe;
                     brls::Application::notify(
-                        credential_probe.LoadNativeCredentials(session.provider.idp_id)
-                            ? "NVIDIA session expired; quick sign-in is starting automatically"
-                            : "NVIDIA requires this account to sign in again");
+                        "NVIDIA session expired; reconnect with a QR code from Library");
                 }
                 guard->store(false);
             });
         }
         catch (const std::exception&)
         {
-            brls::sync([this, guard, automatic_sign_in]() {
-                if (automatic_sign_in)
-                {
-                    auto_reauth_backoff_until_ =
-                        std::chrono::steady_clock::now() + std::chrono::seconds(30);
-                    brls::Application::notify(
-                        "Automatic NVIDIA sign-in needs confirmation; open Library to continue");
-                }
+            brls::sync([guard]() {
                 guard->store(false);
             });
         }
