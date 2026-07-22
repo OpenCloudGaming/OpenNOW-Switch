@@ -58,7 +58,13 @@ target_include_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/libpeer/third_party/mbedtls/include
 )
 
-target_link_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/ffmpeg/lib)
+# Prefer the in-tree libpeer mbedtls/srtp build over portlibs copies that
+# share the same -lmbedtls/-lmbedcrypto names.
+target_link_directories(${PROJECT_NAME}
+    BEFORE PRIVATE
+        ${CMAKE_BINARY_DIR}/dist/lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/ffmpeg/lib
+)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_SWITCH __SWITCH__ HAS_SOCKLEN_T=1)
 if (PLATFORM_SWITCH)
