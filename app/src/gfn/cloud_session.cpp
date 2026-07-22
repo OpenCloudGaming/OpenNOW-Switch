@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include "../community_proxy_policy.hpp"
 #include "../stream_diagnostics.hpp"
 #include "../stream_settings.hpp"
 
@@ -662,6 +663,7 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     const std::string sub_session_id = GenerateUuid();
 
     const StreamSettings stream_settings = LoadStreamSettings();
+    const std::string proxy_url = community_proxy::EnabledUrl(stream_settings);
     std::string url = session.provider.streaming_service_url +
         "v2/session?keyboardLayout=en-US_qwerty&languageCode=" +
         stream_settings.game_language;
@@ -700,14 +702,14 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     AppendSessionTraceLog("START headers:\n" + HeadersForTrace(headers));
     AppendSessionTraceLog("START request body:\n" + JsonForTrace(body));
 
-    HttpResponse response = http_client_.Post(url, kUserAgent, headers, body);
+    HttpResponse response = http_client_.Post(url, kUserAgent, headers, body, proxy_url);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
         jwt_token = ResolveSessionJwt(session);
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("START authorization rejected; refreshed token and retrying once");
-        response = http_client_.Post(url, kUserAgent, headers, body);
+        response = http_client_.Post(url, kUserAgent, headers, body, proxy_url);
     }
     AppendSessionTraceLog("START response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("START response body:\n" + JsonForTrace(response.body));
@@ -790,6 +792,7 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
+    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
@@ -809,14 +812,14 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
 
     AppendSessionTraceLog("POLL url=" + url);
     AppendSessionTraceLog("POLL headers:\n" + HeadersForTrace(headers));
-    HttpResponse response = http_client_.Get(url, kUserAgent, headers);
+    HttpResponse response = http_client_.Get(url, kUserAgent, headers, proxy_url);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
         jwt_token = ResolveSessionJwt(session);
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("POLL authorization rejected; refreshed token and retrying once");
-        response = http_client_.Get(url, kUserAgent, headers);
+        response = http_client_.Get(url, kUserAgent, headers, proxy_url);
     }
     AppendSessionTraceLog("POLL response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("POLL response body:\n" + JsonForTrace(response.body));
@@ -898,6 +901,7 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
+    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
@@ -917,14 +921,16 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
 
     AppendSessionTraceLog("STOP url=" + url);
     AppendSessionTraceLog("STOP headers:\n" + HeadersForTrace(headers));
-    HttpResponse response = http_client_.Request("DELETE", url, kUserAgent, headers);
+    HttpResponse response = http_client_.Request(
+        "DELETE", url, kUserAgent, headers, {}, proxy_url);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
         jwt_token = ResolveSessionJwt(session);
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("STOP authorization rejected; refreshed token and retrying once");
-        response = http_client_.Request("DELETE", url, kUserAgent, headers);
+        response = http_client_.Request(
+            "DELETE", url, kUserAgent, headers, {}, proxy_url);
     }
     AppendSessionTraceLog("STOP response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("STOP response body:\n" + JsonForTrace(response.body));

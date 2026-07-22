@@ -64,6 +64,7 @@ class SettingsTab : public brls::Box
     bool BeginLogin(brls::View* view);
     bool ClearCoverCache(brls::View* view);
     bool CycleStreamPreset(brls::View* view);
+    bool ToggleCommunityProxy(brls::View* view);
     bool ChooseGameLanguage(brls::View* view);
     bool TogglePersistGameSettings(brls::View* view);
     bool ToggleControllerLayout(brls::View* view);
@@ -91,6 +92,7 @@ class SettingsTab : public brls::Box
     StreamSettings draft_settings_;
     bool settings_loaded_ = false;
     bool dirty_ = false;
+    bool community_proxy_provisioning_ = false;
 };
 
 } // namespace opennow

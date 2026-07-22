@@ -26,6 +26,8 @@ struct StreamSettings
     std::string controller_layout = "Xbox";
     std::string image_quality_mode = "Adaptive";
     std::string interface_language = "en";
+    bool community_proxy_enabled = false;
+    std::string community_proxy_url;
 };
 
 struct GameLanguageOption

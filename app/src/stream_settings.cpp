@@ -1,6 +1,7 @@
 #include "stream_settings.hpp"
 #include "app_paths.hpp"
 #include "atomic_file_replace.hpp"
+#include "community_proxy_policy.hpp"
 #include "localization.hpp"
 
 #include <jansson.h>
@@ -121,6 +122,15 @@ StreamSettings Sanitize(StreamSettings settings)
     if (!IsSupportedInterfaceLanguage(settings.interface_language))
         settings.interface_language = "en";
 
+    if (!settings.community_proxy_url.empty() &&
+        !community_proxy::IsCommunityProxyUrl(settings.community_proxy_url))
+    {
+        settings.community_proxy_enabled = false;
+        settings.community_proxy_url.clear();
+    }
+    if (settings.community_proxy_enabled && settings.community_proxy_url.empty())
+        settings.community_proxy_enabled = false;
+
     return settings;
 }
 
@@ -128,10 +138,21 @@ StreamSettings Sanitize(StreamSettings settings)
 
 const std::vector<StreamSettings>& StreamPresets()
 {
+    const auto make_preset = [](
+        const char* id, const char* label, int width, int height, int fps, int bitrate_kbps) {
+        StreamSettings preset;
+        preset.preset_id = id;
+        preset.label = label;
+        preset.width = width;
+        preset.height = height;
+        preset.fps = fps;
+        preset.bitrate_kbps = bitrate_kbps;
+        return preset;
+    };
     static const std::vector<StreamSettings> presets = {
-        {"safe", "Safe", 1280, 720, 30, 8000, "H264", "Auto"},
-        {"balanced", "Balanced", 1280, 720, 60, 12000, "H264", "Auto"},
-        {"quality", "Quality", 1920, 1080, 60, 20000, "H264", "Auto"},
+        make_preset("safe", "Safe", 1280, 720, 30, 8000),
+        make_preset("balanced", "Balanced", 1280, 720, 60, 12000),
+        make_preset("quality", "Quality", 1920, 1080, 60, 20000),
     };
     return presets;
 }
@@ -227,6 +248,10 @@ StreamSettings LoadStreamSettings()
         root.get(), "image_quality_mode", settings.image_quality_mode);
     settings.interface_language = JsonField(
         root.get(), "interface_language", settings.interface_language);
+    settings.community_proxy_enabled = JsonBool(
+        root.get(), "community_proxy_enabled", settings.community_proxy_enabled);
+    settings.community_proxy_url = JsonField(
+        root.get(), "community_proxy_url", settings.community_proxy_url);
     return Sanitize(settings);
 }
 
@@ -259,6 +284,10 @@ bool SaveStreamSettings(const StreamSettings& settings)
         root.get(), "image_quality_mode", json_string(clean.image_quality_mode.c_str()));
     json_object_set_new(
         root.get(), "interface_language", json_string(clean.interface_language.c_str()));
+    json_object_set_new(
+        root.get(), "community_proxy_enabled", json_boolean(clean.community_proxy_enabled));
+    json_object_set_new(
+        root.get(), "community_proxy_url", json_string(clean.community_proxy_url.c_str()));
 
     char* dump = json_dumps(root.get(), JSON_INDENT(2));
     if (!dump)
@@ -311,7 +340,9 @@ std::string FormatStreamSettings(const StreamSettings& settings)
            " | Save game graphics: " +
            (settings.persist_game_settings ? "On" : "Off") +
            " | Controls: " + settings.controller_layout +
-           " | Motion quality: " + settings.image_quality_mode;
+           " | Motion quality: " + settings.image_quality_mode +
+           " | Community proxy: " +
+           (settings.community_proxy_enabled ? "On" : "Off");
            
 }
 
