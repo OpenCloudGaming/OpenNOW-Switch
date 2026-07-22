@@ -26,7 +26,8 @@ HttpResponse HttpClient::Request(
     const std::string& url,
     const std::string& user_agent,
     const std::vector<std::string>& headers,
-    const std::string& body) const
+    const std::string& body,
+    const std::string& proxy_url) const
 {
     CURL* raw = curl_easy_init();
     if (!raw)
@@ -53,6 +54,12 @@ HttpResponse HttpClient::Request(
     curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 2L);
+
+    if (!proxy_url.empty())
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_PROXY, proxy_url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+    }
 
     if (header_list)
         curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, header_list.get());
@@ -92,18 +99,20 @@ HttpResponse HttpClient::Request(
 HttpResponse HttpClient::Get(
     const std::string& url,
     const std::string& user_agent,
-    const std::vector<std::string>& headers) const
+    const std::vector<std::string>& headers,
+    const std::string& proxy_url) const
 {
-    return Request("GET", url, user_agent, headers);
+    return Request("GET", url, user_agent, headers, {}, proxy_url);
 }
 
 HttpResponse HttpClient::Post(
     const std::string& url,
     const std::string& user_agent,
     const std::vector<std::string>& headers,
-    const std::string& body) const
+    const std::string& body,
+    const std::string& proxy_url) const
 {
-    return Request("POST", url, user_agent, headers, body);
+    return Request("POST", url, user_agent, headers, body, proxy_url);
 }
 
 } // namespace opennow

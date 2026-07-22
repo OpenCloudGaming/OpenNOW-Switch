@@ -11,6 +11,9 @@ int main()
     value.persist_game_settings = false;
     value.controller_layout = "Switch";
     value.image_quality_mode = "Adaptive";
+    value.community_proxy_enabled = true;
+    value.community_proxy_url =
+        "http://client:secret@opennow-proxy-tcp.zortos.me:3128";
 
     opennow::settings::CycleResolution(value);
     assert(value.width == 1920 && value.height == 1080);
@@ -19,6 +22,8 @@ int main()
     assert(value.game_language == "ru_RU" && !value.persist_game_settings);
     assert(value.controller_layout == "Switch");
     assert(value.image_quality_mode == "Adaptive");
+    assert(value.community_proxy_enabled);
+    assert(!value.community_proxy_url.empty());
 
     opennow::settings::CycleResolution(value);
     assert(value.width == 1280 && value.height == 720);
