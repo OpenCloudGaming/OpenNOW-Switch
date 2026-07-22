@@ -520,7 +520,6 @@ void SettingsTab::BuildAccountPage()
     else
     {
         const AuthSession& session = *state.session();
-        const bool password_saved = client_.LoadNativeCredentials(session.provider.idp_id).has_value();
         AddInfoLine(overview, "User", session.user.display_name);
         AddInfoLine(
             overview, "Membership",
@@ -528,7 +527,6 @@ void SettingsTab::BuildAccountPage()
                 session.user.membership_tier, session.user.membership_tier_verified));
         AddInfoLine(overview, "Provider", session.provider.display_name);
         AddInfoLine(overview, "Authentication", FormatTokenState(session));
-        AddInfoLine(overview, "Quick sign-in", password_saved ? "Password saved" : "Password not saved");
     }
     AddInfoLine(overview, "Saved accounts", std::to_string(client_.LoadSavedSessions().size()));
     content_container_->addView(overview);
@@ -543,9 +541,6 @@ void SettingsTab::BuildAccountPage()
     session->addView(MakeActionRow(
         "Choose saved account", "Switch profiles without repeating sign-in.", "Choose",
         [this](brls::View* view) { return SwitchSavedAccount(view); }));
-    session->addView(MakeActionRow(
-        "Forget saved passwords", "Keep OAuth sessions, remove quick-login credentials.", "Forget",
-        [this](brls::View* view) { return ClearSavedPasswords(view); }));
     content_container_->addView(session);
 
     auto* danger = MakeSection("Account removal", "These actions also clear the matching cached library state.");
@@ -553,7 +548,7 @@ void SettingsTab::BuildAccountPage()
         "Remove active account", "Disconnect the current account and select another saved profile.", "Remove",
         [this](brls::View* view) { return ClearSavedLogin(view); }, true));
     danger->addView(MakeActionRow(
-        "Remove every account", "Delete all saved sessions and passwords from this console.", "Remove all",
+        "Remove every account", "Delete all saved sessions from this console.", "Remove all",
         [this](brls::View* view) { return ClearAllSavedLogins(view); }, true));
     content_container_->addView(danger);
 }
@@ -912,13 +907,7 @@ bool SettingsTab::ClearSavedLogin(brls::View* view)
 {
     (void)view;
 
-    const auto& current_state = AppState::Instance();
-    const std::string provider_id = current_state.HasSession()
-        ? current_state.session()->provider.idp_id
-        : std::string {};
     client_.ClearSavedSession();
-    if (!provider_id.empty())
-        client_.ClearNativeCredentials(provider_id);
 
     auto& state = AppState::Instance();
     state.SetLibraryGames({});
@@ -991,15 +980,6 @@ bool SettingsTab::ClearAllSavedLogins(brls::View* view)
     RefreshSummary();
     brls::sync([this] { RebuildCategory(); });
     brls::Application::notify("All saved GeForce NOW logins cleared");
-    return true;
-}
-
-bool SettingsTab::ClearSavedPasswords(brls::View* view)
-{
-    (void)view;
-    client_.ClearAllNativeCredentials();
-    brls::sync([this] { RebuildCategory(); });
-    brls::Application::notify("All saved NVIDIA passwords were removed; OAuth sessions remain connected");
     return true;
 }
 

@@ -182,13 +182,7 @@ class StartupGateView final : public brls::Box
             {
                 SetStatus("Checking NVIDIA session",
                           "Refreshing authorization and verifying account access.");
-                AuthSession verified = client.RecoverSavedSession(
-                    saved,
-                    true,
-                    [this](const std::string& status) {
-                        SetStatus("Signing in automatically", status);
-                    },
-                    [alive]() { return !alive->load(); });
+                AuthSession verified = client.RecoverSavedSession(saved, true);
 
                 if (!alive->load())
                     return;
@@ -202,8 +196,8 @@ class StartupGateView final : public brls::Box
                     return;
                 saved.reauthentication_required = true;
                 Complete(std::move(saved),
-                         "Automatic sign-in needs the saved password or account confirmation");
-                brls::Logger::warning("Startup automatic sign-in requires interaction: {}", ex.what());
+                         "NVIDIA requires a new QR code sign-in from Library");
+                brls::Logger::warning("Startup sign-in requires QR reconnection: {}", ex.what());
             }
             catch (const std::exception& ex)
             {

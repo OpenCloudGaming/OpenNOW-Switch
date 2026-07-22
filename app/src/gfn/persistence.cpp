@@ -189,6 +189,7 @@ bool ParseSessionObject(json_t* root, AuthSession& session)
     session.tokens.refresh_token = GetString(tokens, "refresh_token");
     session.tokens.id_token      = GetString(tokens, "id_token");
     session.tokens.client_token  = GetString(tokens, "client_token");
+    session.tokens.auth_client_id = GetString(tokens, "auth_client_id");
 
     json_t* expires = tokens ? json_object_get(tokens, "expires_at_ms") : nullptr;
     if (json_is_integer(expires))
@@ -247,6 +248,8 @@ JsonPtr BuildSessionObject(const AuthSession& session)
     json_object_set_new(tokens.get(), "refresh_token", json_string(session.tokens.refresh_token.c_str()));
     json_object_set_new(tokens.get(), "id_token", json_string(session.tokens.id_token.c_str()));
     json_object_set_new(tokens.get(), "client_token", json_string(session.tokens.client_token.c_str()));
+    json_object_set_new(
+        tokens.get(), "auth_client_id", json_string(session.tokens.auth_client_id.c_str()));
     json_object_set_new(tokens.get(), "expires_at_ms", json_integer(session.tokens.expires_at_ms));
     json_object_set_new(
         tokens.get(),
@@ -270,73 +273,6 @@ JsonPtr BuildSessionObject(const AuthSession& session)
         root.get(), "membership_checked_at_ms",
         json_integer(session.membership_checked_at_ms));
     return root;
-}
-std::vector<NativeCredentials> LoadNativeCredentialEntries()
-{
-    const std::string stored = ReadTextFile(GetNativeCredentialsPath());
-    if (stored.empty())
-        return {};
-    try
-    {
-        JsonPtr root = LoadJson(DecryptTokenVault(stored));
-        json_t* entries = json_object_get(root.get(), "entries");
-        if (!json_is_array(entries))
-            return {};
-        std::vector<NativeCredentials> result;
-        size_t index = 0;
-        json_t* item = nullptr;
-        json_array_foreach(entries, index, item)
-        {
-            NativeCredentials credentials;
-            credentials.provider_id = GetString(item, "provider_id");
-            credentials.email = GetString(item, "email");
-            credentials.password = GetString(item, "password");
-            if (!credentials.provider_id.empty() && !credentials.email.empty() &&
-                !credentials.password.empty())
-            {
-                result.push_back(std::move(credentials));
-            }
-        }
-        return result;
-    }
-    catch (const std::exception& e)
-    {
-        AppendAuthLog(std::string("auth-native: credential vault load failed error=") + e.what());
-        return {};
-    }
-}
-
-void SaveNativeCredentialEntries(const std::vector<NativeCredentials>& entries)
-{
-    EnsureAppHome();
-    if (entries.empty())
-    {
-        std::remove(GetNativeCredentialsPath().c_str());
-        std::remove((GetNativeCredentialsPath() + ".bak").c_str());
-        return;
-    }
-
-    JsonPtr root(json_object(), &json_decref);
-    JsonPtr values(json_array(), &json_decref);
-    for (const NativeCredentials& credentials : entries)
-    {
-        JsonPtr item(json_object(), &json_decref);
-        json_object_set_new(item.get(), "provider_id", json_string(credentials.provider_id.c_str()));
-        json_object_set_new(item.get(), "email", json_string(credentials.email.c_str()));
-        json_object_set_new(item.get(), "password", json_string(credentials.password.c_str()));
-        json_array_append_new(values.get(), json_incref(item.get()));
-    }
-    json_object_set_new(root.get(), "schema_version", json_integer(1));
-    json_object_set_new(root.get(), "entries", json_incref(values.get()));
-    char* dump = json_dumps(root.get(), JSON_COMPACT | JSON_SORT_KEYS);
-    if (!dump)
-        throw std::runtime_error("Failed to serialize the credential vault");
-    std::unique_ptr<char, decltype(&std::free)> plaintext(dump, &std::free);
-    const std::string encrypted = EncryptTokenVault(plaintext.get());
-    if (DecryptTokenVault(encrypted) != plaintext.get())
-        throw std::runtime_error("Credential vault round-trip verification failed");
-    WriteTextFileAtomically(GetNativeCredentialsPath(), encrypted);
-    AppendAuthLog("auth-native: credential vault saved entries=" + std::to_string(entries.size()));
 }
 
 bool LoadLegacySession(AuthSession& session)
@@ -601,58 +537,14 @@ void GfnClient::ClearAllSavedSessions() const
     std::remove((GetSessionPath() + ".bak").c_str());
 }
 
-std::optional<NativeCredentials> GfnClient::LoadNativeCredentials(
-    const std::string& provider_id) const
-{
-    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
-    for (NativeCredentials& credentials : LoadNativeCredentialEntries())
-    {
-        if (credentials.provider_id == provider_id)
-            return credentials;
-    }
-    return std::nullopt;
-}
-
-void GfnClient::SaveNativeCredentials(const NativeCredentials& credentials) const
-{
-    if (credentials.provider_id.empty() || credentials.email.empty() || credentials.password.empty())
-        throw std::runtime_error("Cannot save incomplete NVIDIA credentials");
-    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
-    std::vector<NativeCredentials> entries = LoadNativeCredentialEntries();
-    bool replaced = false;
-    for (NativeCredentials& saved : entries)
-    {
-        if (saved.provider_id == credentials.provider_id)
-        {
-            saved = credentials;
-            replaced = true;
-            break;
-        }
-    }
-    if (!replaced)
-        entries.push_back(credentials);
-    SaveNativeCredentialEntries(entries);
-}
-
-void GfnClient::ClearNativeCredentials(const std::string& provider_id) const
-{
-    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
-    std::vector<NativeCredentials> entries = LoadNativeCredentialEntries();
-    entries.erase(
-        std::remove_if(entries.begin(), entries.end(), [&](const NativeCredentials& entry) {
-            return entry.provider_id == provider_id;
-        }),
-        entries.end());
-    SaveNativeCredentialEntries(entries);
-    AppendAuthLog("auth-native: saved password removed");
-}
-
 void GfnClient::ClearAllNativeCredentials() const
 {
     std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
-    SaveNativeCredentialEntries({});
-    AppendAuthLog("auth-native: all saved passwords removed");
+    std::remove(GetNativeCredentialsPath().c_str());
+    std::remove((GetNativeCredentialsPath() + ".bak").c_str());
+    AppendAuthLog("auth: removed legacy password vault");
 }
+
 
 std::string GfnClient::LoadLauncherPreference(
     const std::string& user_id, const std::string& game_id) const

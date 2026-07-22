@@ -21,7 +21,6 @@ class MainTabsView : public TopBarFrame
     void MaybeRefreshAuthentication();
 
     std::chrono::steady_clock::time_point last_auth_check_ {};
-    std::chrono::steady_clock::time_point auto_reauth_backoff_until_ {};
     std::shared_ptr<std::atomic<bool>> auth_refresh_running_ =
         std::make_shared<std::atomic<bool>>(false);
 };

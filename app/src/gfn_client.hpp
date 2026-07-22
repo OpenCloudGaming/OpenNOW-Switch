@@ -4,7 +4,6 @@
 #include "models.hpp"
 
 #include <functional>
-#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -12,12 +11,6 @@ namespace opennow
 {
 
 class ReauthenticationRequired : public std::runtime_error
-{
-  public:
-    using std::runtime_error::runtime_error;
-};
-
-class NativeLoginFallbackRequired : public std::runtime_error
 {
   public:
     using std::runtime_error::runtime_error;
@@ -34,27 +27,16 @@ class GfnClient
         AuthSession& session, const std::string& search_query = {}) const;
     std::vector<GameInfo> FetchLibraryGames(AuthSession& session) const;
 
-    AuthSession Login(const LoginProvider& provider, const std::string& login_hint = {}) const;
-    AuthSession LoginNative(
+    AuthSession LoginWithQrCode(
         const LoginProvider& provider,
-        const std::string& email,
-        const std::string& password,
-        const std::function<std::string(const std::string&)>& request_one_time_code,
-        const std::function<void(const std::string&)>& report_status = {},
-        const std::function<bool()>& is_cancelled = {}) const;
-    AuthSession ReauthenticateWithSavedCredentials(
-        const AuthSession& expired_session,
-        const std::function<void(const std::string&)>& report_status = {},
-        const std::function<bool()>& is_cancelled = {}) const;
-    AuthSession LoginSwitchQR(const LoginProvider& provider, std::function<void(const std::string&)> onUrlGenerated, std::function<bool()> isCancelled) const;
+        const std::function<void(const QrLoginChallenge&)>& on_challenge,
+        const std::function<bool()>& is_cancelled) const;
     AuthSession EnsureFreshSession(const AuthSession& session) const;
     AuthSession EnsureFreshSavedSession(const AuthSession& session) const;
     AuthSession ForceRefreshSavedSession(const AuthSession& session) const;
     AuthSession RecoverSavedSession(
         const AuthSession& session,
-        bool force_refresh = false,
-        const std::function<void(const std::string&)>& report_status = {},
-        const std::function<bool()>& is_cancelled = {}) const;
+        bool force_refresh = false) const;
 
     SessionInfo StartSession(AuthSession& session, const std::string& launch_app_id,
                              const std::string& launch_store = "",
@@ -69,9 +51,6 @@ class GfnClient
     bool SetActiveSavedSession(const std::string& user_id) const;
     void ClearSavedSession() const;
     void ClearAllSavedSessions() const;
-    std::optional<NativeCredentials> LoadNativeCredentials(const std::string& provider_id) const;
-    void SaveNativeCredentials(const NativeCredentials& credentials) const;
-    void ClearNativeCredentials(const std::string& provider_id) const;
     void ClearAllNativeCredentials() const;
     std::string LoadLauncherPreference(const std::string& user_id, const std::string& game_id) const;
     void SaveLauncherPreference(const std::string& user_id, const std::string& game_id,
