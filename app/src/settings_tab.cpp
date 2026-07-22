@@ -9,6 +9,7 @@
 #include "stream_settings_policy.hpp"
 #include "stream_diagnostics.hpp"
 #include "subscription_display.hpp"
+#include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
 
 #include <cstdint>
@@ -129,7 +130,9 @@ bool SameSettings(const StreamSettings& left, const StreamSettings& right)
            left.persist_game_settings == right.persist_game_settings &&
            left.controller_layout == right.controller_layout &&
            left.image_quality_mode == right.image_quality_mode &&
-           left.interface_language == right.interface_language;
+           left.interface_language == right.interface_language &&
+           left.community_proxy_enabled == right.community_proxy_enabled &&
+           left.community_proxy_url == right.community_proxy_url;
 }
 
 } // namespace
@@ -428,6 +431,12 @@ void SettingsTab::RebuildCategory()
     if (!content_container_)
         return;
 
+    const size_t selected = static_cast<size_t>(category_);
+    brls::View* stable_focus = selected < category_nav_items_.size()
+        ? category_nav_items_[selected].row
+        : static_cast<brls::View*>(this);
+    MoveFocusBeforeDestroy(content_container_, stable_focus);
+
     option_values_.clear();
     content_container_->clearViews();
     switch (category_)
@@ -524,6 +533,22 @@ void SettingsTab::BuildStreamPage()
     AddInfoLine(quality, "Decoder", "Automatic hardware decode with fallback");
     AddInfoLine(quality, "Server", "Automatic selection for best latency");
     content_container_->addView(quality);
+
+    auto* connection = MakeSection(
+        "Connection",
+        "Optional routing for NVIDIA catalog, session creation and queue requests.");
+    connection->addView(MakeOptionRow(
+        "Zortos community proxy",
+        "Streaming, signaling and account authentication always stay direct.",
+        [this] {
+            if (community_proxy_provisioning_)
+                return std::string("Connecting...");
+            return draft_settings_.community_proxy_enabled
+                ? std::string("Enabled")
+                : std::string("Disabled");
+        },
+        [this](brls::View* view) { return ToggleCommunityProxy(view); }));
+    content_container_->addView(connection);
 }
 
 void SettingsTab::BuildPreferencesPage()
@@ -611,6 +636,8 @@ bool SettingsTab::SaveChanges(brls::View* view)
         return true;
     }
 
+    const bool interface_language_changed =
+        draft_settings_.interface_language != saved_settings_.interface_language;
     if (!SaveStreamSettings(draft_settings_))
     {
         ShowError("Settings Save Failed", "Could not safely write stream_settings.json to the SD card.");
@@ -628,7 +655,8 @@ bool SettingsTab::SaveChanges(brls::View* view)
         "Account", "Stream", "Preferences", "App"};
     for (size_t index = 0; index < category_nav_items_.size() && index < category_names.size(); ++index)
         category_nav_items_[index].label->setText(Tr(category_names[index]));
-    SelectCategory(category_);
+    if (interface_language_changed)
+        SelectCategory(category_);
     brls::Application::notify(Tr("Settings saved; changes apply to the next stream"));
     return true;
 }
@@ -829,6 +857,8 @@ bool SettingsTab::CycleStreamPreset(brls::View* view)
     const std::string controller_layout = draft_settings_.controller_layout;
     const std::string image_quality_mode = draft_settings_.image_quality_mode;
     const std::string interface_language = draft_settings_.interface_language;
+    const bool community_proxy_enabled = draft_settings_.community_proxy_enabled;
+    const std::string community_proxy_url = draft_settings_.community_proxy_url;
 
     draft_settings_ = NextStreamPreset(draft_settings_);
     draft_settings_.audio_enabled = audio_enabled;
@@ -841,7 +871,62 @@ bool SettingsTab::CycleStreamPreset(brls::View* view)
     draft_settings_.controller_layout = controller_layout;
     draft_settings_.image_quality_mode = image_quality_mode;
     draft_settings_.interface_language = interface_language;
+    draft_settings_.community_proxy_enabled = community_proxy_enabled;
+    draft_settings_.community_proxy_url = community_proxy_url;
     MarkDirty();
+    return true;
+}
+
+bool SettingsTab::ToggleCommunityProxy(brls::View* view)
+{
+    (void)view;
+    if (community_proxy_provisioning_)
+        return true;
+
+    if (draft_settings_.community_proxy_enabled)
+    {
+        draft_settings_.community_proxy_enabled = false;
+        MarkDirty();
+        return true;
+    }
+
+    auto* dialog = new brls::Dialog(
+        "The Zortos community proxy is optional, shared and may be rate-limited or "
+        "unavailable. It only routes NVIDIA catalog and session requests; streaming "
+        "traffic stays direct.");
+    dialog->addButton("Enable proxy", [this]() {
+        community_proxy_provisioning_ = true;
+        UpdateOptionValues();
+        brls::Application::notify("Activating community proxy...");
+
+        GfnClient client = client_;
+        brls::async([this, client]() mutable {
+            try
+            {
+                std::string proxy_url = client.ProvisionCommunityProxy();
+                brls::sync([this, proxy_url = std::move(proxy_url)]() mutable {
+                    draft_settings_.community_proxy_url = std::move(proxy_url);
+                    draft_settings_.community_proxy_enabled = true;
+                    community_proxy_provisioning_ = false;
+                    MarkDirty();
+                    UpdateOptionValues();
+                    brls::Application::notify(
+                        "Community proxy ready; press X to save");
+                });
+            }
+            catch (const std::exception& ex)
+            {
+                const std::string message = ex.what();
+                brls::sync([this, message] {
+                    community_proxy_provisioning_ = false;
+                    UpdateOptionValues();
+                    ShowError("Community Proxy Failed", message);
+                });
+            }
+        }, false);
+    });
+    dialog->addButton("Cancel", [] {});
+    dialog->open();
     return true;
 }
 

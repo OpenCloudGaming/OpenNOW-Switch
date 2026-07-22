@@ -20,18 +20,21 @@ class HttpClient
         const std::string& url,
         const std::string& user_agent,
         const std::vector<std::string>& headers = {},
-        const std::string& body = {}) const;
+        const std::string& body = {},
+        const std::string& proxy_url = {}) const;
 
     HttpResponse Get(
         const std::string& url,
         const std::string& user_agent,
-        const std::vector<std::string>& headers = {}) const;
+        const std::vector<std::string>& headers = {},
+        const std::string& proxy_url = {}) const;
 
     HttpResponse Post(
         const std::string& url,
         const std::string& user_agent,
         const std::vector<std::string>& headers,
-        const std::string& body) const;
+        const std::string& body,
+        const std::string& proxy_url = {}) const;
 };
 
 } // namespace opennow

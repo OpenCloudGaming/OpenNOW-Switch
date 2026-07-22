@@ -1,6 +1,8 @@
 #include "internal.hpp"
 
+#include "../community_proxy_policy.hpp"
 #include "../play_history.hpp"
+#include "../stream_settings.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -265,12 +267,16 @@ std::string BuildLibraryUrl(const std::string& vpc_id, bool with_library_time)
     return url;
 }
 
-std::string ResolveVpcId(const HttpClient& http_client, const AuthSession& session)
+std::string ResolveVpcId(
+    const HttpClient& http_client,
+    const AuthSession& session,
+    const std::string& proxy_url)
 {
     const HttpResponse response = http_client.Get(
         EnsureTrailingSlash(session.provider.streaming_service_url) + "v2/serverInfo",
         GfnClient::kUserAgent,
-        BuildGfnLcarsHeaders(ResolveSessionJwt(session), "NATIVE", "NVIDIA-CLASSIC", true));
+        BuildGfnLcarsHeaders(ResolveSessionJwt(session), "NATIVE", "NVIDIA-CLASSIC", true),
+        proxy_url);
 
     if (response.status_code != 200)
         return "GFN-PC";
@@ -543,10 +549,12 @@ std::vector<LoginProvider> GfnClient::FetchLoginProviders() const
 
 std::vector<PublicGame> GfnClient::FetchPublicGames() const
 {
+    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     const HttpResponse response = http_client_.Get(
         kPublicCatalogEndpoint,
         kUserAgent,
-        {"Accept: application/json"});
+        {"Accept: application/json"},
+        proxy_url);
 
     if (response.status_code != 200)
     {
@@ -596,7 +604,8 @@ std::vector<PublicGame> GfnClient::FetchCatalogGames(
 {
     session = RecoverSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string vpc_id = ResolveVpcId(http_client_, session);
+    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
+    const std::string vpc_id = ResolveVpcId(http_client_, session, proxy_url);
 
     std::vector<PublicGame> games;
     std::unordered_set<std::string> seen_ids;
@@ -608,7 +617,8 @@ std::vector<PublicGame> GfnClient::FetchCatalogGames(
             kGraphQlEndpoint,
             kUserAgent,
             BuildGraphQlPostHeaders(jwt_token),
-            BuildCatalogRequestBody(vpc_id, search_query, cursor));
+            BuildCatalogRequestBody(vpc_id, search_query, cursor),
+            proxy_url);
 
         if (response.status_code == 401)
         {
@@ -618,7 +628,8 @@ std::vector<PublicGame> GfnClient::FetchCatalogGames(
                 kGraphQlEndpoint,
                 kUserAgent,
                 BuildGraphQlPostHeaders(jwt_token),
-                BuildCatalogRequestBody(vpc_id, search_query, cursor));
+                BuildCatalogRequestBody(vpc_id, search_query, cursor),
+                proxy_url);
         }
 
         if (response.status_code != 200)
@@ -650,12 +661,14 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
 {
     session = RecoverSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string vpc_id    = ResolveVpcId(http_client_, session);
+    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
+    const std::string vpc_id = ResolveVpcId(http_client_, session, proxy_url);
 
     HttpResponse response = http_client_.Get(
         BuildLibraryUrl(vpc_id, true),
         kUserAgent,
-        BuildGraphQlHeaders(jwt_token));
+        BuildGraphQlHeaders(jwt_token),
+        proxy_url);
 
     if (response.status_code == 401)
     {
@@ -664,7 +677,8 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
         response = http_client_.Get(
             BuildLibraryUrl(vpc_id, true),
             kUserAgent,
-            BuildGraphQlHeaders(jwt_token));
+            BuildGraphQlHeaders(jwt_token),
+            proxy_url);
     }
 
     if (response.status_code != 200)
@@ -672,7 +686,8 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
         response = http_client_.Get(
             BuildLibraryUrl(vpc_id, false),
             kUserAgent,
-            BuildGraphQlHeaders(jwt_token));
+            BuildGraphQlHeaders(jwt_token),
+            proxy_url);
     }
 
     if (response.status_code != 200)
