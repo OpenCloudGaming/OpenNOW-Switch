@@ -57,6 +57,7 @@ constexpr int kLoginCallbackPort           = 2259;
 constexpr const char* kNvidiaFileOrigin    = "https://nvfile";
 constexpr const char* kNvidiaFileReferer   = "https://nvfile/";
 constexpr std::int64_t kRefreshWindowMs    = 10LL * 60LL * 1000LL;
+constexpr auto kQrLoginTimeout             = std::chrono::minutes(5);
 std::mutex g_reauthentication_mutex;
 
 std::string Base64UrlEncode(const unsigned char* data, size_t length)
@@ -265,6 +266,7 @@ class NativeAuthHttpSession
         curl_easy_setopt(curl_.get(), CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl_.get(), CURLOPT_USERAGENT, GfnClient::kUserAgent);
         curl_easy_setopt(curl_.get(), CURLOPT_FOLLOWLOCATION, 0L);
+        curl_easy_setopt(curl_.get(), CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(curl_.get(), CURLOPT_CONNECTTIMEOUT, 10L);
         curl_easy_setopt(curl_.get(), CURLOPT_TIMEOUT, 30L);
         curl_easy_setopt(curl_.get(), CURLOPT_ACCEPT_ENCODING, "");
@@ -1278,12 +1280,20 @@ class QrCallbackServer
 
     std::string WaitForResult(std::function<bool()> isCancelled)
     {
+        const auto deadline = std::chrono::steady_clock::now() + kQrLoginTimeout;
         while (!completed_ && !stop_)
         {
             if (isCancelled && isCancelled())
             {
                 Stop();
                 return "";
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                if (completed_)
+                    break;
+                Stop();
+                throw std::runtime_error("GeForce NOW QR login timed out");
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

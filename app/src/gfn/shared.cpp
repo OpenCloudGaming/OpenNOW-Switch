@@ -216,6 +216,9 @@ std::string ReadTextFile(const std::string& path)
         std::istreambuf_iterator<char>());
 }
 
+namespace
+{
+
 void WriteTextFile(const std::string& path, const std::string& content)
 {
     EnsureAppHome();
@@ -226,6 +229,8 @@ void WriteTextFile(const std::string& path, const std::string& content)
 
     stream.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
+
+} // namespace
 
 void WriteTextFileAtomically(const std::string& path, const std::string& content)
 {
@@ -274,6 +279,9 @@ std::string Lowercase(std::string value)
     return value;
 }
 
+namespace
+{
+
 bool IsSensitiveJsonKey(const std::string& key)
 {
     const std::string lower = Lowercase(key);
@@ -282,7 +290,13 @@ bool IsSensitiveJsonKey(const std::string& key)
            lower.find("credential") != std::string::npos ||
            lower.find("password") != std::string::npos ||
            lower.find("secret") != std::string::npos ||
-           lower.find("jwt") != std::string::npos;
+           lower.find("jwt") != std::string::npos ||
+           lower.find("email") != std::string::npos ||
+           lower == "user_id" ||
+           lower == "userid" ||
+           lower == "display_name" ||
+           lower == "displayname" ||
+           lower.find("avatar") != std::string::npos;
 }
 
 void RedactJsonInPlace(json_t* value)
@@ -318,6 +332,8 @@ void RedactJsonInPlace(json_t* value)
     }
 }
 
+} // namespace
+
 std::string JsonForTrace(const std::string& body)
 {
     if (body.empty())
@@ -341,9 +357,8 @@ std::string DumpJson(json_t* value)
     char* raw = json_dumps(value, JSON_COMPACT);
     if (!raw)
         throw std::runtime_error("Unable to encode the NVIDIA login request");
-    std::string result(raw);
-    free(raw);
-    return result;
+    std::unique_ptr<char, decltype(&std::free)> output(raw, &std::free);
+    return output.get();
 }
 std::string ResolveSessionJwt(const AuthSession& session)
 {

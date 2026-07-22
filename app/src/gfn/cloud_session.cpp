@@ -512,7 +512,7 @@ static std::string BuildSessionBody(
     const std::string& device_id,
     const StreamSettings& stream_settings)
 {
-    json_t* root = json_object();
+    JsonPtr root(json_object(), &json_decref);
     json_t* req = json_object();
     try {
         json_object_set_new(req, "appId", json_integer(std::stoll(app_id)));
@@ -597,13 +597,8 @@ static std::string BuildSessionBody(
     json_array_append_new(monitors, monitor);
     json_object_set_new(req, "clientRequestMonitorSettings", monitors);
 
-    json_object_set_new(root, "sessionRequestData", req);
-
-    char* dump = json_dumps(root, 0);
-    std::string body(dump);
-    free(dump);
-    json_decref(root);
-    return body;
+    json_object_set_new(root.get(), "sessionRequestData", req);
+    return DumpJson(root.get());
 }
 
 int ParseSessionStatus(json_t* status)

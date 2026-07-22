@@ -359,6 +359,7 @@ std::recursive_mutex& AccountsMutex()
 
 std::vector<AuthSession> LoadAccountsFromDisk(std::string* active_user_id)
 {
+    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
     for (const std::string& path : {GetAccountsPath(), GetAccountsPath() + ".bak"})
     {
         const std::string stored = ReadTextFile(path);
@@ -415,6 +416,7 @@ std::vector<AuthSession> LoadAccountsFromDisk(std::string* active_user_id)
 
 void SaveAccountsToDisk(const std::vector<AuthSession>& sessions, const std::string& active_user_id)
 {
+    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
     EnsureAppHome();
 
     JsonPtr root(json_object(), &json_decref);
