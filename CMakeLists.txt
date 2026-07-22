@@ -147,8 +147,8 @@ add_custom_target(${PROJECT_NAME}.nro
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/icon
         ${PROJECT_ROMFS_DIR}/icon
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/resources/img/sys
-        ${PROJECT_ROMFS_DIR}/img/sys
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/img
+        ${PROJECT_ROMFS_DIR}/img
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/material
         ${PROJECT_ROMFS_DIR}/material

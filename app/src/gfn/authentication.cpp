@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -379,6 +380,104 @@ std::vector<std::string> BuildMembershipHeaders(const std::string& token)
     };
 }
 
+double JsonNumber(json_t* object, const char* key, double fallback = 0.0)
+{
+    if (!object || !json_is_object(object))
+        return fallback;
+
+    json_t* value = json_object_get(object, key);
+    if (json_is_integer(value))
+        return static_cast<double>(json_integer_value(value));
+    if (json_is_real(value))
+        return json_real_value(value);
+    if (!json_is_string(value))
+        return fallback;
+
+    const char* text = json_string_value(value);
+    if (!text || !*text)
+        return fallback;
+    char* end = nullptr;
+    const double parsed = std::strtod(text, &end);
+    return end != text && std::isfinite(parsed) ? parsed : fallback;
+}
+
+std::string AddonAttribute(json_t* addon, const char* key)
+{
+    json_t* attributes = addon ? json_object_get(addon, "attributes") : nullptr;
+    if (!json_is_array(attributes))
+        return {};
+
+    size_t index;
+    json_t* attribute;
+    json_array_foreach(attributes, index, attribute)
+    {
+        if (GetString(attribute, "key") == key)
+            return GetString(attribute, "textValue");
+    }
+    return {};
+}
+
+bool ParseNumberText(const std::string& text, double& output)
+{
+    if (text.empty())
+        return false;
+    char* end = nullptr;
+    const double parsed = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || !std::isfinite(parsed))
+        return false;
+    output = parsed;
+    return true;
+}
+
+SubscriptionInfo ParseSubscription(json_t* root)
+{
+    SubscriptionInfo info;
+    info.available            = true;
+    info.membership_tier      = Trim(GetString(root, "membershipTier"));
+    info.subscription_type    = GetString(root, "type");
+    info.subscription_subtype = GetString(root, "subType");
+
+    const double allotted_minutes = JsonNumber(root, "allottedTimeInMinutes");
+    const double purchased_minutes = JsonNumber(root, "purchasedTimeInMinutes");
+    const double rolled_over_minutes = JsonNumber(root, "rolledOverTimeInMinutes");
+    const double fallback_total = allotted_minutes + purchased_minutes + rolled_over_minutes;
+    const double total_minutes = JsonNumber(root, "totalTimeInMinutes", fallback_total);
+    const double remaining_minutes = JsonNumber(root, "remainingTimeInMinutes");
+
+    info.allotted_hours    = allotted_minutes / 60.0;
+    info.purchased_hours   = purchased_minutes / 60.0;
+    info.rolled_over_hours = rolled_over_minutes / 60.0;
+    info.total_hours       = total_minutes / 60.0;
+    info.remaining_hours   = remaining_minutes / 60.0;
+    info.used_hours        = std::max(total_minutes - remaining_minutes, 0.0) / 60.0;
+    info.is_unlimited      = info.subscription_subtype == "UNLIMITED";
+
+    json_t* addons = root ? json_object_get(root, "addons") : nullptr;
+    if (!json_is_array(addons))
+        return info;
+
+    size_t index;
+    json_t* addon;
+    json_array_foreach(addons, index, addon)
+    {
+        if (GetString(addon, "type") != "STORAGE" ||
+            GetString(addon, "subType") != "PERMANENT_STORAGE" ||
+            GetString(addon, "status") != "OK")
+            continue;
+
+        info.has_storage = true;
+        const bool has_size = ParseNumberText(
+            AddonAttribute(addon, "TOTAL_STORAGE_SIZE_IN_GB"), info.storage_size_gb);
+        const bool has_used = ParseNumberText(
+            AddonAttribute(addon, "USED_STORAGE_SIZE_IN_GB"), info.storage_used_gb);
+        info.has_storage_usage = has_size && has_used;
+        info.storage_region_name = AddonAttribute(addon, "STORAGE_METRO_REGION_NAME");
+        info.storage_region_code = AddonAttribute(addon, "STORAGE_METRO_REGION");
+        break;
+    }
+    return info;
+}
+
 std::string FetchVpcId(const HttpClient& http_client, const AuthSession& session)
 {
     const std::string token = ResolveSessionJwt(session);
@@ -435,7 +534,8 @@ bool RefreshMembershipTier(const HttpClient& http_client, AuthSession& session)
         }
 
         JsonPtr root = LoadJson(response.body);
-        const std::string tier = Trim(GetString(root.get(), "membershipTier"));
+        session.subscription = ParseSubscription(root.get());
+        const std::string tier = session.subscription.membership_tier;
         if (tier.empty())
             return false;
         session.user.membership_tier = tier;

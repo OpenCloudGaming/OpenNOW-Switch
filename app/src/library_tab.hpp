@@ -24,8 +24,6 @@ class LibraryTab : public brls::Box
   private:
     void EnsureSessionLoaded();
     void UpdateSessionUi();
-    void BeginLogin();
-    void Logout();
     void ReloadLibrary(bool background = false);
     void BeginSearch();
     void RebuildGrid();
@@ -38,17 +36,12 @@ class LibraryTab : public brls::Box
     GfnClient client_;
     std::vector<GameInfo> games_;
     std::vector<std::vector<brls::View*>> card_rows_;
-    std::vector<brls::View*> account_buttons_;
     std::vector<brls::View*> toolbar_buttons_;
-    brls::Label* account_label_         = nullptr;
     brls::Label* status_label_          = nullptr;
     brls::Button* search_button_        = nullptr;
     brls::Button* filter_button_        = nullptr;
     brls::Button* sort_button_          = nullptr;
     brls::Button* more_button_          = nullptr;
-    brls::Button* sign_in_button_       = nullptr;
-    brls::Button* refresh_button_       = nullptr;
-    brls::Button* logout_button_        = nullptr;
     brls::Button* load_more_button_     = nullptr;
     brls::ScrollingFrame* scrolling_frame_ = nullptr;
     brls::Box* grid_container_          = nullptr;

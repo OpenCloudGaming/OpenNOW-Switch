@@ -9,9 +9,7 @@
 #include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
 #include "ui_text_policy.hpp"
-#include "qr_login_dialog.hpp"
 #include "localization.hpp"
-#include "membership_tier_policy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -120,46 +118,6 @@ LibraryTab::LibraryTab()
     heading->addView(title);
     addView(heading);
 
-    account_label_ = MakeParagraph("Checking saved GeForce NOW session...", 8.0f, 14.0f);
-    account_label_->setTextColor(nvgRGB(144, 151, 163));
-    addView(account_label_);
-
-    auto* actions = new brls::Box(brls::Axis::ROW);
-    actions->setMarginBottom(8);
-
-    sign_in_button_ = new brls::Button();
-    sign_in_button_->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-    sign_in_button_->setText(Tr("Sign in to GeForce NOW"));
-    sign_in_button_->setMarginRight(12);
-    sign_in_button_->setHeight(42);
-    sign_in_button_->registerClickAction([this](brls::View* view) {
-        (void)view;
-        return RunUiAction("library.account.login", [this]() { BeginLogin(); });
-    });
-    actions->addView(sign_in_button_);
-
-    refresh_button_ = new brls::Button();
-    refresh_button_->setText(Tr("Refresh library"));
-    refresh_button_->setMarginRight(12);
-    refresh_button_->setHeight(42);
-    refresh_button_->registerClickAction([this](brls::View* view) {
-        (void)view;
-        return RunUiAction("library.account.refresh", [this]() { ReloadLibrary(); });
-    });
-    actions->addView(refresh_button_);
-
-    logout_button_ = new brls::Button();
-    logout_button_->setText(Tr("Sign out"));
-    logout_button_->setHeight(42);
-    logout_button_->registerClickAction([this](brls::View* view) {
-        (void)view;
-        return RunUiAction("library.account.logout", [this]() { Logout(); });
-    });
-    actions->addView(logout_button_);
-    account_buttons_ = {sign_in_button_, refresh_button_, logout_button_};
-
-    addView(actions);
-
     auto* toolbar = new brls::Box(brls::Axis::ROW);
     toolbar->setAlignItems(brls::AlignItems::CENTER);
     toolbar->setMarginBottom(8);
@@ -186,7 +144,9 @@ LibraryTab::LibraryTab()
         return RunUiAction("library.more.button", [this]() { LoadMoreOrRefresh(); });
     });
 
-    status_label_ = MakeParagraph("Sign in to load your GeForce NOW library.", 8.0f, 14.0f);
+    status_label_ = MakeParagraph(
+        "Open Settings > Account to connect GeForce NOW and load your library.",
+        8.0f, 14.0f);
     status_label_->setTextColor(nvgRGB(132, 139, 151));
     addView(status_label_);
 
@@ -288,93 +248,17 @@ void LibraryTab::UpdateSessionUi()
     const auto& state = AppState::Instance();
     if (!state.HasSession())
     {
-        account_label_->setText("No GeForce NOW account connected on this Switch yet.");
-        status_label_->setText("Sign in to load your GeForce NOW library.");
-        sign_in_button_->setText(Tr("Sign in to GeForce NOW"));
-        refresh_button_->setState(brls::ButtonState::DISABLED);
-        logout_button_->setState(brls::ButtonState::DISABLED);
+        status_label_->setText("Open Settings > Account to connect GeForce NOW and load your library.");
         return;
     }
 
     const AuthSession& session = *state.session();
-    const std::string membership = membership::DisplayLabel(
-        session.user.membership_tier, session.user.membership_tier_verified);
 
     if (session.reauthentication_required)
     {
-        account_label_->setText("Reconnect required for " + session.user.display_name);
-        status_label_->setText("NVIDIA revoked or expired the saved refresh token.");
-        sign_in_button_->setText(Tr("Reconnect this account"));
-        refresh_button_->setState(brls::ButtonState::DISABLED);
+        status_label_->setText(
+            "Reconnect this account from Settings > Account before refreshing the library.");
     }
-    else
-    {
-        account_label_->setText(
-            "Connected as " + session.user.display_name + "  |  " + membership);
-        sign_in_button_->setText(Tr("Add another account"));
-        refresh_button_->setState(brls::ButtonState::ENABLED);
-    }
-    logout_button_->setState(brls::ButtonState::ENABLED);
-}
-
-void LibraryTab::BeginLogin()
-{
-    try
-    {
-        auto& state = AppState::Instance();
-        std::vector<LoginProvider> providers =
-            state.HasProviders() ? state.providers() : client_.FetchLoginProviders();
-
-        if (!state.HasProviders())
-            state.SetProviders(providers);
-
-        if (providers.empty())
-            throw std::runtime_error("No GeForce NOW login providers were returned");
-
-        const LoginProvider provider = state.HasSession() && state.session()->reauthentication_required
-            ? state.session()->provider
-            : providers.front();
-        const auto alive = alive_;
-        auto* dialog = new QrLoginDialog(provider, client_, [this, alive]() {
-            if (!alive->load())
-                return;
-            UpdateSessionUi();
-            ReloadLibrary();
-        });
-        brls::Application::pushActivity(new brls::Activity(dialog));
-    }
-    catch (const std::exception& ex)
-    {
-        ShowError("GeForce NOW Login Failed", ex.what());
-    }
-}
-
-void LibraryTab::Logout()
-{
-    if (loading_)
-        return;
-
-    games_.clear();
-    client_.ClearSavedSession();
-
-    auto& state = AppState::Instance();
-    state.SetLibraryGames({});
-
-    AuthSession next;
-    if (client_.LoadSavedSession(next))
-    {
-        state.SetSession(std::move(next));
-        UpdateSessionUi();
-        RebuildGrid();
-        brls::Application::notify("Active account removed; switched to another saved account");
-        return;
-    }
-
-    state.ClearSession();
-
-    UpdateSessionUi();
-    RebuildGrid();
-    brls::Application::notify("GeForce NOW account disconnected");
 }
 
 void LibraryTab::ReloadLibrary(bool background)
@@ -458,7 +342,7 @@ void LibraryTab::RebuildGrid()
     const auto& state = AppState::Instance();
     if (!state.HasSession())
     {
-        WireVerticalGridNavigation({account_buttons_, toolbar_buttons_});
+        WireVerticalGridNavigation({toolbar_buttons_});
         grid_container_->addView(MakeParagraph(
             "After login, this screen will show your owned GeForce NOW titles with cover art and store labels.",
             0.0f));
@@ -515,7 +399,7 @@ void LibraryTab::LoadMore()
 
     if (filtered_indices.empty())
     {
-        WireVerticalGridNavigation({account_buttons_, toolbar_buttons_});
+        WireVerticalGridNavigation({toolbar_buttons_});
         std::string empty_msg = search_query_.empty()
             ? "This account is logged in, but no owned games were returned by the current GeForce NOW library feed."
             : "No games found matching your search.";
@@ -566,7 +450,7 @@ void LibraryTab::LoadMore()
         card_rows_.push_back(std::move(card_row));
     }
 
-    std::vector<std::vector<brls::View*>> navigation_rows {account_buttons_, toolbar_buttons_};
+    std::vector<std::vector<brls::View*>> navigation_rows {toolbar_buttons_};
     navigation_rows.insert(navigation_rows.end(), card_rows_.begin(), card_rows_.end());
     WireVerticalGridNavigation(navigation_rows);
     
@@ -615,7 +499,7 @@ void LibraryTab::LoadMoreOrRefresh()
 
     if (!AppState::Instance().HasSession())
     {
-        BeginLogin();
+        brls::Application::notify("Connect an account from Settings > Account");
         return;
     }
 
