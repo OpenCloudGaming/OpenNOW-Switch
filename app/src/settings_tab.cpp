@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 #include "app_paths.hpp"
 #include "localization.hpp"
+#include "membership_tier_policy.hpp"
 #include "network_utils.hpp"
 #include "stream_settings.hpp"
 #include "stream_settings_policy.hpp"
@@ -521,7 +522,10 @@ void SettingsTab::BuildAccountPage()
         const AuthSession& session = *state.session();
         const bool password_saved = client_.LoadNativeCredentials(session.provider.idp_id).has_value();
         AddInfoLine(overview, "User", session.user.display_name);
-        AddInfoLine(overview, "Membership", session.user.membership_tier.empty() ? "Unknown" : session.user.membership_tier);
+        AddInfoLine(
+            overview, "Membership",
+            membership::DisplayLabel(
+                session.user.membership_tier, session.user.membership_tier_verified));
         AddInfoLine(overview, "Provider", session.provider.display_name);
         AddInfoLine(overview, "Authentication", FormatTokenState(session));
         AddInfoLine(overview, "Quick sign-in", password_saved ? "Password saved" : "Password not saved");
@@ -860,7 +864,8 @@ bool SettingsTab::ShowSessionDialog(brls::View* view)
         "Session Details",
         "User: " + session.user.display_name + "\n" +
             "Email: " + (session.user.email.empty() ? std::string("Unavailable") : session.user.email) + "\n" +
-            "Tier: " + session.user.membership_tier + "\n" +
+            "Tier: " + membership::DisplayLabel(
+                session.user.membership_tier, session.user.membership_tier_verified) + "\n" +
             "Provider: " + session.provider.display_name + "\n" +
             "Authentication: " + FormatTokenState(session) + "\n" +
             "Streaming base: " + session.provider.streaming_service_url + "\n" +

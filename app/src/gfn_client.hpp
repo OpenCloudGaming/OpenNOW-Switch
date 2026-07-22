@@ -26,6 +26,8 @@ class NativeLoginFallbackRequired : public std::runtime_error
 class GfnClient
 {
   public:
+    GfnClient();
+
     std::vector<LoginProvider> FetchLoginProviders() const;
     std::vector<PublicGame> FetchPublicGames() const;
     std::vector<PublicGame> FetchCatalogGames(
@@ -82,8 +84,7 @@ class GfnClient
 
   private:
     HttpClient http_client_;
-    std::string client_id_ = "d54a2a22-386f-4a30-84dc-6680a6b7d188";
-    std::string device_id_ = "12345678-1234-5678-1234-567812345678";
+    std::string client_id_;
 };
 
 } // namespace opennow

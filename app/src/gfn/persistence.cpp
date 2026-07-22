@@ -207,12 +207,19 @@ bool ParseSessionObject(json_t* root, AuthSession& session)
     session.user.email           = GetString(user, "email");
     session.user.avatar_url      = GetString(user, "avatar_url");
     session.user.membership_tier = GetString(user, "membership_tier");
-    if (session.user.membership_tier.empty())
-        session.user.membership_tier = "FREE";
+    session.user.membership_tier_verified =
+        GetBool(user, "membership_tier_verified", false);
 
     json_t* last_refresh = json_object_get(root, "last_refresh_at_ms");
     if (json_is_integer(last_refresh))
         session.last_refresh_at_ms = static_cast<std::int64_t>(json_integer_value(last_refresh));
+
+    json_t* membership_checked = json_object_get(root, "membership_checked_at_ms");
+    if (json_is_integer(membership_checked))
+    {
+        session.membership_checked_at_ms =
+            static_cast<std::int64_t>(json_integer_value(membership_checked));
+    }
 
     if (session.provider.idp_id.empty())
         session.provider = DefaultProvider();
@@ -251,11 +258,17 @@ JsonPtr BuildSessionObject(const AuthSession& session)
     json_object_set_new(user.get(), "email", json_string(session.user.email.c_str()));
     json_object_set_new(user.get(), "avatar_url", json_string(session.user.avatar_url.c_str()));
     json_object_set_new(user.get(), "membership_tier", json_string(session.user.membership_tier.c_str()));
+    json_object_set_new(
+        user.get(), "membership_tier_verified",
+        json_boolean(session.user.membership_tier_verified));
 
     json_object_set_new(root.get(), "provider", json_incref(provider.get()));
     json_object_set_new(root.get(), "tokens", json_incref(tokens.get()));
     json_object_set_new(root.get(), "user", json_incref(user.get()));
     json_object_set_new(root.get(), "last_refresh_at_ms", json_integer(session.last_refresh_at_ms));
+    json_object_set_new(
+        root.get(), "membership_checked_at_ms",
+        json_integer(session.membership_checked_at_ms));
     return root;
 }
 std::vector<NativeCredentials> LoadNativeCredentialEntries()
@@ -428,7 +441,7 @@ void SaveAccountsToDisk(const std::vector<AuthSession>& sessions, const std::str
         json_array_append_new(accounts.get(), json_incref(item.get()));
     }
 
-    json_object_set_new(root.get(), "schema_version", json_integer(3));
+    json_object_set_new(root.get(), "schema_version", json_integer(4));
     json_object_set_new(root.get(), "active_user_id", json_string(active_user_id.c_str()));
     json_object_set_new(root.get(), "accounts", json_incref(accounts.get()));
     char* dump = json_dumps(root.get(), JSON_COMPACT | JSON_SORT_KEYS);

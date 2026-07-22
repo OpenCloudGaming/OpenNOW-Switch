@@ -510,6 +510,7 @@ static std::string BuildSessionBody(
     const std::string& app_id,
     const std::string& internal_title,
     const std::string& device_id,
+    const std::string& sub_session_id,
     const StreamSettings& stream_settings)
 {
     JsonPtr root(json_object(), &json_decref);
@@ -577,7 +578,7 @@ static std::string BuildSessionBody(
     json_object_set_new(req, "requestedStreamingFeatures", features);
 
     json_t* meta = json_array();
-    json_t* m1 = json_object(); json_object_set_new(m1, "key", json_string("SubSessionId")); json_object_set_new(m1, "value", json_string(device_id.c_str())); json_array_append_new(meta, m1);
+    json_t* m1 = json_object(); json_object_set_new(m1, "key", json_string("SubSessionId")); json_object_set_new(m1, "value", json_string(sub_session_id.c_str())); json_array_append_new(meta, m1);
     json_t* m2 = json_object(); json_object_set_new(m2, "key", json_string("wssignaling")); json_object_set_new(m2, "value", json_string("1")); json_array_append_new(meta, m2);
     json_t* m3 = json_object(); json_object_set_new(m3, "key", json_string("GSStreamerType")); json_object_set_new(m3, "value", json_string("WebRTC")); json_array_append_new(meta, m3);
     json_object_set_new(req, "metaData", meta);
@@ -657,7 +658,8 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
 {
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string device_id = device_id_;
+    const std::string device_id = GenerateDeviceId();
+    const std::string sub_session_id = GenerateUuid();
 
     const StreamSettings stream_settings = LoadStreamSettings();
     std::string url = session.provider.streaming_service_url +
@@ -671,7 +673,7 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
         "nv-browser-type: CHROME",
         "nv-client-streamer: NVIDIA-CLASSIC",
         "nv-client-type: NATIVE",
-        "nv-client-version: 30.0",
+        "nv-client-version: 2.0.80.173",
         "nv-device-make: UNKNOWN",
         "nv-device-model: UNKNOWN",
         "nv-device-os: WINDOWS",
@@ -681,7 +683,8 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
         "Referer: https://play.geforcenow.com/"
     };
 
-    std::string body = BuildSessionBody(launch_app_id, internal_title, device_id, stream_settings);
+    std::string body = BuildSessionBody(
+        launch_app_id, internal_title, device_id, sub_session_id, stream_settings);
     ResetSessionTraceLog("StartSession appId=" + launch_app_id +
                          " store=" + (launch_store.empty() ? "unknown" : launch_store) +
                          " internalTitle=" + (internal_title.empty() ? "missing" : internal_title));
@@ -786,7 +789,7 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
 {
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string device_id = device_id_;
+    const std::string device_id = GenerateDeviceId();
     std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
@@ -795,7 +798,7 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
         "nv-browser-type: CHROME",
         "nv-client-streamer: NVIDIA-CLASSIC",
         "nv-client-type: NATIVE",
-        "nv-client-version: 30.0",
+        "nv-client-version: 2.0.80.173",
         "nv-device-make: UNKNOWN",
         "nv-device-model: UNKNOWN",
         "nv-device-os: WINDOWS",
@@ -894,7 +897,7 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
 {
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string device_id = device_id_;
+    const std::string device_id = GenerateDeviceId();
     std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
@@ -903,7 +906,7 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
         "nv-browser-type: CHROME",
         "nv-client-streamer: NVIDIA-CLASSIC",
         "nv-client-type: NATIVE",
-        "nv-client-version: 30.0",
+        "nv-client-version: 2.0.80.173",
         "nv-device-make: UNKNOWN",
         "nv-device-model: UNKNOWN",
         "nv-device-os: WINDOWS",
@@ -941,7 +944,22 @@ void GfnClient::CleanupStaleCloudSession(AuthSession& session) const
         return;
 
     AppendAuthLog("session: cleaning stale CloudMatch session before launch");
-    StopSession(session, stale_session_id);
+    try
+    {
+        StopSession(session, stale_session_id);
+    }
+    catch (const std::exception& e)
+    {
+        const std::string error = e.what();
+        if (error.find("HTTP 403") == std::string::npos)
+            throw;
+
+        // Builds before the stable-device fix created CloudMatch sessions with
+        // a shared placeholder identity. They cannot be deleted with the new,
+        // installation-specific identity and must not block the next launch.
+        AppendAuthLog("session: discarded legacy stale-session marker after HTTP 403");
+        ForgetActiveCloudSession(stale_session_id);
+    }
 }
 
 

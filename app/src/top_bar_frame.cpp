@@ -4,6 +4,7 @@
 #include "cover_image_cache.hpp"
 #include "stream_settings.hpp"
 #include "localization.hpp"
+#include "membership_tier_policy.hpp"
 #include "ui_refresh_policy.hpp"
 #include <borealis/core/application.hpp>
 #include <borealis/core/theme.hpp>
@@ -15,7 +16,7 @@ TopBarFrame::TopBarFrame()
     : brls::Box(brls::Axis::COLUMN)
 {
     setGrow(1.0f);
-    setBackgroundColor(nvgRGB(16, 16, 20));
+    setBackgroundColor(nvgRGB(18, 18, 22));
 
     // Header container
     header_container_ = new brls::Box(brls::Axis::ROW);
@@ -23,7 +24,7 @@ TopBarFrame::TopBarFrame()
     header_container_->setAlignItems(brls::AlignItems::CENTER);
     header_container_->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
     header_container_->setPadding(0, 28, 0, 28);
-    header_container_->setBackgroundColor(nvgRGB(19, 19, 22));
+    header_container_->setBackgroundColor(nvgRGB(24, 24, 29));
     
     addView(header_container_);
 
@@ -32,11 +33,11 @@ TopBarFrame::TopBarFrame()
     brand->setJustifyContent(brls::JustifyContent::CENTER);
     auto* brand_name = new brls::Label();
     brand_name->setText("OpenNOW");
-    brand_name->setFontSize(24);
-    brand_name->setTextColor(nvgRGB(88, 217, 138));
+    brand_name->setFontSize(22);
+    brand_name->setTextColor(nvgRGB(0, 200, 215));
     brand->addView(brand_name);
     auto* brand_platform = new brls::Label();
-    brand_platform->setText("NINTENDO SWITCH");
+    brand_platform->setText("Nintendo Switch");
     brand_platform->setFontSize(10);
     brand_platform->setTextColor(nvgRGB(112, 119, 130));
     brand->addView(brand_platform);
@@ -85,7 +86,7 @@ TopBarFrame::TopBarFrame()
     // Divider
     auto* divider = new brls::Rectangle();
     divider->setHeight(1);
-    divider->setColor(nvgRGB(42, 42, 48));
+    divider->setColor(nvgRGBA(255, 255, 255, 18));
     addView(divider);
 
     // Content container
@@ -149,7 +150,7 @@ void TopBarFrame::addTab(const std::string& label, TabViewCreator creator)
 
     auto* text = new brls::Label();
     text->setText(Tr(label));
-    text->setFontSize(20);
+    text->setFontSize(18);
     text->setTextColor(nvgRGB(128, 133, 143));
     tab_box->addView(text);
 
@@ -218,7 +219,7 @@ void TopBarFrame::SelectTab(int index)
     for (size_t i = 0; i < tabs_.size(); ++i) {
         if ((int)i == index) {
             tabs_[i].header_label->setTextColor(nvgRGB(255, 255, 255));
-            tabs_[i].underline->setColor(nvgRGB(96, 236, 136));
+            tabs_[i].underline->setColor(nvgRGB(0, 200, 215));
             tabs_[i].tab_box->setBackgroundColor(nvgRGB(31, 34, 40));
         } else {
             tabs_[i].header_label->setTextColor(nvgRGB(128, 133, 143));
@@ -264,7 +265,7 @@ void TopBarFrame::UpdateStatusBar(bool force)
     {
         avatar_image_->setVisibility(brls::Visibility::GONE);
         const std::string name = Tr("Guest");
-        const std::string detail = Tr("No account") + "  ·  " + Tr(settings.label);
+        const std::string detail = Tr("No account") + "  /  " + Tr(settings.label);
         const std::string status = name + "\n" + detail;
         if (status != displayed_status_)
         {
@@ -276,10 +277,11 @@ void TopBarFrame::UpdateStatusBar(bool force)
     }
 
     const AuthSession& session = *state.session();
-    const std::string tier = session.user.membership_tier.empty() ? std::string("FREE") : session.user.membership_tier;
+    const std::string tier = membership::DisplayLabel(
+        session.user.membership_tier, session.user.membership_tier_verified);
     const std::string name =
         session.user.display_name.empty() ? Tr("GeForce NOW account") : session.user.display_name;
-    const std::string detail = tier + "  ·  " + Tr(settings.label);
+    const std::string detail = Tr(tier) + "  /  " + Tr(settings.label);
     const std::string status = name + "\n" + detail;
     if (status != displayed_status_)
     {

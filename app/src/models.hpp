@@ -32,7 +32,8 @@ struct AuthUser
     std::string display_name;
     std::string email;
     std::string avatar_url;
-    std::string membership_tier = "FREE";
+    std::string membership_tier;
+    bool membership_tier_verified = false;
 };
 
 struct AuthSession
@@ -41,6 +42,7 @@ struct AuthSession
     AuthTokens tokens;
     AuthUser user;
     std::int64_t last_refresh_at_ms = 0;
+    std::int64_t membership_checked_at_ms = 0;
     bool persistence_enabled = true; // Runtime-only; vault sessions are persistent.
     bool reauthentication_required = false; // Runtime-only; set after invalid_grant/401 refresh failure.
 };

@@ -50,13 +50,17 @@ constexpr const char* kTokenEndpoint       = "https://login.nvidia.com/token";
 constexpr const char* kClientTokenEndpoint = "https://login.nvidia.com/client_token";
 constexpr const char* kUserInfoEndpoint    = "https://login.nvidia.com/userinfo";
 constexpr const char* kAuthorizeEndpoint   = "https://login.nvidia.com/authorize";
+constexpr const char* kSubscriptionEndpoint = "https://mes.geforcenow.com/v4/subscriptions";
 constexpr const char* kClientId            = "ZU7sPN-miLujMD95LfOQ453IB0AtjM8sMyvgJ9wCXEQ";
+constexpr const char* kLcarsClientId       = "ec7e38d4-03af-4b58-b131-cfb0495903ab";
+constexpr const char* kGfnClientVersion    = "2.0.80.173";
 constexpr const char* kScopes              = "openid consent email tk_client age";
 constexpr const char* kRedirectUri         = "http://localhost:2259";
 constexpr int kLoginCallbackPort           = 2259;
 constexpr const char* kNvidiaFileOrigin    = "https://nvfile";
 constexpr const char* kNvidiaFileReferer   = "https://nvfile/";
 constexpr std::int64_t kRefreshWindowMs    = 10LL * 60LL * 1000LL;
+constexpr std::int64_t kMembershipRefreshIntervalMs = 60LL * 60LL * 1000LL;
 constexpr auto kQrLoginTimeout             = std::chrono::minutes(5);
 std::mutex g_reauthentication_mutex;
 
@@ -780,7 +784,7 @@ AuthTokens ExchangeAuthorizationCode(
 AuthTokens RefreshTokens(const HttpClient& http_client, const AuthSession& session)
 {
     if (session.tokens.refresh_token.empty())
-        throw std::runtime_error("Saved GeForce NOW session cannot be refreshed");
+        throw ReauthenticationRequired("Saved GeForce NOW session cannot be refreshed. Please sign in again.");
 
     const std::string body =
         "grant_type=refresh_token"
@@ -820,6 +824,11 @@ AuthTokens RefreshTokens(const HttpClient& http_client, const AuthSession& sessi
     if (tokens.refresh_token.empty())
         tokens.refresh_token = session.tokens.refresh_token;
 
+    // NVIDIA commonly omits id_token during OAuth refresh. CloudMatch requires
+    // the signed JWT, so an omitted field must not erase the last usable token.
+    if (tokens.id_token.empty())
+        tokens.id_token = session.tokens.id_token;
+
     if (tokens.client_token.empty())
     {
         tokens.client_token              = session.tokens.client_token;
@@ -827,6 +836,68 @@ AuthTokens RefreshTokens(const HttpClient& http_client, const AuthSession& sessi
     }
 
     return tokens;
+}
+
+AuthTokens RefreshTokensWithClientToken(
+    const HttpClient& http_client, const AuthSession& session)
+{
+    if (session.tokens.client_token.empty() || session.user.user_id.empty())
+        throw std::runtime_error("Saved session has no client-token refresh mechanism");
+
+    const std::string body =
+        "grant_type=" + UrlEncode("urn:ietf:params:oauth:grant-type:client_token", true) +
+        "&client_token=" + UrlEncode(session.tokens.client_token, true) +
+        "&client_id=" + UrlEncode(kClientId, true) +
+        "&sub=" + UrlEncode(session.user.user_id, true);
+
+    const HttpResponse response = http_client.Post(
+        kTokenEndpoint,
+        GfnClient::kUserAgent,
+        BuildNvidiaAuthHeaders({}, "application/x-www-form-urlencoded; charset=UTF-8"),
+        body);
+    if (response.status_code != 200)
+    {
+        throw std::runtime_error(
+            "Client-token refresh failed with HTTP " + std::to_string(response.status_code));
+    }
+
+    JsonPtr root = LoadJson(response.body);
+    AuthTokens tokens = ParseAuthTokens(root.get());
+    if (tokens.refresh_token.empty())
+        tokens.refresh_token = session.tokens.refresh_token;
+    if (tokens.id_token.empty())
+        tokens.id_token = session.tokens.id_token;
+    if (tokens.client_token.empty())
+    {
+        tokens.client_token = session.tokens.client_token;
+        tokens.client_token_expires_at_ms = session.tokens.client_token_expires_at_ms;
+    }
+    else if (tokens.client_token != session.tokens.client_token)
+    {
+        // A rotated client token needs fresh lifetime metadata from /client_token.
+        tokens.client_token_expires_at_ms = 0;
+    }
+    return tokens;
+}
+
+AuthTokens RefreshSessionTokens(const HttpClient& http_client, const AuthSession& session)
+{
+    if (!session.tokens.client_token.empty())
+    {
+        try
+        {
+            AuthTokens refreshed = RefreshTokensWithClientToken(http_client, session);
+            AppendAuthLog("auth: client-token refresh ok");
+            return refreshed;
+        }
+        catch (const std::exception& e)
+        {
+            AppendAuthLog("auth: client-token refresh failed; trying OAuth refresh error=" +
+                          std::string(e.what()));
+        }
+    }
+
+    return RefreshTokens(http_client, session);
 }
 
 void RequestClientToken(const HttpClient& http_client, AuthTokens& tokens)
@@ -870,7 +941,8 @@ AuthUser FetchUserInfo(const HttpClient& http_client, const AuthTokens& tokens)
     user.display_name    = GetString(root.get(), "preferred_username");
     user.email           = GetString(root.get(), "email");
     user.avatar_url      = GetString(root.get(), "picture");
-    user.membership_tier = "FREE";
+    user.membership_tier.clear();
+    user.membership_tier_verified = false;
 
     if (user.display_name.empty() && !user.email.empty())
     {
@@ -886,6 +958,93 @@ AuthUser FetchUserInfo(const HttpClient& http_client, const AuthTokens& tokens)
         throw std::runtime_error("Login succeeded but user info is incomplete");
 
     return user;
+}
+
+std::vector<std::string> BuildMembershipHeaders(const std::string& token)
+{
+    return {
+        "Accept: application/json",
+        "Authorization: GFNJWT " + token,
+        "nv-client-id: " + std::string(kLcarsClientId),
+        "nv-client-type: NATIVE",
+        "nv-client-version: " + std::string(kGfnClientVersion),
+        "nv-client-streamer: NVIDIA-CLASSIC",
+        "nv-device-os: WINDOWS",
+        "nv-device-type: DESKTOP",
+        "nv-device-make: UNKNOWN",
+        "nv-device-model: UNKNOWN",
+    };
+}
+
+std::string FetchVpcId(const HttpClient& http_client, const AuthSession& session)
+{
+    const std::string token = ResolveSessionJwt(session);
+    if (token.empty())
+        return "NP-AMS-08";
+
+    const std::string url = EnsureTrailingSlash(session.provider.streaming_service_url) +
+        "v2/serverInfo";
+    std::vector<std::string> headers = BuildMembershipHeaders(token);
+    for (std::string& header : headers)
+    {
+        if (header == "nv-client-type: NATIVE")
+            header = "nv-client-type: BROWSER";
+        else if (header == "nv-client-streamer: NVIDIA-CLASSIC")
+            header = "nv-client-streamer: WEBRTC";
+    }
+
+    const HttpResponse response = http_client.Get(url, GfnClient::kUserAgent, headers);
+    if (response.status_code != 200)
+        return "NP-AMS-08";
+
+    try
+    {
+        JsonPtr root = LoadJson(response.body);
+        const std::string vpc = GetString(json_object_get(root.get(), "requestStatus"), "serverId");
+        return vpc.empty() ? "NP-AMS-08" : vpc;
+    }
+    catch (...)
+    {
+        return "NP-AMS-08";
+    }
+}
+
+bool RefreshMembershipTier(const HttpClient& http_client, AuthSession& session)
+{
+    session.membership_checked_at_ms = NowMs();
+    const std::string token = ResolveSessionJwt(session);
+    if (token.empty() || session.user.user_id.empty())
+        return false;
+
+    try
+    {
+        const std::string vpc_id = FetchVpcId(http_client, session);
+        const std::string url = std::string(kSubscriptionEndpoint) +
+            "?serviceName=gfn_pc&languageCode=en_US&vpcId=" + UrlEncode(vpc_id) +
+            "&userId=" + UrlEncode(session.user.user_id);
+        const HttpResponse response = http_client.Get(
+            url, GfnClient::kUserAgent, BuildMembershipHeaders(token));
+        if (response.status_code != 200)
+        {
+            AppendAuthLog("auth: subscription lookup failed HTTP " +
+                          std::to_string(response.status_code));
+            return false;
+        }
+
+        JsonPtr root = LoadJson(response.body);
+        const std::string tier = Trim(GetString(root.get(), "membershipTier"));
+        if (tier.empty())
+            return false;
+        session.user.membership_tier = tier;
+        session.user.membership_tier_verified = true;
+        AppendAuthLog("auth: subscription tier resolved");
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        AppendAuthLog("auth: subscription response parse failed error=" + std::string(e.what()));
+        return false;
+    }
 }
 
 
@@ -922,6 +1081,7 @@ AuthSession GfnClient::Login(const LoginProvider& provider, const std::string& l
     session.tokens   = tokens;
     session.user     = FetchUserInfo(http_client_, tokens);
     session.last_refresh_at_ms = NowMs();
+    RefreshMembershipTier(http_client_, session);
     AppendAuthLog("auth: user info ok user_id_present=" + std::string(session.user.user_id.empty() ? "no" : "yes"));
     return session;
 }
@@ -1209,6 +1369,7 @@ AuthSession GfnClient::LoginNative(
             auth_session.tokens = std::move(tokens);
             auth_session.user = FetchUserInfo(http_client_, auth_session.tokens);
             auth_session.last_refresh_at_ms = NowMs();
+            RefreshMembershipTier(http_client_, auth_session);
             AppendAuthLog("auth-native: login complete");
             return auth_session;
         }
@@ -1590,6 +1751,7 @@ AuthSession GfnClient::LoginSwitchQR(const LoginProvider& provider, std::functio
     session.tokens   = tokens;
     session.user     = FetchUserInfo(http_client_, tokens);
     session.last_refresh_at_ms = NowMs();
+    RefreshMembershipTier(http_client_, session);
     AppendAuthLog("auth: user info ok user_id_present=" + std::string(session.user.user_id.empty() ? "no" : "yes"));
     return session;
 }
@@ -1599,8 +1761,11 @@ AuthSession GfnClient::EnsureFreshSession(const AuthSession& session) const
     const bool access_needs_refresh = IsNearExpiry(session.tokens.expires_at_ms);
     const bool client_needs_refresh = session.tokens.client_token.empty() ||
         IsNearExpiry(session.tokens.client_token_expires_at_ms);
+    const bool membership_needs_refresh =
+        session.membership_checked_at_ms <= 0 ||
+        NowMs() - session.membership_checked_at_ms >= kMembershipRefreshIntervalMs;
 
-    if (!access_needs_refresh && !client_needs_refresh)
+    if (!access_needs_refresh && !client_needs_refresh && !membership_needs_refresh)
         return session;
 
     AuthSession refreshed = session;
@@ -1614,7 +1779,7 @@ AuthSession GfnClient::EnsureFreshSession(const AuthSession& session) const
     {
         AppendAuthLog("auth: refreshing access token user_id_present=" +
                       std::string(session.user.user_id.empty() ? "no" : "yes"));
-        refreshed.tokens = RefreshTokens(http_client_, session);
+        refreshed.tokens = RefreshSessionTokens(http_client_, session);
         refreshed.last_refresh_at_ms = NowMs();
         AppendAuthLog("auth: access token refresh ok");
     }
@@ -1624,6 +1789,8 @@ AuthSession GfnClient::EnsureFreshSession(const AuthSession& session) const
     {
         RequestClientToken(http_client_, refreshed.tokens);
     }
+    if (membership_needs_refresh || access_needs_refresh)
+        RefreshMembershipTier(http_client_, refreshed);
     return refreshed;
 }
 
@@ -1652,6 +1819,9 @@ AuthSession GfnClient::EnsureFreshSavedSession(const AuthSession& session) const
         refreshed.tokens.client_token != source.tokens.client_token ||
         refreshed.tokens.expires_at_ms != source.tokens.expires_at_ms ||
         refreshed.tokens.client_token_expires_at_ms != source.tokens.client_token_expires_at_ms ||
+        refreshed.user.membership_tier != source.user.membership_tier ||
+        refreshed.user.membership_tier_verified != source.user.membership_tier_verified ||
+        refreshed.membership_checked_at_ms != source.membership_checked_at_ms ||
         refreshed.last_refresh_at_ms != source.last_refresh_at_ms;
     if (changed)
         SaveSession(refreshed);
@@ -1663,13 +1833,14 @@ AuthSession GfnClient::ForceRefreshSavedSession(const AuthSession& session) cons
     if (!session.persistence_enabled)
     {
         AuthSession refreshed = session;
-        refreshed.tokens = RefreshTokens(http_client_, session);
+        refreshed.tokens = RefreshSessionTokens(http_client_, session);
         if (refreshed.tokens.client_token.empty() ||
             IsNearExpiry(refreshed.tokens.client_token_expires_at_ms))
         {
             RequestClientToken(http_client_, refreshed.tokens);
         }
         refreshed.last_refresh_at_ms = NowMs();
+        RefreshMembershipTier(http_client_, refreshed);
         return refreshed;
     }
 
@@ -1688,13 +1859,14 @@ AuthSession GfnClient::ForceRefreshSavedSession(const AuthSession& session) cons
     AppendAuthLog("auth: forced refresh after authorization failure user_id_present=" +
                   std::string(source.user.user_id.empty() ? "no" : "yes"));
     AuthSession refreshed = source;
-    refreshed.tokens = RefreshTokens(http_client_, source);
+    refreshed.tokens = RefreshSessionTokens(http_client_, source);
     if (refreshed.tokens.client_token.empty() ||
         IsNearExpiry(refreshed.tokens.client_token_expires_at_ms))
     {
         RequestClientToken(http_client_, refreshed.tokens);
     }
     refreshed.last_refresh_at_ms = NowMs();
+    RefreshMembershipTier(http_client_, refreshed);
     SaveSession(refreshed);
     return refreshed;
 }

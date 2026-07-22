@@ -1,0 +1,23 @@
+#include "session_error_policy.hpp"
+
+#include <cassert>
+
+int main()
+{
+    using opennow::session_error::Present;
+
+    const auto device_limit = Present(
+        "StartSession failed: HTTP 403, statusCode=50, "
+        "statusDescription=SESSION_LIMIT_PER_DEVICE_EXCEEDED_STATUS");
+    assert(device_limit.title == "A session is already active");
+    assert(device_limit.body.find("statusCode") == std::string::npos);
+
+    const auto auth = Present("StartSession failed: HTTP 401");
+    assert(auth.title == "Sign in again");
+
+    const auto generic = Present(
+        "Network request failed\nEnable Settings > Stream > Debug diagnostics");
+    assert(generic.title == "Session could not start");
+    assert(generic.body == "Network request failed");
+    return 0;
+}
