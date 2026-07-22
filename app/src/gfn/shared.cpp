@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include "../device_identity_policy.hpp"
 #include "../stream_diagnostics.hpp"
 
 #ifdef __SWITCH__
@@ -163,15 +164,24 @@ std::string HexEncode(const unsigned char* data, size_t length)
     return output;
 }
 
+std::string GenerateUuid()
+{
+    auto bytes = GenerateRandomBytes(16);
+    bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0f) | 0x40);
+    bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3f) | 0x80);
+    const std::string hex = HexEncode(bytes.data(), bytes.size());
+    return hex.substr(0, 8) + "-" + hex.substr(8, 4) + "-" + hex.substr(12, 4) +
+        "-" + hex.substr(16, 4) + "-" + hex.substr(20);
+}
+
 std::string GenerateDeviceId()
 {
     const std::string path = GetAppHome() + "/device_id.txt";
     std::string stored = Trim(ReadTextFile(path));
-    if (!stored.empty())
+    if (device_identity::IsUsableStoredDeviceId(stored))
         return stored;
 
-    const auto bytes = GenerateRandomBytes(32);
-    stored           = HexEncode(bytes.data(), bytes.size());
+    stored = GenerateUuid();
     WriteTextFileAtomically(path, stored);
     return stored;
 }
@@ -368,3 +378,13 @@ std::string ResolveSessionJwt(const AuthSession& session)
 }
 
 } // namespace opennow::gfn::detail
+
+namespace opennow
+{
+
+GfnClient::GfnClient()
+    : client_id_(gfn::detail::GenerateUuid())
+{
+}
+
+} // namespace opennow

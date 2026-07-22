@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 #include "cover_image_cache.hpp"
 #include "play_history.hpp"
+#include "session_error_policy.hpp"
 #include "localization.hpp"
 #include <borealis.hpp>
 #include <switch.h>
@@ -52,7 +53,7 @@ class LaunchAnimationView final : public brls::View
         const double seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         const float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(seconds * 3.2));
-        static constexpr const char* kLabels[] = {"QUEUE", "SETUP", "READY"};
+        static constexpr const char* kLabels[] = {"Queue", "Setup", "Ready"};
         const float rail_y = y + 42.0f;
         const float first_x = x + 76.0f;
         const float gap = (width - 152.0f) * 0.5f;
@@ -69,7 +70,7 @@ class LaunchAnimationView final : public brls::View
             completed_width = gap * 2.0f;
         nvgBeginPath(vg);
         nvgRect(vg, first_x, rail_y - 2.0f, completed_width, 4.0f);
-        nvgFillColor(vg, nvgRGB(77, 218, 130));
+        nvgFillColor(vg, nvgRGB(0, 200, 215));
         nvgFill(vg);
 
         nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
@@ -83,15 +84,15 @@ class LaunchAnimationView final : public brls::View
             {
                 nvgBeginPath(vg);
                 nvgCircle(vg, cx, rail_y, 29.0f + pulse * 3.0f);
-                nvgFillColor(vg, nvgRGBA(77, 218, 130, 25 + static_cast<int>(pulse * 22.0f)));
+                nvgFillColor(vg, nvgRGBA(0, 200, 215, 25 + static_cast<int>(pulse * 22.0f)));
                 nvgFill(vg);
             }
             nvgBeginPath(vg);
             nvgCircle(vg, cx, rail_y, 22.0f);
-            nvgFillColor(vg, complete || active ? nvgRGB(77, 218, 130) : nvgRGB(24, 28, 33));
+            nvgFillColor(vg, complete || active ? nvgRGB(0, 200, 215) : nvgRGB(24, 28, 33));
             nvgFill(vg);
             nvgStrokeWidth(vg, 2.0f);
-            nvgStrokeColor(vg, complete || active ? nvgRGB(108, 235, 153) : nvgRGB(43, 48, 55));
+            nvgStrokeColor(vg, complete || active ? nvgRGB(100, 231, 239) : nvgRGB(43, 48, 55));
             nvgStroke(vg);
 
             nvgFontSize(vg, 17.0f);
@@ -117,13 +118,13 @@ class LaunchAnimationView final : public brls::View
                angle + kPi * 1.42f, NVG_CW);
         nvgStrokeWidth(vg, 5.0f);
         nvgLineCap(vg, NVG_ROUND);
-        nvgStrokeColor(vg, nvgRGB(77, 218, 130));
+        nvgStrokeColor(vg, nvgRGB(0, 200, 215));
         nvgStroke(vg);
         const float head_angle = angle + kPi * 1.42f;
         nvgBeginPath(vg);
         nvgCircle(vg, spinner_x + std::cos(head_angle) * 18.0f,
                   spinner_y + std::sin(head_angle) * 18.0f, 3.2f);
-        nvgFillColor(vg, nvgRGB(123, 242, 166));
+        nvgFillColor(vg, nvgRGB(118, 234, 241));
         nvgFill(vg);
     }
 
@@ -149,7 +150,7 @@ void SetLaunchProgress(
         const bool queue_position = title.rfind("Position in queue:", 0) == 0;
         stage_label->setFontSize(queue_position ? 36 : 27);
         stage_label->setTextColor(queue_position
-            ? nvgRGB(98, 232, 148)
+            ? nvgRGB(0, 200, 215)
             : nvgRGB(238, 242, 245));
     }
     if (detail_label)
@@ -210,8 +211,7 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     box->setWidth(720);
     box->setPadding(24, 36, 18, 36);
     box->setAlignItems(brls::AlignItems::CENTER);
-    box->setBackgroundColor(nvgRGB(15, 17, 21));
-    box->setCornerRadius(18);
+    box->setBackgroundColor(nvgRGBA(0, 0, 0, 0));
 
     auto* game_header = new brls::Box(brls::Axis::ROW);
     game_header->setWidth(620);
@@ -231,9 +231,9 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     auto* game_copy = new brls::Box(brls::Axis::COLUMN);
     game_copy->setGrow(1.0f);
     auto* eyebrow = new brls::Label();
-    eyebrow->setText(Tr("NOW LOADING"));
+    eyebrow->setText(Tr("Now loading"));
     eyebrow->setFontSize(13);
-    eyebrow->setTextColor(nvgRGB(77, 218, 130));
+    eyebrow->setTextColor(nvgRGB(0, 200, 215));
     eyebrow->setMarginBottom(5);
     game_copy->addView(eyebrow);
     auto* heading = new brls::Label();
@@ -424,13 +424,16 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             });
 
         } catch (const std::exception& e) {
-            std::string err = e.what();
+            const session_error::Presentation error = session_error::Present(e.what());
             brls::sync([=]() {
                 if (!launch_state->running) return;
                 animation->SetState(0, 0.04f);
-                stage_label->setText(Tr("Session could not start"));
+                stage_label->setText(Tr(error.title));
+                stage_label->setFontSize(24);
                 stage_label->setTextColor(nvgRGB(255, 125, 132));
-                detail_label->setText(err + "\n\nPress B to return to the game page.");
+                detail_label->setFontSize(17);
+                detail_label->setText(
+                    Tr(error.body) + "\n\n" + Tr("Press B to return to the game page."));
                 dialog->setCancelable(true);
             });
         }

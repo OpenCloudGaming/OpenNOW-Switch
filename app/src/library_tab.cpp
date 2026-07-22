@@ -11,6 +11,7 @@
 #include "ui_text_policy.hpp"
 #include "qr_login_dialog.hpp"
 #include "localization.hpp"
+#include "membership_tier_policy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -296,8 +297,8 @@ void LibraryTab::UpdateSessionUi()
     }
 
     const AuthSession& session = *state.session();
-    const std::string membership =
-        session.user.membership_tier.empty() ? std::string("FREE") : session.user.membership_tier;
+    const std::string membership = membership::DisplayLabel(
+        session.user.membership_tier, session.user.membership_tier_verified);
 
     if (session.reauthentication_required)
     {
@@ -309,7 +310,7 @@ void LibraryTab::UpdateSessionUi()
     else
     {
         account_label_->setText(
-            "Connected as " + session.user.display_name + "  |  " + membership + " tier");
+            "Connected as " + session.user.display_name + "  |  " + membership);
         sign_in_button_->setText(Tr("Add another account"));
         refresh_button_->setState(brls::ButtonState::ENABLED);
     }

@@ -146,7 +146,8 @@ StreamView::StreamView(
     debug_diagnostics_ = stream_settings.debug_diagnostics;
     controller_layout_ = stream_settings.controller_layout;
     opennow::SetStreamDiagnosticsEnabled(debug_diagnostics_);
-    free_tier_session_ = IsFreeTier(auth_.user.membership_tier);
+    free_tier_session_ = auth_.user.membership_tier_verified &&
+        IsFreeTier(auth_.user.membership_tier);
     stream_started_at_ = std::chrono::steady_clock::now();
     is_nte_session_ = opennow::IsNevernessToEverness(game_title_);
     if (is_nte_session_) {

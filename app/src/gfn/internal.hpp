@@ -28,6 +28,7 @@ std::string EnsureTrailingSlash(std::string value);
 LoginProvider DefaultProvider();
 std::vector<unsigned char> GenerateRandomBytes(size_t length);
 std::string HexEncode(const unsigned char* data, size_t length);
+std::string GenerateUuid();
 std::string GenerateDeviceId();
 std::string UrlEncode(const std::string& input, bool plus_for_space = false);
 std::string ReadTextFile(const std::string& path);
