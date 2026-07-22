@@ -70,7 +70,7 @@ class LaunchAnimationView final : public brls::View
             completed_width = gap * 2.0f;
         nvgBeginPath(vg);
         nvgRect(vg, first_x, rail_y - 2.0f, completed_width, 4.0f);
-        nvgFillColor(vg, nvgRGB(0, 200, 215));
+        nvgFillColor(vg, nvgRGB(77, 218, 130));
         nvgFill(vg);
 
         nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
@@ -84,15 +84,15 @@ class LaunchAnimationView final : public brls::View
             {
                 nvgBeginPath(vg);
                 nvgCircle(vg, cx, rail_y, 29.0f + pulse * 3.0f);
-                nvgFillColor(vg, nvgRGBA(0, 200, 215, 25 + static_cast<int>(pulse * 22.0f)));
+                nvgFillColor(vg, nvgRGBA(77, 218, 130, 25 + static_cast<int>(pulse * 22.0f)));
                 nvgFill(vg);
             }
             nvgBeginPath(vg);
             nvgCircle(vg, cx, rail_y, 22.0f);
-            nvgFillColor(vg, complete || active ? nvgRGB(0, 200, 215) : nvgRGB(24, 28, 33));
+            nvgFillColor(vg, complete || active ? nvgRGB(77, 218, 130) : nvgRGB(24, 28, 33));
             nvgFill(vg);
             nvgStrokeWidth(vg, 2.0f);
-            nvgStrokeColor(vg, complete || active ? nvgRGB(100, 231, 239) : nvgRGB(43, 48, 55));
+            nvgStrokeColor(vg, complete || active ? nvgRGB(123, 242, 166) : nvgRGB(43, 48, 55));
             nvgStroke(vg);
 
             nvgFontSize(vg, 17.0f);
@@ -118,7 +118,7 @@ class LaunchAnimationView final : public brls::View
                angle + kPi * 1.42f, NVG_CW);
         nvgStrokeWidth(vg, 5.0f);
         nvgLineCap(vg, NVG_ROUND);
-        nvgStrokeColor(vg, nvgRGB(0, 200, 215));
+        nvgStrokeColor(vg, nvgRGB(77, 218, 130));
         nvgStroke(vg);
         const float head_angle = angle + kPi * 1.42f;
         nvgBeginPath(vg);
@@ -150,7 +150,7 @@ void SetLaunchProgress(
         const bool queue_position = title.rfind("Position in queue:", 0) == 0;
         stage_label->setFontSize(queue_position ? 36 : 27);
         stage_label->setTextColor(queue_position
-            ? nvgRGB(0, 200, 215)
+            ? nvgRGB(77, 218, 130)
             : nvgRGB(238, 242, 245));
     }
     if (detail_label)
@@ -233,7 +233,7 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     auto* eyebrow = new brls::Label();
     eyebrow->setText(Tr("Now loading"));
     eyebrow->setFontSize(13);
-    eyebrow->setTextColor(nvgRGB(0, 200, 215));
+    eyebrow->setTextColor(nvgRGB(77, 218, 130));
     eyebrow->setMarginBottom(5);
     game_copy->addView(eyebrow);
     auto* heading = new brls::Label();

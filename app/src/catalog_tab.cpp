@@ -370,6 +370,7 @@ void CatalogTab::RebuildList()
             auto* card = new GameCardView(display, [this, index]() {
                 OpenGameDialog(nullptr, index);
             });
+            card->setMarginRight(i + 1 < end ? 24.0f : 0.0f);
 
             if (!first_card_)
                 first_card_ = card;

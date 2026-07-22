@@ -26,11 +26,8 @@ class SettingsTab : public brls::Box
     {
         Account,
         Stream,
-        Game,
-        Controls,
-        Audio,
-        Storage,
-        Interface,
+        Preferences,
+        App,
     };
 
     void EnsureSessionLoaded();
@@ -39,19 +36,13 @@ class SettingsTab : public brls::Box
     void RebuildCategory();
     void BuildAccountPage();
     void BuildStreamPage();
-    void BuildGamePage();
-    void BuildControlsPage();
-    void BuildAudioPage();
-    void BuildStoragePage();
-    void BuildInterfacePage();
+    void BuildPreferencesPage();
+    void BuildAppPage();
     void UpdateCategoryChrome();
     void UpdateOptionValues();
     void MarkDirty();
     bool SaveChanges(brls::View* view);
     bool RevertChanges(brls::View* view);
-    bool CycleResolution(brls::View* view);
-    bool CycleFrameRate(brls::View* view);
-    bool CycleBitrate(brls::View* view);
     bool CycleImageQuality(brls::View* view);
 
     brls::Box* MakeSection(const std::string& title, const std::string& subtitle = {});
@@ -68,24 +59,15 @@ class SettingsTab : public brls::Box
         bool destructive = false);
     void AddInfoLine(brls::Box* parent, const std::string& label, const std::string& value);
 
-    bool ShowSessionDialog(brls::View* view);
-    bool TestTokenRefresh(brls::View* view);
     bool ClearSavedLogin(brls::View* view);
     bool SwitchSavedAccount(brls::View* view);
-    bool ClearAllSavedLogins(brls::View* view);
-    bool ShowCacheState(brls::View* view);
     bool ClearCoverCache(brls::View* view);
     bool CycleStreamPreset(brls::View* view);
-    bool ResetStreamPreset(brls::View* view);
-    bool CycleVideoBackend(brls::View* view);
     bool ChooseGameLanguage(brls::View* view);
     bool TogglePersistGameSettings(brls::View* view);
     bool ToggleControllerLayout(brls::View* view);
     bool ToggleAudio(brls::View* view);
     bool CycleAudioVolume(brls::View* view);
-    bool CycleAudioBuffer(brls::View* view);
-    bool ToggleDebugDiagnostics(brls::View* view);
-    bool ShowDiagnostics(brls::View* view);
     bool ChooseInterfaceLanguage(brls::View* view);
 
     GfnClient client_;

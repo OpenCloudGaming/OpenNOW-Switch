@@ -23,18 +23,20 @@ TopBarFrame::TopBarFrame()
     header_container_->setHeight(76);
     header_container_->setAlignItems(brls::AlignItems::CENTER);
     header_container_->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
-    header_container_->setPadding(0, 28, 0, 28);
+    header_container_->setPadding(0, 32, 0, 32);
     header_container_->setBackgroundColor(nvgRGB(24, 24, 29));
     
     addView(header_container_);
 
     auto* brand = new brls::Box(brls::Axis::COLUMN);
-    brand->setWidth(210);
+    // Match the account gutter so the navigation is centered on the screen,
+    // rather than merely centered in the space left between unequal sides.
+    brand->setWidth(310);
     brand->setJustifyContent(brls::JustifyContent::CENTER);
     auto* brand_name = new brls::Label();
     brand_name->setText("OpenNOW");
     brand_name->setFontSize(22);
-    brand_name->setTextColor(nvgRGB(0, 200, 215));
+    brand_name->setTextColor(nvgRGB(77, 218, 130));
     brand->addView(brand_name);
     auto* brand_platform = new brls::Label();
     brand_platform->setText("Nintendo Switch");
@@ -141,7 +143,8 @@ void TopBarFrame::addTab(const std::string& label, TabViewCreator creator)
     auto* tab_box = new brls::Box(brls::Axis::COLUMN);
     tab_box->setAlignItems(brls::AlignItems::CENTER);
     tab_box->setJustifyContent(brls::JustifyContent::CENTER);
-    tab_box->setMarginRight(12);
+    tab_box->setMarginLeft(6);
+    tab_box->setMarginRight(6);
     tab_box->setHeight(50);
     tab_box->setPadding(8, 18, 8, 18);
     tab_box->setCornerRadius(8);
@@ -219,7 +222,7 @@ void TopBarFrame::SelectTab(int index)
     for (size_t i = 0; i < tabs_.size(); ++i) {
         if ((int)i == index) {
             tabs_[i].header_label->setTextColor(nvgRGB(255, 255, 255));
-            tabs_[i].underline->setColor(nvgRGB(0, 200, 215));
+            tabs_[i].underline->setColor(nvgRGB(77, 218, 130));
             tabs_[i].tab_box->setBackgroundColor(nvgRGB(31, 34, 40));
         } else {
             tabs_[i].header_label->setTextColor(nvgRGB(128, 133, 143));

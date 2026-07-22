@@ -309,7 +309,7 @@ std::string SessionTraceHint()
 {
     return StreamDiagnosticsEnabled()
         ? "\nDetails: sdmc:/switch/SwitchNOW/session_trace.log"
-        : "\nEnable Settings > Stream > Debug diagnostics for a detailed trace.";
+        : "";
 }
 
 void ResetSessionTraceLog(const std::string& reason)
