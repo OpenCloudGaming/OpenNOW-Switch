@@ -4,9 +4,11 @@
 #include "app_paths.hpp"
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
+#include "qr_login_dialog.hpp"
 #include "stream_settings.hpp"
 #include "stream_settings_policy.hpp"
 #include "stream_diagnostics.hpp"
+#include "subscription_display.hpp"
 #include "ui_helpers.hpp"
 
 #include <cstdint>
@@ -16,6 +18,7 @@
 #include <dirent.h>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 #include <sys/stat.h>
 #include <utility>
 #include <vector>
@@ -134,10 +137,11 @@ bool SameSettings(const StreamSettings& left, const StreamSettings& right)
 SettingsTab::SettingsTab()
     : brls::Box(brls::Axis::COLUMN)
 {
-    setPadding(18, 32, 18, 32);
+    setPadding(16, 28, 18, 28);
+    setBackgroundColor(nvgRGB(12, 13, 16));
 
     auto* top = new brls::Box(brls::Axis::ROW);
-    top->setHeight(68);
+    top->setHeight(62);
     top->setAlignItems(brls::AlignItems::CENTER);
     top->setMarginBottom(12);
 
@@ -146,7 +150,7 @@ SettingsTab::SettingsTab()
     auto* title = MakeParagraph("Settings", 3.0f);
     title->setFontSize(30);
     title_column->addView(title);
-    auto* hint = MakeParagraph("Choose what matters, then press X to save.", 0.0f);
+    auto* hint = MakeParagraph("Account, streaming and app preferences in one place.", 0.0f);
     hint->setFontSize(15);
     hint->setTextColor(nvgRGB(142, 149, 160));
     title_column->addView(hint);
@@ -162,13 +166,11 @@ SettingsTab::SettingsTab()
     body->setGrow(1.0f);
 
     auto* sidebar = new brls::Box(brls::Axis::COLUMN);
-    sidebar->setWidth(224);
-    sidebar->setPadding(16, 14, 16, 14);
-    sidebar->setMarginRight(24);
-    sidebar->setCornerRadius(14);
-    sidebar->setBackgroundColor(nvgRGB(15, 17, 21));
+    sidebar->setWidth(220);
+    sidebar->setPadding(14, 12, 16, 12);
+    sidebar->setBackgroundColor(nvgRGB(16, 18, 22));
 
-    auto* nav_label = MakeParagraph("Settings", 12.0f);
+    auto* nav_label = MakeParagraph("General", 10.0f);
     nav_label->setFontSize(13);
     nav_label->setTextColor(nvgRGB(108, 115, 126));
     sidebar->addView(nav_label);
@@ -181,17 +183,34 @@ SettingsTab::SettingsTab()
     }};
     for (const auto& [label, category] : categories)
     {
-        auto* button = new brls::Button();
-        button->setText(Tr(label));
-        button->setHeight(54);
-        button->setMarginBottom(8);
-        button->setCornerRadius(10);
-        button->registerClickAction([this, category](brls::View*) {
+        auto* row = new brls::Box(brls::Axis::ROW);
+        row->setHeight(44);
+        row->setAlignItems(brls::AlignItems::CENTER);
+        row->setPadding(0, 12, 0, 0);
+        row->setMarginBottom(3);
+        row->setCornerRadius(6);
+        row->setHighlightCornerRadius(6);
+        row->setHighlightPadding(0);
+        row->setFocusable(true);
+
+        auto* marker = new brls::Rectangle();
+        marker->setWidth(3);
+        marker->setHeight(20);
+        marker->setMarginRight(12);
+        marker->setColor(nvgRGBA(0, 0, 0, 0));
+        row->addView(marker);
+
+        auto* text = MakeParagraph(label, 0.0f);
+        text->setFontSize(16);
+        text->setTextColor(nvgRGB(184, 190, 200));
+        row->addView(text);
+
+        row->registerClickAction([this, category](brls::View*) {
             SelectCategory(category);
             return true;
         });
-        category_buttons_.push_back(button);
-        sidebar->addView(button);
+        category_nav_items_.push_back({row, marker, text});
+        sidebar->addView(row);
     }
 
     auto* nav_hint = MakeParagraph(
@@ -202,14 +221,20 @@ SettingsTab::SettingsTab()
     sidebar->addView(nav_hint);
     body->addView(sidebar);
 
+    auto* sidebar_divider = new brls::Rectangle();
+    sidebar_divider->setWidth(1);
+    sidebar_divider->setMarginRight(24);
+    sidebar_divider->setColor(nvgRGBA(255, 255, 255, 16));
+    body->addView(sidebar_divider);
+
     auto* content_shell = new brls::Box(brls::Axis::COLUMN);
     content_shell->setGrow(1.0f);
     content_shell->setPadding(0, 0, 0, 0);
 
-    page_title_ = MakeParagraph("Stream", 2.0f);
+    page_title_ = MakeParagraph("Account", 2.0f);
     page_title_->setFontSize(27);
     content_shell->addView(page_title_);
-    page_subtitle_ = MakeParagraph("Pick a quality profile that fits your connection.", 14.0f);
+    page_subtitle_ = MakeParagraph("Manage your GeForce NOW identity and saved sign-in.", 14.0f);
     page_subtitle_->setFontSize(15);
     page_subtitle_->setTextColor(nvgRGB(142, 149, 160));
     content_shell->addView(page_subtitle_);
@@ -231,21 +256,21 @@ SettingsTab::SettingsTab()
         return RevertChanges(view);
     }, false, true);
 
-    SelectCategory(Category::Stream);
+    SelectCategory(Category::Account);
 }
 
 brls::Box* SettingsTab::MakeSection(const std::string& title, const std::string& subtitle)
 {
     auto* section = new brls::Box(brls::Axis::COLUMN);
-    section->setPadding(18, 20, 18, 20);
-    section->setMarginBottom(16);
-    section->setCornerRadius(13);
+    section->setPadding(16, 18, 16, 18);
+    section->setMarginBottom(14);
+    section->setCornerRadius(6);
     section->setBorderThickness(1);
     section->setBorderColor(nvgRGB(42, 46, 54));
-    section->setBackgroundColor(nvgRGB(20, 22, 27));
+    section->setBackgroundColor(nvgRGB(18, 20, 24));
 
     auto* label = MakeParagraph(title, subtitle.empty() ? 14.0f : 4.0f);
-    label->setFontSize(21);
+    label->setFontSize(19);
     label->setTextColor(nvgRGB(242, 244, 247));
     section->addView(label);
     if (!subtitle.empty())
@@ -265,7 +290,7 @@ brls::Box* SettingsTab::MakeOptionRow(
     std::function<bool(brls::View*)> action)
 {
     auto* row = new brls::Box(brls::Axis::ROW);
-    row->setHeight(68);
+    row->setHeight(64);
     row->setAlignItems(brls::AlignItems::CENTER);
     row->setPadding(7, 8, 7, 8);
     row->setMarginBottom(4);
@@ -284,8 +309,8 @@ brls::Box* SettingsTab::MakeOptionRow(
 
     auto* button = new brls::Button();
     button->setWidth(224);
-    button->setHeight(48);
-    button->setCornerRadius(9);
+    button->setHeight(42);
+    button->setCornerRadius(6);
     button->setText(Tr(value()));
     button->registerClickAction([this, action = std::move(action)](brls::View* view) {
         const bool handled = action ? action(view) : true;
@@ -305,7 +330,7 @@ brls::Box* SettingsTab::MakeActionRow(
     bool destructive)
 {
     auto* row = new brls::Box(brls::Axis::ROW);
-    row->setHeight(68);
+    row->setHeight(64);
     row->setAlignItems(brls::AlignItems::CENTER);
     row->setPadding(7, 8, 7, 8);
     row->setMarginBottom(4);
@@ -325,8 +350,8 @@ brls::Box* SettingsTab::MakeActionRow(
 
     auto* button = new brls::Button();
     button->setWidth(224);
-    button->setHeight(48);
-    button->setCornerRadius(9);
+    button->setHeight(42);
+    button->setCornerRadius(6);
     button->setText(Tr(button_text));
     button->registerClickAction(std::move(action));
     row->addView(button);
@@ -385,13 +410,16 @@ void SettingsTab::SelectCategory(Category category)
 void SettingsTab::UpdateCategoryChrome()
 {
     const size_t selected = static_cast<size_t>(category_);
-    for (size_t index = 0; index < category_buttons_.size(); ++index)
+    for (size_t index = 0; index < category_nav_items_.size(); ++index)
     {
-        auto* button = category_buttons_[index];
+        const auto& item = category_nav_items_[index];
         const bool active = index == selected;
-        button->setBackgroundColor(active ? nvgRGB(22, 55, 42) : nvgRGB(24, 27, 32));
-        button->setBorderThickness(active ? 2.0f : 0.0f);
-        button->setBorderColor(active ? nvgRGB(74, 225, 142) : nvgRGB(24, 27, 32));
+        item.row->setBackgroundColor(
+            active ? nvgRGBA(77, 218, 130, 24) : nvgRGBA(0, 0, 0, 0));
+        item.marker->setColor(
+            active ? nvgRGB(77, 218, 130) : nvgRGBA(0, 0, 0, 0));
+        item.label->setTextColor(
+            active ? nvgRGB(245, 247, 249) : nvgRGB(184, 190, 200));
     }
 }
 
@@ -425,11 +453,13 @@ void SettingsTab::RebuildCategory()
 void SettingsTab::BuildAccountPage()
 {
     const auto& state = AppState::Instance();
-    auto* overview = MakeSection("Connected account", "OpenNOW keeps your sign-in ready between launches.");
+    const std::vector<AuthSession> saved_accounts = client_.LoadSavedSessions();
+    auto* overview = MakeSection(
+        "GeForce NOW account", "OpenNOW keeps your sign-in ready between launches.");
     if (!state.HasSession())
     {
         AddInfoLine(overview, "Status", "Not connected");
-        AddInfoLine(overview, "Next step", "Sign in from Library");
+        AddInfoLine(overview, "Next step", "Connect an account below");
     }
     else
     {
@@ -439,19 +469,38 @@ void SettingsTab::BuildAccountPage()
             overview, "Membership",
             membership::DisplayLabel(
                 session.user.membership_tier, session.user.membership_tier_verified));
+        if (session.subscription.available)
+        {
+            AddInfoLine(
+                overview, "Play time",
+                subscription::FormatTimeRemaining(session.subscription));
+            AddInfoLine(
+                overview, "Persistent storage",
+                subscription::FormatStorageUsage(session.subscription));
+        }
         AddInfoLine(overview, "Provider", session.provider.display_name);
     }
-    AddInfoLine(overview, "Saved accounts", std::to_string(client_.LoadSavedSessions().size()));
+    AddInfoLine(overview, "Saved accounts", std::to_string(saved_accounts.size()));
     content_container_->addView(overview);
 
-    auto* session = MakeSection("Account actions", "These actions take effect immediately.");
-    session->addView(MakeActionRow(
-        "Choose saved account", "Switch profiles without repeating sign-in.", "Choose",
+    auto* actions = MakeSection("Account actions", "These actions take effect immediately.");
+    actions->addView(MakeActionRow(
+        state.HasSession() && state.session()->reauthentication_required
+            ? "Reconnect account"
+            : "Add account",
+        "Connect with NVIDIA using a QR code.",
+        state.HasSession() && state.session()->reauthentication_required ? "Reconnect" : "Add",
+        [this](brls::View* view) { return BeginLogin(view); }));
+    actions->addView(MakeActionRow(
+        "Switch account", "Choose another saved profile.", "Choose",
         [this](brls::View* view) { return SwitchSavedAccount(view); }));
-    session->addView(MakeActionRow(
-        "Remove active account", "Disconnect this account from the console.", "Remove",
-        [this](brls::View* view) { return ClearSavedLogin(view); }, true));
-    content_container_->addView(session);
+    if (state.HasSession())
+    {
+        actions->addView(MakeActionRow(
+            "Remove active account", "Disconnect this account from this console.", "Remove",
+            [this](brls::View* view) { return ClearSavedLogin(view); }, true));
+    }
+    content_container_->addView(actions);
 }
 
 void SettingsTab::BuildStreamPage()
@@ -577,8 +626,8 @@ bool SettingsTab::SaveChanges(brls::View* view)
     UpdateOptionValues();
     const std::array<const char*, 4> category_names {
         "Account", "Stream", "Preferences", "App"};
-    for (size_t index = 0; index < category_buttons_.size() && index < category_names.size(); ++index)
-        category_buttons_[index]->setText(Tr(category_names[index]));
+    for (size_t index = 0; index < category_nav_items_.size() && index < category_names.size(); ++index)
+        category_nav_items_[index].label->setText(Tr(category_names[index]));
     SelectCategory(category_);
     brls::Application::notify(Tr("Settings saved; changes apply to the next stream"));
     return true;
@@ -639,6 +688,36 @@ void SettingsTab::RefreshSummary()
     }
 }
 
+bool SettingsTab::BeginLogin(brls::View* view)
+{
+    (void)view;
+    try
+    {
+        auto& state = AppState::Instance();
+        std::vector<LoginProvider> providers =
+            state.HasProviders() ? state.providers() : client_.FetchLoginProviders();
+        if (!state.HasProviders())
+            state.SetProviders(providers);
+        if (providers.empty())
+            throw std::runtime_error("No GeForce NOW login providers were returned");
+
+        const LoginProvider provider =
+            state.HasSession() && state.session()->reauthentication_required
+            ? state.session()->provider
+            : providers.front();
+        auto* dialog = new QrLoginDialog(provider, client_, [this]() {
+            RefreshSummary();
+            RebuildCategory();
+        });
+        brls::Application::pushActivity(new brls::Activity(dialog));
+    }
+    catch (const std::exception& ex)
+    {
+        ShowError("GeForce NOW Login Failed", ex.what());
+    }
+    return true;
+}
+
 bool SettingsTab::ClearSavedLogin(brls::View* view)
 {
     (void)view;
@@ -697,6 +776,28 @@ bool SettingsTab::SwitchSavedAccount(brls::View* view)
             RefreshSummary();
             brls::sync([this] { RebuildCategory(); });
             brls::Application::notify("Switched to " + session.user.display_name);
+
+            AuthSession refresh_source = session;
+            refresh_source.membership_checked_at_ms = 0;
+            GfnClient client = client_;
+            brls::async([this, client, refresh_source = std::move(refresh_source)]() mutable {
+                try
+                {
+                    AuthSession refreshed = client.EnsureFreshSavedSession(refresh_source);
+                    brls::sync([this, refreshed = std::move(refreshed)]() mutable {
+                        auto& current = AppState::Instance();
+                        if (!current.HasSession() ||
+                            current.session()->user.user_id != refreshed.user.user_id)
+                            return;
+                        current.SetSession(std::move(refreshed));
+                        RebuildCategory();
+                    });
+                }
+                catch (const std::exception&)
+                {
+                    // Keep the saved account active when subscription refresh is offline.
+                }
+            }, false);
         });
     }
     dialog->addButton("Cancel", [] {});

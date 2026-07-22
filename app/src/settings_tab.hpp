@@ -61,6 +61,7 @@ class SettingsTab : public brls::Box
 
     bool ClearSavedLogin(brls::View* view);
     bool SwitchSavedAccount(brls::View* view);
+    bool BeginLogin(brls::View* view);
     bool ClearCoverCache(brls::View* view);
     bool CycleStreamPreset(brls::View* view);
     bool ChooseGameLanguage(brls::View* view);
@@ -76,9 +77,16 @@ class SettingsTab : public brls::Box
     brls::Label* save_status_ = nullptr;
     brls::ScrollingFrame* scrolling_frame_ = nullptr;
     brls::Box* content_container_ = nullptr;
-    std::vector<brls::Button*> category_buttons_;
+    struct CategoryNavItem
+    {
+        brls::Box* row = nullptr;
+        brls::Rectangle* marker = nullptr;
+        brls::Label* label = nullptr;
+    };
+
+    std::vector<CategoryNavItem> category_nav_items_;
     std::vector<std::pair<brls::Button*, std::function<std::string()>>> option_values_;
-    Category category_ = Category::Stream;
+    Category category_ = Category::Account;
     StreamSettings saved_settings_;
     StreamSettings draft_settings_;
     bool settings_loaded_ = false;

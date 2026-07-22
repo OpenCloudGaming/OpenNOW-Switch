@@ -37,6 +37,28 @@ struct AuthUser
     bool membership_tier_verified = false;
 };
 
+struct SubscriptionInfo
+{
+    std::string membership_tier;
+    std::string subscription_type;
+    std::string subscription_subtype;
+    double allotted_hours    = 0.0;
+    double purchased_hours   = 0.0;
+    double rolled_over_hours = 0.0;
+    double used_hours        = 0.0;
+    double remaining_hours   = 0.0;
+    double total_hours       = 0.0;
+    bool is_unlimited        = false;
+    bool available           = false;
+
+    bool has_storage         = false;
+    bool has_storage_usage   = false;
+    double storage_size_gb   = 0.0;
+    double storage_used_gb   = 0.0;
+    std::string storage_region_name;
+    std::string storage_region_code;
+};
+
 struct QrLoginChallenge
 {
     std::string user_code;
@@ -51,6 +73,7 @@ struct AuthSession
     LoginProvider provider;
     AuthTokens tokens;
     AuthUser user;
+    SubscriptionInfo subscription;
     std::int64_t last_refresh_at_ms = 0;
     std::int64_t membership_checked_at_ms = 0;
     bool persistence_enabled = true; // Runtime-only; vault sessions are persistent.
