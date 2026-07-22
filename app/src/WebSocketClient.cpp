@@ -16,6 +16,9 @@
 namespace
 {
 
+constexpr size_t kMaximumHandshakeBytes = 64 * 1024;
+constexpr size_t kMaximumSignalingPayloadBytes = 4 * 1024 * 1024;
+
 std::vector<uint8_t> random_bytes(size_t length)
 {
     std::vector<uint8_t> bytes(length);
@@ -99,7 +102,7 @@ bool WebSocketClient::connect() {
     size_t path_pos = host.find("/");
     if (path_pos != std::string::npos) {
         path = host.substr(path_pos);
-        host = host.substr(0, path_pos);
+        host.resize(path_pos);
     }
     
     const std::string host_header = host;
@@ -111,7 +114,7 @@ bool WebSocketClient::connect() {
     if (colon_pos != std::string::npos) {
         std::string port_str = host.substr(colon_pos + 1);
         if (port_str == "443" || port_str == "80") {
-            host = host.substr(0, colon_pos);
+            host.resize(colon_pos);
         }
     }
 
@@ -122,8 +125,8 @@ bool WebSocketClient::connect() {
 
     curl_easy_setopt(curl_, CURLOPT_URL, curl_url.c_str());
     curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY, 1L);
-    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
 
@@ -162,6 +165,10 @@ bool WebSocketClient::connect() {
         res = curl_easy_recv(curl_, buf, sizeof(buf) - 1, &rcvd);
         if (res == CURLE_OK && rcvd > 0) {
             response.append(buf, rcvd);
+            if (response.size() > kMaximumHandshakeBytes) {
+                last_error_ = "WebSocket handshake response is too large";
+                break;
+            }
             const size_t header_end = response.find("\r\n\r\n");
             if (header_end == std::string::npos)
                 continue;
@@ -319,6 +326,13 @@ void WebSocketClient::poll() {
             }
             payload_len = static_cast<size_t>(big_len);
         }
+
+        if (payload_len > kMaximumSignalingPayloadBytes ||
+            payload_len > std::numeric_limits<size_t>::max() - header_size) {
+            last_error_ = "Incoming WebSocket frame is too large";
+            connected_ = false;
+            return;
+        }
         
         if (masked) {
             header_size += 4;
@@ -334,7 +348,9 @@ void WebSocketClient::poll() {
             memcpy(mask_key, &rx_buffer_[header_size - 4], 4);
         }
         
-        std::vector<uint8_t> payload(&rx_buffer_[header_size], &rx_buffer_[header_size + payload_len]);
+        std::vector<uint8_t> payload(payload_len);
+        if (payload_len > 0)
+            std::memcpy(payload.data(), rx_buffer_.data() + header_size, payload_len);
         
         if (masked) {
             for (size_t i = 0; i < payload_len; i++) {

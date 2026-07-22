@@ -51,6 +51,7 @@ GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
     image_ = new brls::Image();
     image_->setWidth(212);
     image_->setHeight(112);
+    image_->setCornerRadius(7);
     image_->setMarginBottom(6);
     image_->setScalingType(brls::ImageScalingType::FILL);
     addView(image_);
@@ -59,7 +60,7 @@ GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
     title_label_->setMarginBottom(3);
     addView(title_label_);
 
-    subtitle_label_ = MakeLabel(BuildSubtitle(display_), 12.0f, nvgRGB(105, 220, 148));
+    subtitle_label_ = MakeLabel(BuildSubtitle(display_), 12.0f, nvgRGB(88, 217, 138));
     addView(subtitle_label_);
 
     UpdateChrome(false);
@@ -88,8 +89,8 @@ void GameCardView::onFocusLost()
 
 void GameCardView::UpdateChrome(bool focused)
 {
-    setBackgroundColor(focused ? nvgRGB(29, 33, 38) : nvgRGB(17, 19, 23));
-    setBorderColor(focused ? nvgRGB(92, 238, 139) : nvgRGB(39, 42, 48));
+    setBackgroundColor(focused ? nvgRGB(26, 42, 34) : nvgRGB(21, 21, 24));
+    setBorderColor(focused ? nvgRGB(88, 217, 138) : nvgRGB(42, 42, 48));
 }
 
 void GameCardView::LoadImage()

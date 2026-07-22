@@ -4,6 +4,7 @@
 #include "cover_image_cache.hpp"
 #include "stream_settings.hpp"
 #include "localization.hpp"
+#include "ui_refresh_policy.hpp"
 #include <borealis/core/application.hpp>
 #include <borealis/core/theme.hpp>
 #include <borealis/core/logger.hpp>
@@ -14,7 +15,7 @@ TopBarFrame::TopBarFrame()
     : brls::Box(brls::Axis::COLUMN)
 {
     setGrow(1.0f);
-    setBackgroundColor(nvgRGB(11, 12, 15));
+    setBackgroundColor(nvgRGB(16, 16, 20));
 
     // Header container
     header_container_ = new brls::Box(brls::Axis::ROW);
@@ -22,15 +23,23 @@ TopBarFrame::TopBarFrame()
     header_container_->setAlignItems(brls::AlignItems::CENTER);
     header_container_->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
     header_container_->setPadding(0, 28, 0, 28);
-    header_container_->setBackgroundColor(nvgRGB(14, 15, 19));
+    header_container_->setBackgroundColor(nvgRGB(19, 19, 22));
     
     addView(header_container_);
 
-    auto* brand = new brls::Label();
-    brand->setText("SwitchNOW");
-    brand->setFontSize(24);
-    brand->setTextColor(nvgRGB(96, 236, 136));
+    auto* brand = new brls::Box(brls::Axis::COLUMN);
     brand->setWidth(210);
+    brand->setJustifyContent(brls::JustifyContent::CENTER);
+    auto* brand_name = new brls::Label();
+    brand_name->setText("OpenNOW");
+    brand_name->setFontSize(24);
+    brand_name->setTextColor(nvgRGB(88, 217, 138));
+    brand->addView(brand_name);
+    auto* brand_platform = new brls::Label();
+    brand_platform->setText("NINTENDO SWITCH");
+    brand_platform->setFontSize(10);
+    brand_platform->setTextColor(nvgRGB(112, 119, 130));
+    brand->addView(brand_platform);
     header_container_->addView(brand);
 
     tabs_container_ = new brls::Box(brls::Axis::ROW);
@@ -55,18 +64,28 @@ TopBarFrame::TopBarFrame()
     avatar_image_->setVisibility(brls::Visibility::GONE);
     account_container_->addView(avatar_image_);
 
-    status_label_ = new brls::Label();
-    status_label_->setText("Offline");
-    status_label_->setFontSize(16);
-    status_label_->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
-    status_label_->setTextColor(nvgRGB(170, 178, 190));
-    status_label_->setWidth(255);
-    account_container_->addView(status_label_);
+    auto* account_labels = new brls::Box(brls::Axis::COLUMN);
+    account_labels->setWidth(255);
+    account_labels->setJustifyContent(brls::JustifyContent::CENTER);
+    account_name_label_ = new brls::Label();
+    account_name_label_->setText("Guest");
+    account_name_label_->setFontSize(15);
+    account_name_label_->setSingleLine(true);
+    account_name_label_->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
+    account_name_label_->setTextColor(nvgRGB(236, 236, 239));
+    account_labels->addView(account_name_label_);
+    account_detail_label_ = new brls::Label();
+    account_detail_label_->setText("No account");
+    account_detail_label_->setFontSize(12);
+    account_detail_label_->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
+    account_detail_label_->setTextColor(nvgRGB(112, 119, 130));
+    account_labels->addView(account_detail_label_);
+    account_container_->addView(account_labels);
 
     // Divider
     auto* divider = new brls::Rectangle();
     divider->setHeight(1);
-    divider->setColor(nvgRGB(35, 38, 44));
+    divider->setColor(nvgRGB(42, 42, 48));
     addView(divider);
 
     // Content container
@@ -194,7 +213,7 @@ void TopBarFrame::SelectTab(int index)
     if (active_tab_index_ == index && active_content_ != nullptr) return;
 
     active_tab_index_ = index;
-    UpdateStatusBar();
+    UpdateStatusBar(true);
 
     for (size_t i = 0; i < tabs_.size(); ++i) {
         if ((int)i == index) {
@@ -227,20 +246,30 @@ void TopBarFrame::SelectTab(int index)
     }
 }
 
-void TopBarFrame::UpdateStatusBar()
+void TopBarFrame::UpdateStatusBar(bool force)
 {
-    if (!status_label_)
+    if (!account_name_label_ || !account_detail_label_)
         return;
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - last_status_update_);
+    if (!force && !ui::ShouldRefreshStatus(elapsed, !displayed_status_.empty()))
+        return;
+    last_status_update_ = now;
 
     const auto& state = AppState::Instance();
     const StreamSettings settings = LoadStreamSettings();
     if (!state.HasSession())
     {
         avatar_image_->setVisibility(brls::Visibility::GONE);
-        const std::string status = Tr("No account") + " | " + Tr(settings.label);
+        const std::string name = Tr("Guest");
+        const std::string detail = Tr("No account") + "  ·  " + Tr(settings.label);
+        const std::string status = name + "\n" + detail;
         if (status != displayed_status_)
         {
-            status_label_->setText(status);
+            account_name_label_->setText(name);
+            account_detail_label_->setText(detail);
             displayed_status_ = status;
         }
         return;
@@ -248,10 +277,14 @@ void TopBarFrame::UpdateStatusBar()
 
     const AuthSession& session = *state.session();
     const std::string tier = session.user.membership_tier.empty() ? std::string("FREE") : session.user.membership_tier;
-    const std::string status = session.user.display_name + " | " + tier + " | " + settings.label;
+    const std::string name =
+        session.user.display_name.empty() ? Tr("GeForce NOW account") : session.user.display_name;
+    const std::string detail = tier + "  ·  " + Tr(settings.label);
+    const std::string status = name + "\n" + detail;
     if (status != displayed_status_)
     {
-        status_label_->setText(status);
+        account_name_label_->setText(name);
+        account_detail_label_->setText(detail);
         displayed_status_ = status;
     }
 

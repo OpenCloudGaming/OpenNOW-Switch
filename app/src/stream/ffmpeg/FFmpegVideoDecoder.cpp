@@ -3,6 +3,8 @@
 #include "borealis.hpp"
 #include "../../stream_settings.hpp"
 #include "../../video_quality_policy.hpp"
+#include <cstdio>
+#include <vector>
 #ifdef PLATFORM_APPLE
 extern "C" {
 #include <libavcodec/videotoolbox.h>
@@ -45,14 +47,18 @@ FFmpegVideoDecoder::FFmpegVideoDecoder() {
 FFmpegVideoDecoder::~FFmpegVideoDecoder() = default;
 
 void ffmpegLog(void* ptr, int level, const char* fmt, va_list vargs) {
-    std::string message;
+    (void)ptr;
+    (void)level;
     va_list ap_copy;
     va_copy(ap_copy, vargs);
-    size_t len = vsnprintf(nullptr, 0, fmt, ap_copy);
-    message.resize(len + 1);  // need space for NUL
-    vsnprintf(&message[0], len + 1,fmt, vargs);
-    message.resize(len);  // remove the NUL
-    brls::Logger::debug("FFmpeg [LOG]: {}", message.c_str());
+    const int length = std::vsnprintf(nullptr, 0, fmt, ap_copy);
+    va_end(ap_copy);
+    if (length <= 0)
+        return;
+
+    std::vector<char> buffer(static_cast<size_t>(length) + 1);
+    std::vsnprintf(buffer.data(), buffer.size(), fmt, vargs);
+    brls::Logger::debug("FFmpeg [LOG]: {}", buffer.data());
 }
 
 int FFmpegVideoDecoder::setup(int video_format, int width, int height,
