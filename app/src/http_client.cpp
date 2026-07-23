@@ -59,7 +59,9 @@ HttpResponse HttpClient::Request(
     if (!proxy_url.empty())
     {
         curl_easy_setopt(curl.get(), CURLOPT_PROXY, proxy_url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
         curl_easy_setopt(curl.get(), CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROXY, "");
     }
 
     if (header_list)
@@ -85,7 +87,9 @@ HttpResponse HttpClient::Request(
     if (result != CURLE_OK)
     {
         throw std::runtime_error(
-            "HTTP " + method + " failed for " + url + ": " + curl_easy_strerror(result));
+            "HTTP " + method + " failed for " + url +
+            (proxy_url.empty() ? std::string() : " while using the configured proxy") +
+            ": " + curl_easy_strerror(result));
     }
 
     long status_code = 0;
