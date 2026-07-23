@@ -221,6 +221,8 @@ int peer_connection_get_ice_candidate_pair_stats(PeerConnection* pc,
                                                  int* succeeded,
                                                  int* failed);
 
+int peer_connection_get_rtt_ms(PeerConnection* pc);
+
 #ifdef __cplusplus
 }
 #endif

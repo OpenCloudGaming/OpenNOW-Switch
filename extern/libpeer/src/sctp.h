@@ -155,6 +155,9 @@ typedef struct Sctp {
   int connected;
   uint32_t verification_tag;
   uint32_t tsn;
+  uint32_t last_outbound_tsn;
+  uint32_t last_outbound_sent_ms;
+  uint32_t smoothed_rtt_ms;
   DtlsSrtp* dtls_srtp;
   int stream_count;
   SctpStreamEntry stream_table[SCTP_MAX_STREAMS];
@@ -177,6 +180,8 @@ void sctp_usrsctp_init();
 void sctp_usrsctp_deinit();
 
 int sctp_is_connected(Sctp* sctp);
+
+int sctp_get_rtt_ms(Sctp* sctp);
 
 void sctp_incoming_data(Sctp* sctp, char* buf, size_t len);
 

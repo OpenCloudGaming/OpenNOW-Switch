@@ -2,6 +2,7 @@
 
 #include "../community_proxy_policy.hpp"
 #include "../play_history.hpp"
+#include "../server_location_policy.hpp"
 #include "../stream_settings.hpp"
 
 #include <algorithm>
@@ -272,8 +273,14 @@ std::string ResolveVpcId(
     const AuthSession& session,
     const std::string& proxy_url)
 {
+    const StreamSettings settings = LoadStreamSettings();
+    const std::string streaming_base_url = server_location::ResolveStreamingBaseUrl(
+        settings.region, session.provider.streaming_service_url);
+    if (streaming_base_url.empty())
+        return "GFN-PC";
+
     const HttpResponse response = http_client.Get(
-        EnsureTrailingSlash(session.provider.streaming_service_url) + "v2/serverInfo",
+        streaming_base_url + "v2/serverInfo",
         GfnClient::kUserAgent,
         BuildGfnLcarsHeaders(ResolveSessionJwt(session), "NATIVE", "NVIDIA-CLASSIC", true),
         proxy_url);

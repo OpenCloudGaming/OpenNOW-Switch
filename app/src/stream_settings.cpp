@@ -3,6 +3,7 @@
 #include "atomic_file_replace.hpp"
 #include "community_proxy_policy.hpp"
 #include "localization.hpp"
+#include "server_location_policy.hpp"
 
 #include <jansson.h>
 
@@ -94,8 +95,15 @@ StreamSettings Sanitize(StreamSettings settings)
     if (settings.codec != "H264")
         settings.codec = "H264";
 
-    if (settings.region.empty())
+    if (server_location::IsAutomatic(settings.region))
         settings.region = "Auto";
+    else
+    {
+        settings.region =
+            server_location::NormalizeStreamingBaseUrl(settings.region);
+        if (settings.region.empty())
+            settings.region = "Auto";
+    }
 
     settings.audio_volume = std::max(800, std::min(1600, settings.audio_volume));
     settings.audio_buffer_ms = std::max(30, std::min(100, settings.audio_buffer_ms));
@@ -239,6 +247,8 @@ StreamSettings LoadStreamSettings()
     settings.audio_buffer_ms = JsonInt(root.get(), "audio_buffer_ms", settings.audio_buffer_ms);
     settings.video_backend = JsonField(root.get(), "video_backend", settings.video_backend);
     settings.debug_diagnostics = JsonBool(root.get(), "debug_diagnostics", false);
+    settings.stats_overlay_enabled = JsonBool(
+        root.get(), "stats_overlay_enabled", settings.stats_overlay_enabled);
     settings.game_language = JsonField(root.get(), "game_language", settings.game_language);
     settings.persist_game_settings = JsonBool(
         root.get(), "persist_game_settings", settings.persist_game_settings);
@@ -275,6 +285,8 @@ bool SaveStreamSettings(const StreamSettings& settings)
     json_object_set_new(root.get(), "audio_buffer_ms", json_integer(clean.audio_buffer_ms));
     json_object_set_new(root.get(), "video_backend", json_string(clean.video_backend.c_str()));
     json_object_set_new(root.get(), "debug_diagnostics", json_boolean(clean.debug_diagnostics));
+    json_object_set_new(
+        root.get(), "stats_overlay_enabled", json_boolean(clean.stats_overlay_enabled));
     json_object_set_new(root.get(), "game_language", json_string(clean.game_language.c_str()));
     json_object_set_new(
         root.get(), "persist_game_settings", json_boolean(clean.persist_game_settings));
@@ -341,6 +353,8 @@ std::string FormatStreamSettings(const StreamSettings& settings)
            (settings.persist_game_settings ? "On" : "Off") +
            " | Controls: " + settings.controller_layout +
            " | Motion quality: " + settings.image_quality_mode +
+           " | Stats overlay: " +
+           (settings.stats_overlay_enabled ? "On" : "Off") +
            " | Community proxy: " +
            (settings.community_proxy_enabled ? "On" : "Off");
            

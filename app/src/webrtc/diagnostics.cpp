@@ -332,6 +332,11 @@ VideoPerformanceCounters WebRtcSession::get_video_performance() const {
     return result;
 }
 
+int WebRtcSession::get_network_rtt_ms() const {
+    std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
+    return pc_ ? peer_connection_get_rtt_ms(pc_) : -1;
+}
+
 StreamTransportHealth WebRtcSession::get_transport_health() const {
     StreamTransportHealth health;
     health.peer_completed = peer_ever_completed_.load(std::memory_order_acquire);

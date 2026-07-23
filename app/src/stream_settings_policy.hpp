@@ -51,6 +51,16 @@ inline void CycleBitrate(StreamSettings& value)
     MarkCustom(value);
 }
 
+inline void CycleVideoBackend(StreamSettings& value)
+{
+    if (value.video_backend == "Auto")
+        value.video_backend = "NVDEC";
+    else if (value.video_backend == "NVDEC")
+        value.video_backend = "Software";
+    else
+        value.video_backend = "Auto";
+}
+
 inline void CycleImageQuality(StreamSettings& value)
 {
     value.image_quality_mode = video::NextQualityMode(value.image_quality_mode);

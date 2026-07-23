@@ -103,6 +103,7 @@ private:
     std::string game_title_;
     bool cloud_stop_requested_ = false;
     bool debug_diagnostics_ = false;
+    bool stats_overlay_enabled_ = false;
     std::string controller_layout_ = "Xbox";
     bool show_debug_overlay_ = false;
     bool is_nte_session_ = false;
@@ -143,6 +144,8 @@ private:
     float incoming_fps_ = 0.0f;
     float decoded_fps_ = 0.0f;
     float presented_fps_ = 0.0f;
+    float stream_bitrate_mbps_ = 0.0f;
+    int network_rtt_ms_ = -1;
     bool gamepad_state_initialized_ = false;
     uint16_t last_gamepad_buttons_ = 0;
     uint8_t last_left_trigger_ = 0;

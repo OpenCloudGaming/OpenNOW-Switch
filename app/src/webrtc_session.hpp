@@ -90,6 +90,7 @@ public:
     void on_rtp_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_t rtp_timestamp);
     int64_t video_target_rtp_timestamp() const;
     VideoPerformanceCounters get_video_performance() const;
+    int get_network_rtt_ms() const;
     StreamTransportHealth get_transport_health() const;
     std::string get_debug_info() const;
     bool is_terminal() const { return peer_terminal_.load(std::memory_order_acquire); }
