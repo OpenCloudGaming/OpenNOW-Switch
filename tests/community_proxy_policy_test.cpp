@@ -7,6 +7,7 @@ int main()
 {
     using opennow::community_proxy::EnabledUrl;
     using opennow::community_proxy::IsCommunityProxyUrl;
+    using opennow::community_proxy::RuntimeUrl;
 
     const std::string primary =
         "http://client:secret@opennow-proxy-tcp.zortos.me:3128";
@@ -24,15 +25,22 @@ int main()
     assert(!IsCommunityProxyUrl("http://client:secret@proxy.example.com:3128"));
     assert(!IsCommunityProxyUrl(primary + "/unexpected"));
     assert(!IsCommunityProxyUrl(primary + "?redirect=example.com"));
+    assert(RuntimeUrl(primary) == fallback);
+    assert(RuntimeUrl("  client:secret@opennow-proxy-tcp.zortos.me:3128/  ") ==
+           fallback + "/");
+    assert(RuntimeUrl(fallback) == fallback);
+    assert(RuntimeUrl("http://client:secret@proxy.example.com:3128").empty());
 
     opennow::StreamSettings settings;
     settings.community_proxy_url = primary;
     assert(EnabledUrl(settings).empty());
     settings.community_proxy_enabled = true;
-    assert(EnabledUrl(settings) == primary);
+    assert(EnabledUrl(settings) == fallback);
     settings.community_proxy_url =
         "client:secret@opennow-proxy-tcp.zortos.me:3128";
-    assert(EnabledUrl(settings) == primary);
+    assert(EnabledUrl(settings) == fallback);
+    settings.community_proxy_url = fallback;
+    assert(EnabledUrl(settings) == fallback);
     settings.community_proxy_url = "http://client:secret@proxy.example.com:3128";
     assert(EnabledUrl(settings).empty());
     return 0;
