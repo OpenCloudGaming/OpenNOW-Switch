@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <string>
 
 namespace opennow::server_location
@@ -37,15 +38,43 @@ inline std::string NormalizeStreamingBaseUrl(std::string value)
     return value;
 }
 
+template <typename RegionRange>
+std::string SelectBestMeasuredRegionUrl(const RegionRange& regions)
+{
+    int best_ping_ms = std::numeric_limits<int>::max();
+    std::string best_url;
+    for (const auto& region : regions)
+    {
+        if (region.ping_ms < 0 || region.ping_ms >= best_ping_ms)
+            continue;
+
+        const std::string normalized = NormalizeStreamingBaseUrl(region.url);
+        if (normalized.empty())
+            continue;
+
+        best_ping_ms = region.ping_ms;
+        best_url = normalized;
+    }
+    return best_url;
+}
+
 inline std::string ResolveStreamingBaseUrl(
     const std::string& selected_region,
-    const std::string& provider_url)
+    const std::string& provider_url,
+    const std::string& automatic_region_url = {})
 {
     if (!IsAutomatic(selected_region))
     {
         const std::string selected = NormalizeStreamingBaseUrl(selected_region);
         if (!selected.empty())
             return selected;
+    }
+    else
+    {
+        const std::string automatic =
+            NormalizeStreamingBaseUrl(automatic_region_url);
+        if (!automatic.empty())
+            return automatic;
     }
 
     return NormalizeStreamingBaseUrl(provider_url);

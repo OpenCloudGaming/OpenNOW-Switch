@@ -91,28 +91,8 @@ void SetCachedRemoteImage(brls::Image* image, const std::string& image_url)
             [image_url, ready]() {
                 try
                 {
-                    const std::string cache_path = CachePathForUrl(image_url);
-                    std::string cached;
-                    if (ReadCachedImage(cache_path, cached))
-                    {
-                        ready(cached, cached.size());
-                        return;
-                    }
-
-                    HttpClient http_client;
-                    const HttpResponse response = http_client.Get(
-                        image_url,
-                        GfnClient::kUserAgent,
-                        {"Accept: image/jpeg,image/png,image/*,*/*;q=0.8"});
-
-                    if (response.status_code != 200 || response.body.empty())
-                    {
-                        ready({}, 0);
-                        return;
-                    }
-
-                    WriteCachedImage(cache_path, response.body);
-                    ready(response.body, response.body.size());
+                    const std::string data = LoadCachedImageData(image_url);
+                    ready(data, data.size());
                 }
                 catch (...)
                 {
@@ -121,6 +101,28 @@ void SetCachedRemoteImage(brls::Image* image, const std::string& image_url)
             },
             false);
     });
+}
+
+std::string LoadCachedImageData(const std::string& image_url)
+{
+    if (image_url.empty())
+        return {};
+
+    const std::string cache_path = CachePathForUrl(image_url);
+    std::string cached;
+    if (ReadCachedImage(cache_path, cached))
+        return cached;
+
+    HttpClient http_client;
+    const HttpResponse response = http_client.Get(
+        image_url,
+        GfnClient::kUserAgent,
+        {"Accept: image/jpeg,image/png,image/*,*/*;q=0.8"});
+    if (response.status_code != 200 || response.body.empty())
+        return {};
+
+    WriteCachedImage(cache_path, response.body);
+    return response.body;
 }
 
 void SetCachedCoverImage(brls::Image* image, const std::string& image_url)

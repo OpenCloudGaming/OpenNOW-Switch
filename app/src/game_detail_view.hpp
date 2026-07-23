@@ -5,6 +5,8 @@
 
 #include <borealis.hpp>
 
+#include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -31,11 +33,13 @@ class GameDetailView : public brls::Box
 {
   public:
     GameDetailView(const GfnClient& client, GameDetailData data);
+    ~GameDetailView() override;
 
   private:
     void Play();
     void ShowStoreSelector(bool launch_after_selection);
     void LaunchSelectedVariant();
+    void CreateSwitchShortcut();
     void UpdateStoreButton();
     void OpenNteCredentialsMenu();
     void ConfigureNteCredentials();
@@ -46,6 +50,8 @@ class GameDetailView : public brls::Box
     GameDetailData data_;
     brls::Button* store_button_ = nullptr;
     brls::Button* nte_button_ = nullptr;
+    std::shared_ptr<std::atomic_bool> alive_ =
+        std::make_shared<std::atomic_bool>(true);
     size_t selected_variant_index_ = 0;
     bool launcher_preference_loaded_ = false;
 };

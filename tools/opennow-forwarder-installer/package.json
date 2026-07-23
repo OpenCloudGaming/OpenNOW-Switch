@@ -1,0 +1,34 @@
+{
+  "private": true,
+  "name": "opennow-forwarder-installer",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "OpenNOW-owned Horizon forwarder generator and installer",
+  "nacp": {
+    "id": "05004f4e4657494e",
+    "title": "OpenNOW Forwarder Installer",
+    "author": "OpenCloudGaming",
+    "userAccountSaveDataSize": "0"
+  },
+  "scripts": {
+    "build": "esbuild --bundle --target=es2022 --format=esm --outdir=romfs --jsx=automatic --define:process.env.NODE_ENV=\\\"production\\\" src/main.tsx",
+    "nro": "npm run build && nxjs-nro",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nx.js/constants": "0.4.0",
+    "@nx.js/install-title": "0.0.3",
+    "@nx.js/ncm": "1.2.0",
+    "@tootallnate/nacp": "0.2.0",
+    "react": "18.3.1",
+    "react-tela": "1.0.1"
+  },
+  "devDependencies": {
+    "@nx.js/nro": "0.0.69",
+    "@nx.js/runtime": "0.0.69",
+    "@types/react": "18.3.23",
+    "esbuild": "0.28.0",
+    "typescript": "5.8.3"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

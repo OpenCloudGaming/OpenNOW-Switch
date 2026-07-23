@@ -10,10 +10,12 @@
 #include <exception>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include "main_activity.hpp"
 #include "app_paths.hpp"
 #include "gfn_client.hpp"
+#include "home_shortcut.hpp"
 #include "localization.hpp"
 #include "stream_diagnostics.hpp"
 #include "stream_settings.hpp"
@@ -52,7 +54,7 @@ void ShowStartupFailure(const std::string& message)
     PadState pad;
     padInitializeDefault(&pad);
 
-    printf("SwitchNOW failed to start.\n\n");
+    printf("OpenNOW failed to start.\n\n");
     printf("%s\n\n", message.c_str());
     printf("A boot log was written to:\n");
     printf("sdmc:/switch/SwitchNOW/boot.log\n\n");
@@ -76,6 +78,10 @@ void ShowStartupFailure(const std::string& message)
 
 int main(int argc, char* argv[])
 {
+    if (argc > 0 && argv && argv[0])
+        opennow::shortcut::SetExecutablePath(argv[0]);
+    auto launch_request = opennow::shortcut::ReadLaunchRequest(argc, argv);
+
     opennow::PrepareAppStorage();
     AppendBootLog("boot: entered main()");
 
@@ -110,7 +116,7 @@ int main(int argc, char* argv[])
 
         const opennow::StreamSettings startup_settings = opennow::LoadStreamSettings();
         opennow::SetInterfaceLanguage(startup_settings.interface_language);
-        brls::Application::createWindow("SwitchNOW");
+        brls::Application::createWindow("OpenNOW");
         AppendBootLog("boot: window created");
 
         // Plus is an in-game Xbox Start/Guide input. Borealis otherwise binds
@@ -121,7 +127,8 @@ int main(int argc, char* argv[])
             startup_settings.debug_diagnostics);
 
         AppendBootLog("boot: pushing main activity");
-        brls::Application::pushActivity(new opennow::MainActivity());
+        brls::Application::pushActivity(
+            new opennow::MainActivity(std::move(launch_request)));
         AppendBootLog("boot: main activity pushed");
 
         while (brls::Application::mainLoop())

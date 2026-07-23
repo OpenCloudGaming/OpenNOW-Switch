@@ -79,6 +79,7 @@ class SettingsTab : public brls::Box
     bool ToggleAudio(brls::View* view);
     bool CycleAudioVolume(brls::View* view);
     bool ChooseInterfaceLanguage(brls::View* view);
+    bool ShowHomeScreenHelp(brls::View* view);
 
     GfnClient client_;
     brls::Label* page_title_ = nullptr;
