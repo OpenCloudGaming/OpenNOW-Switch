@@ -7,6 +7,7 @@
 #include "agent.h"
 #include "base64.h"
 #include "ice.h"
+#include "ice_candidate_pair_policy.h"
 #include "ports.h"
 #include "socket.h"
 #include "stun.h"
@@ -24,6 +25,8 @@ void agent_clear_candidates(Agent* agent) {
   agent->candidate_pairs_num = 0;
   agent->selected_pair = NULL;
   agent->nominated_pair = NULL;
+  agent->last_binding_request_sent_ms = 0;
+  agent->smoothed_binding_rtt_ms = 0;
 }
 
 int agent_create(Agent* agent) {
@@ -364,8 +367,20 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg) {
   switch (stun_msg->stunmethod) {
     case STUN_METHOD_BINDING:
       if (stun_msg_is_valid(stun_msg->buf, stun_msg->size, agent->remote_upwd) == 0) {
+        const uint32_t now_ms = ports_get_epoch_time();
+        if (agent->last_binding_request_sent_ms != 0) {
+          const uint32_t sample_ms =
+              now_ms - agent->last_binding_request_sent_ms;
+          if (sample_ms > 0 && sample_ms <= 5000) {
+            agent->smoothed_binding_rtt_ms =
+                agent->smoothed_binding_rtt_ms == 0
+                    ? sample_ms
+                    : (agent->smoothed_binding_rtt_ms * 7 + sample_ms) / 8;
+          }
+          agent->last_binding_request_sent_ms = 0;
+        }
         agent->nominated_pair->state = ICE_CANDIDATE_STATE_SUCCEEDED;
-        agent->binding_request_time = ports_get_epoch_time();
+        agent->binding_request_time = now_ms;
       }
       break;
     default:
@@ -441,6 +456,24 @@ void agent_set_remote_description(Agent* agent, char* description) {
   LOGD("remote upwd: %s", agent->remote_upwd);
 }
 
+void agent_sort_candidate_pairs(Agent* agent) {
+  int i;
+  if (!agent || agent->nominated_pair || agent->selected_pair)
+    return;
+
+  for (i = 1; i < agent->candidate_pairs_num; ++i) {
+    IceCandidatePair candidate = agent->candidate_pairs[i];
+    int insertion = i;
+    while (insertion > 0 &&
+           agent->candidate_pairs[insertion - 1].priority < candidate.priority) {
+      agent->candidate_pairs[insertion] =
+          agent->candidate_pairs[insertion - 1];
+      --insertion;
+    }
+    agent->candidate_pairs[insertion] = candidate;
+  }
+}
+
 void agent_update_candidate_pairs(Agent* agent) {
   int i, j;
   // Please set gather candidates before set remote description
@@ -453,12 +486,17 @@ void agent_update_candidate_pairs(Agent* agent) {
         }
         agent->candidate_pairs[agent->candidate_pairs_num].local = &agent->local_candidates[i];
         agent->candidate_pairs[agent->candidate_pairs_num].remote = &agent->remote_candidates[j];
-        agent->candidate_pairs[agent->candidate_pairs_num].priority = agent->local_candidates[i].priority + agent->remote_candidates[j].priority;
+        agent->candidate_pairs[agent->candidate_pairs_num].priority =
+            ice_candidate_pair_priority(
+                agent->local_candidates[i].priority,
+                agent->remote_candidates[j].priority,
+                agent->mode == AGENT_MODE_CONTROLLING);
         agent->candidate_pairs[agent->candidate_pairs_num].state = ICE_CANDIDATE_STATE_FROZEN;
         agent->candidate_pairs_num++;
       }
     }
   }
+  agent_sort_candidate_pairs(agent);
   LOGD("candidate pairs num: %d", agent->candidate_pairs_num);
 }
 
@@ -488,7 +526,10 @@ int agent_connectivity_check(Agent* agent) {
     addr_to_string(&agent->nominated_pair->remote->addr, addr_string, sizeof(addr_string));
     LOGD("send binding request to remote ip: %s, port: %d", addr_string, agent->nominated_pair->remote->addr.port);
     agent_create_binding_request(agent, &msg);
-    agent_socket_send(agent, &agent->nominated_pair->remote->addr, msg.buf, msg.size);
+    if (agent_socket_send(
+            agent, &agent->nominated_pair->remote->addr, msg.buf, msg.size) >= 0) {
+      agent->last_binding_request_sent_ms = ports_get_epoch_time();
+    }
   }
 
   agent_recv(agent, buf, sizeof(buf));
@@ -579,4 +620,10 @@ void agent_get_candidate_pair_stats(Agent* agent, AgentCandidatePairStats* stats
         break;
     }
   }
+}
+
+int agent_get_rtt_ms(Agent* agent) {
+  return agent && agent->smoothed_binding_rtt_ms > 0
+      ? (int)agent->smoothed_binding_rtt_ms
+      : -1;
 }

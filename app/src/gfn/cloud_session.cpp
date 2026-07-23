@@ -6,6 +6,8 @@
 #include "../stream_settings.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -549,6 +551,7 @@ static std::string BuildSessionBody(
     const std::string& internal_title,
     const std::string& device_id,
     const std::string& sub_session_id,
+    const std::string& network_test_session_id,
     const StreamSettings& stream_settings)
 {
     JsonPtr root(json_object(), &json_decref);
@@ -563,7 +566,12 @@ static std::string BuildSessionBody(
         json_object_set_new(req, "internalTitle", json_null());
     else
         json_object_set_new(req, "internalTitle", json_string(internal_title.c_str()));
-    json_object_set_new(req, "networkTestSessionId", json_null());
+    if (network_test_session_id.empty())
+        json_object_set_new(req, "networkTestSessionId", json_null());
+    else
+        json_object_set_new(
+            req, "networkTestSessionId",
+            json_string(network_test_session_id.c_str()));
     json_object_set_new(req, "parentSessionId", json_null());
     json_object_set_new(req, "clientIdentification", json_string("GFN-PC"));
     json_object_set_new(req, "deviceHashId", json_string(device_id.c_str()));
@@ -590,7 +598,23 @@ static std::string BuildSessionBody(
         req, "enablePersistingInGameSettings",
         json_boolean(stream_settings.persist_game_settings));
     json_object_set_new(req, "userAge", json_integer(26));
-    json_object_set_new(req, "clientTimezoneOffset", json_integer(0));
+    const std::time_t now = std::time(nullptr);
+    std::tm local_time {};
+    std::tm utc_time {};
+#if defined(_WIN32)
+    localtime_s(&local_time, &now);
+    gmtime_s(&utc_time, &now);
+#else
+    localtime_r(&now, &local_time);
+    gmtime_r(&now, &utc_time);
+#endif
+    utc_time.tm_isdst = local_time.tm_isdst;
+    const std::time_t local_epoch = std::mktime(&local_time);
+    const std::time_t utc_as_local_epoch = std::mktime(&utc_time);
+    const auto timezone_offset_ms = static_cast<json_int_t>(
+        std::difftime(local_epoch, utc_as_local_epoch) * 1000.0);
+    json_object_set_new(
+        req, "clientTimezoneOffset", json_integer(timezone_offset_ms));
 
     json_t* features = json_object();
     json_object_set_new(features, "reflex", json_false());
@@ -638,6 +662,43 @@ static std::string BuildSessionBody(
 
     json_object_set_new(root.get(), "sessionRequestData", req);
     return DumpJson(root.get());
+}
+
+std::string CreateNetworkTestSession(
+    const HttpClient& http_client,
+    const std::string& streaming_base_url,
+    const std::vector<std::string>& headers,
+    const std::string& proxy_url,
+    const StreamSettings& stream_settings)
+{
+    JsonPtr root(json_object(), &json_decref);
+    json_t* request = json_object();
+    json_t* profile = json_object();
+    json_object_set_new(profile, "widthInPixels", json_integer(stream_settings.width));
+    json_object_set_new(profile, "heightInPixels", json_integer(stream_settings.height));
+    json_object_set_new(profile, "framesPerSecond", json_integer(stream_settings.fps));
+    json_object_set_new(
+        request, "clientPlatformName", json_string("windows"));
+    json_object_set_new(request, "netTestProfile", profile);
+    json_object_set_new(root.get(), "netTestRequestData", request);
+
+    const HttpResponse response = http_client.Post(
+        streaming_base_url + "v2/nettestsession",
+        GfnClient::kUserAgent,
+        headers,
+        DumpJson(root.get()),
+        proxy_url);
+    if (response.status_code < 200 || response.status_code >= 300)
+        return {};
+
+    JsonPtr response_root = LoadJson(response.body);
+    json_t* request_status = json_object_get(response_root.get(), "requestStatus");
+    if (!request_status || GetInteger(request_status, "statusCode") != 1)
+        return {};
+
+    json_t* net_test_session =
+        json_object_get(response_root.get(), "netTestSession");
+    return GetString(net_test_session, "sessionId");
 }
 
 int ParseSessionStatus(json_t* status)
@@ -764,13 +825,39 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
         "Referer: https://play.geforcenow.com/"
     };
 
+    std::string network_test_session_id;
+    std::string network_test_trace;
+    try
+    {
+        network_test_session_id = CreateNetworkTestSession(
+            http_client_,
+            streaming_base_url,
+            headers,
+            proxy_url,
+            stream_settings);
+        network_test_trace = network_test_session_id.empty()
+            ? "unavailable; launch will use regional endpoint without a test ID"
+            : "created";
+    }
+    catch (const std::exception& ex)
+    {
+        network_test_trace =
+            "failed; launch will use regional endpoint without a test ID: " +
+            std::string(ex.what());
+    }
     std::string body = BuildSessionBody(
-        launch_app_id, internal_title, device_id, sub_session_id, stream_settings);
+        launch_app_id,
+        internal_title,
+        device_id,
+        sub_session_id,
+        network_test_session_id,
+        stream_settings);
     ResetSessionTraceLog("StartSession appId=" + launch_app_id +
                          " store=" + (launch_store.empty() ? "unknown" : launch_store) +
                          " internalTitle=" + (internal_title.empty() ? "missing" : internal_title));
     if (!automatic_region_trace.empty())
         AppendSessionTraceLog("START region=" + automatic_region_trace);
+    AppendSessionTraceLog("START nettest=" + network_test_trace);
     AppendSessionTraceLog("START url=" + url);
     AppendSessionTraceLog(
         "START settings=" + std::to_string(stream_settings.width) + "x" +

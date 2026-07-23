@@ -8,6 +8,7 @@
 #include "agent.h"
 #include "config.h"
 #include "dtls_srtp.h"
+#include "ice_candidate_pair_policy.h"
 #include "peer_connection.h"
 #include "ports.h"
 #include "rtcp.h"
@@ -158,6 +159,21 @@ static const char* peer_connection_ice_state_name(IceCandidateState state) {
   }
 }
 
+static const char* peer_connection_ice_type_name(IceCandidateType type) {
+  switch (type) {
+    case ICE_CANDIDATE_TYPE_HOST:
+      return "host";
+    case ICE_CANDIDATE_TYPE_SRFLX:
+      return "srflx";
+    case ICE_CANDIDATE_TYPE_PRFLX:
+      return "prflx";
+    case ICE_CANDIDATE_TYPE_RELAY:
+      return "relay";
+    default:
+      return "unknown";
+  }
+}
+
 static void peer_connection_log_candidate_pairs(PeerConnection* pc, const char* reason) {
   if (!pc) {
     return;
@@ -181,11 +197,18 @@ static void peer_connection_log_candidate_pairs(PeerConnection* pc, const char* 
     if (pair->remote) {
       addr_to_string(&pair->remote->addr, remote, sizeof(remote));
     }
-    peer_connection_diag_log("ice_pair[%d] state=%s local=%s:%u remote=%s:%u priority=%" PRIu64,
+    peer_connection_diag_log("ice_pair[%d] state=%s selected=%d local=%s/%s:%u remote=%s/%s:%u priority=%" PRIu64,
                              i,
                              peer_connection_ice_state_name(pair->state),
+                             pair == pc->agent.selected_pair,
+                             pair->local
+                                 ? peer_connection_ice_type_name(pair->local->type)
+                                 : "none",
                              local,
                              pair->local ? pair->local->addr.port : 0,
+                             pair->remote
+                                 ? peer_connection_ice_type_name(pair->remote->type)
+                                 : "none",
                              remote,
                              pair->remote ? pair->remote->addr.port : 0,
                              pair->priority);
@@ -517,6 +540,7 @@ int peer_connection_loop(PeerConnection* pc) {
           }
         }
 
+        peer_connection_log_candidate_pairs(pc, "transport_completed");
         peer_connection_diag_log("transport_completed");
         STATE_CHANGED(pc, PEER_CONNECTION_COMPLETED);
       } else if ((uint32_t)(ports_get_epoch_time() - pc->dtls_handshake_started_ms) >= 3500) {
@@ -990,9 +1014,13 @@ int peer_connection_add_ice_candidate(PeerConnection* pc, char* candidate) {
     IceCandidatePair* pair = &agent->candidate_pairs[agent->candidate_pairs_num++];
     pair->local = &agent->local_candidates[i];
     pair->remote = remote;
-    pair->priority = pair->local->priority + pair->remote->priority;
+    pair->priority = ice_candidate_pair_priority(
+        pair->local->priority,
+        pair->remote->priority,
+        agent->mode == AGENT_MODE_CONTROLLING);
     pair->state = ICE_CANDIDATE_STATE_FROZEN;
   }
+  agent_sort_candidate_pairs(agent);
 
   return 0;
 }
@@ -1023,7 +1051,11 @@ int peer_connection_get_ice_candidate_pair_stats(PeerConnection* pc,
 }
 
 int peer_connection_get_rtt_ms(PeerConnection* pc) {
-  return pc ? sctp_get_rtt_ms(&pc->sctp) : -1;
+  if (!pc)
+    return -1;
+
+  const int ice_rtt_ms = agent_get_rtt_ms(&pc->agent);
+  return ice_rtt_ms >= 0 ? ice_rtt_ms : sctp_get_rtt_ms(&pc->sctp);
 }
 
 int peer_connection_get_video_rtp_stats(PeerConnection* pc, PeerVideoRtpStats* stats) {

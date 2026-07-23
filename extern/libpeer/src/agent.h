@@ -59,6 +59,8 @@ struct Agent {
   Address host_addr;
   int b_host_addr;
   uint64_t binding_request_time;
+  uint32_t last_binding_request_sent_ms;
+  uint32_t smoothed_binding_rtt_ms;
   AgentState state;
 
   AgentMode mode;
@@ -106,6 +108,10 @@ void agent_destroy(Agent* agent);
 
 void agent_update_candidate_pairs(Agent* agent);
 
+void agent_sort_candidate_pairs(Agent* agent);
+
 void agent_get_candidate_pair_stats(Agent* agent, AgentCandidatePairStats* stats);
+
+int agent_get_rtt_ms(Agent* agent);
 
 #endif  // AGENT_H_
