@@ -1,8 +1,45 @@
+<h1 align="center">OpenNOW for Nintendo Switch</h1>
+
 <p align="center">
-  <img src="docs/branding/switchnow-hero-2048.png" width="560" alt="SwitchNOW logo">
+  <img src="docs/branding/opennow-logo.png" width="180" alt="OpenNOW logo">
 </p>
 
-# OpenNOW for Nintendo Switch
+<p align="center">
+  <strong>A native GeForce NOW client for Nintendo Switch homebrew.</strong>
+</p>
+
+<p align="center">
+  Browse your catalog, tune the stream, and launch cloud sessions from a
+  controller-first app.
+</p>
+
+<p align="center">
+  <a href="https://github.com/OpenCloudGaming/OpenNOW-Switch">
+    <img src="https://img.shields.io/badge/Platform-Nintendo%20Switch-E60012?style=for-the-badge&logo=nintendoswitch&logoColor=white" alt="Nintendo Switch">
+  </a>
+  <a href="https://github.com/OpenCloudGaming/OpenNOW-Switch">
+    <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge" alt="Active development">
+  </a>
+  <a href="https://opennow.zortos.me">
+    <img src="https://img.shields.io/badge/Docs-opennow.zortos.me-blue?style=for-the-badge" alt="OpenNOW documentation">
+  </a>
+  <a href="https://discord.gg/8EJYaJcNfD">
+    <img src="https://img.shields.io/badge/Discord-Join%20Us-7289da?style=for-the-badge&logo=discord&logoColor=white" alt="Join the OpenNOW Discord">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/OpenCloudGaming/OpenNOW-Switch/stargazers">
+    <img src="https://img.shields.io/github/stars/OpenCloudGaming/OpenNOW-Switch?style=flat-square" alt="GitHub stars">
+  </a>
+  <a href="https://github.com/OpenCloudGaming/OpenNOW">
+    <img src="https://img.shields.io/badge/OpenNOW-Desktop%20project-76B900?style=flat-square" alt="OpenNOW desktop project">
+  </a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/store.png" alt="OpenNOW Store on Nintendo Switch">
+</p>
 
 This repository is the Nintendo Switch foundation for
 [OpenNOW](https://github.com/OpenCloudGaming/OpenNOW). It is forked from
@@ -10,10 +47,12 @@ This repository is the Nintendo Switch foundation for
 Nintendo Switch homebrew client for GeForce NOW.
 
 > [!WARNING]
-> The OpenNOW integration is under active development. The current codebase still
-> uses the inherited SwitchNOW name, assets, package paths and `.nro` filename.
-> The documentation below describes that working baseline and will be updated as
-> the OpenNOW implementation replaces it.
+> OpenNOW for Nintendo Switch is under active development. Expect occasional
+> bugs, rough edges and platform-specific issues while the client matures.
+>
+> The current build retains the inherited SwitchNOW package paths and `.nro`
+> filename for compatibility. Those names will change only through an explicit
+> migration that preserves existing accounts and settings.
 
 The inherited client combines a controller-first Borealis launcher with native
 WebRTC signaling, H.264 video, Opus audio and low-latency input delivery.
@@ -144,15 +183,15 @@ Existing installations are migrated automatically from
 
 ### Library
 
-![SwitchNOW game library](docs/screenshots/library.jpg)
+![OpenNOW game library](docs/screenshots/library.png)
 
 ### Game details
 
-![SwitchNOW game details](docs/screenshots/game-details.jpg)
+![OpenNOW game details](docs/screenshots/game-details.png)
 
 ### Session launch
 
-![SwitchNOW cloud session launch screen](docs/screenshots/session-launch.jpg)
+![OpenNOW cloud session launch screen](docs/screenshots/session-launch.png)
 
 ## Install
 
