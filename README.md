@@ -198,16 +198,71 @@ Existing installations are migrated automatically from
 1. Copy `SwitchNOW.nro` and the icons to `sdmc:/switch/SwitchNOW/`.
 2. Start Homebrew Menu in application mode by holding `R` while opening an
    installed game.
-3. Launch SwitchNOW.
+3. Launch OpenNOW. This is the one-time bootstrap; after installing its HOME
+   entry, OpenNOW starts directly from Horizon without reopening Homebrew Menu.
 
 Application data, settings and optional debug logs are stored in
 `sdmc:/switch/SwitchNOW/`.
+
+### Horizon HOME-screen shortcuts
+
+The release remains an `.nro`, so it appears in Homebrew Menu by itself.
+Horizon HOME entries are installed titles and require an NRO forwarder.
+OpenNOW includes its own forwarder generator and installer; no separate
+homebrew launcher or PC-side generator is needed.
+
+To add OpenNOW itself to Horizon HOME:
+
+1. Launch OpenNOW in full-memory/application mode.
+2. Open **Settings > App > Switch HOME screen**.
+3. Choose **Add OpenNOW to HOME**, confirm the installation, and wait for the
+   OpenNOW Forwarder Installer to finish.
+
+To replace an older OpenNOW/SwitchNOW forwarder:
+
+1. In Horizon, open **System Settings > Data Management > Software**.
+2. Select the old OpenNOW or SwitchNOW entry and choose **Delete Software**.
+   Do not choose **Delete Save Data** and do not remove
+   `sdmc:/switch/SwitchNOW/`; that folder contains the client and its settings.
+3. Copy the updated `SwitchNOW.nro` to
+   `sdmc:/switch/SwitchNOW/SwitchNOW.nro`.
+4. Launch that NRO in full-memory/application mode and use
+   **Settings > App > Switch HOME screen > Add OpenNOW to HOME**.
+
+To add a game:
+
+1. Open the game's detail screen in OpenNOW and choose
+   **Create Switch shortcut**.
+2. Choose **Install on HOME** and wait for the OpenNOW Forwarder Installer to
+   finish.
+
+Each generated launcher is a small NRO with the game's title and square cover.
+The installer builds the personalized application locally and commits it to SD
+storage. Launching the HOME icon passes a local `.opennow` manifest back to the
+main client, which signs in with the existing saved account and starts the
+selected GeForce NOW App ID. Shortcut manifests contain no account tokens or
+credentials.
+
+The installer requires application mode and custom firmware capable of running
+unsigned homebrew forwarders. OpenNOW does not download, install or alter
+signature-policy patches. Installation errors are shown by the bundled
+installer instead of modifying system policy.
+
+The same launch contract can be used by other forwarder generators:
+
+```text
+SwitchNOW.nro --launch-app-id=123456 --game-id=uuid --title=Game --store=Steam
+```
+
+NRO icons and NACP metadata follow the
+[Switchbrew NRO format](https://switchbrew.org/wiki/NRO).
 
 ## Build requirements
 
 - Windows with MSYS2 at `C:\msys64`, or an equivalent Unix/MSYS2 shell.
 - devkitPro with `devkitA64`, Switch portlibs and CMake/Ninja.
 - The dependencies included in `extern/`.
+- Node.js and pnpm only when rebuilding the bundled forwarder installer.
 
 Build from PowerShell:
 
@@ -231,10 +286,13 @@ Create a conventional release archive:
 
 ```text
 app/src/                 Application, GFN API and streaming implementation
+app/shortcut/            Lightweight per-game chainloader template
 resources/               Fonts, icons and RomFS resources
 extern/                  Pinned third-party dependencies
 tests/                   Host-side policy and parsing tests
 scripts/                 Switch build and release packaging
+tools/opennow-forwarder-installer/
+                         OpenNOW-owned Horizon generator/installer source
 CMakeLists.txt            Switch build definition
 build-switch.ps1          Windows build entry point
 ```
@@ -295,6 +353,10 @@ copied into or linked directly with the SwitchNOW binary.
 - [curl](https://github.com/curl/curl) - HTTPS and service requests.
 - [Jansson](https://github.com/akheron/jansson) - JSON parsing and generation.
 - [zlib](https://github.com/madler/zlib) - compression support.
+- [nx.js](https://github.com/TooTallNate/nx.js) and
+  [switch-nsp-forwarder](https://github.com/TooTallNate/switch-nsp-forwarder)
+  - runtime title installation and the MIT-licensed forwarder-generation
+  foundation used by the bundled OpenNOW installer.
 
 ### Bundled upstream components
 

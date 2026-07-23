@@ -701,8 +701,46 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
 
     const StreamSettings stream_settings = LoadStreamSettings();
     const std::string proxy_url = community_proxy::EnabledUrl(stream_settings);
+    std::string automatic_region_url;
+    std::string automatic_region_trace;
+    if (server_location::IsAutomatic(stream_settings.region))
+    {
+        try
+        {
+            std::vector<StreamRegion> regions = FetchStreamRegions(session);
+            regions = MeasureStreamRegionLatencies(std::move(regions));
+            automatic_region_url =
+                server_location::SelectBestMeasuredRegionUrl(regions);
+
+            const auto selected = std::find_if(
+                regions.begin(), regions.end(),
+                [&automatic_region_url](const StreamRegion& region) {
+                    return server_location::NormalizeStreamingBaseUrl(region.url) ==
+                        automatic_region_url;
+                });
+            if (selected != regions.end())
+            {
+                automatic_region_trace =
+                    "Auto selected=" + selected->name +
+                    " ping=" + std::to_string(selected->ping_ms) + "ms";
+            }
+            else
+            {
+                automatic_region_trace =
+                    "Auto found no reachable regional endpoint; using provider fallback";
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            automatic_region_trace =
+                "Auto region test failed; using provider fallback: " +
+                std::string(ex.what());
+        }
+    }
     const std::string streaming_base_url = server_location::ResolveStreamingBaseUrl(
-        stream_settings.region, session.provider.streaming_service_url);
+        stream_settings.region,
+        session.provider.streaming_service_url,
+        automatic_region_url);
     if (streaming_base_url.empty())
         throw std::runtime_error("The selected GeForce NOW server location is invalid.");
     std::string url = streaming_base_url +
@@ -731,6 +769,8 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     ResetSessionTraceLog("StartSession appId=" + launch_app_id +
                          " store=" + (launch_store.empty() ? "unknown" : launch_store) +
                          " internalTitle=" + (internal_title.empty() ? "missing" : internal_title));
+    if (!automatic_region_trace.empty())
+        AppendSessionTraceLog("START region=" + automatic_region_trace);
     AppendSessionTraceLog("START url=" + url);
     AppendSessionTraceLog(
         "START settings=" + std::to_string(stream_settings.width) + "x" +

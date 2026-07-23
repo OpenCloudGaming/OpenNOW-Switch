@@ -53,6 +53,7 @@ add_executable(${PROJECT_NAME} ${APP_SOURCES} ${PLATFORM_SOURCES})
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         app/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/borealis/library/lib/extern/glfw/deps
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/ffmpeg/include
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/libpeer/src
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/libpeer/third_party/mbedtls/include
@@ -126,17 +127,43 @@ set(PROJECT_TITLEID "05004F4E4F575358")
 set(PROJECT_ICON ${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/icon.jpg)
 set(PROJECT_ROMFS_DIR ${CMAKE_BINARY_DIR}/romfs)
 
-add_custom_target(${PROJECT_NAME}.nro
-    DEPENDS ${PROJECT_NAME}
+add_executable(OpenNOWShortcut app/shortcut/main.c)
+target_compile_options(OpenNOWShortcut PRIVATE -Wall -Wextra -Werror)
+
+add_custom_target(OpenNOWShortcut.nro
+    DEPENDS OpenNOWShortcut
     COMMAND ${NX_NACPTOOL_EXE}
         --create
-        "SwitchNOW"
+        "OpenNOW Shortcut"
+        "${PROJECT_AUTHOR}"
+        "${PROJECT_VERSION_STRING}"
+        OpenNOWShortcut.nacp
+        --titleid=05004F4E53484F52
+    COMMAND ${NX_ELF2NRO_EXE}
+        OpenNOWShortcut.elf
+        OpenNOWShortcut.nro
+        --icon=${PROJECT_ICON}
+        --nacp=OpenNOWShortcut.nacp
+)
+
+add_custom_target(${PROJECT_NAME}.nro
+    DEPENDS ${PROJECT_NAME} OpenNOWShortcut.nro
+    COMMAND ${NX_NACPTOOL_EXE}
+        --create
+        "OpenNOW"
         "${PROJECT_AUTHOR}"
         "${PROJECT_VERSION_STRING}"
         ${PROJECT_NAME}.nacp
         --titleid=${PROJECT_TITLEID}
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${PROJECT_ROMFS_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_ROMFS_DIR}/img
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_ROMFS_DIR}/shortcut
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/OpenNOWShortcut.nro
+        ${PROJECT_ROMFS_DIR}/shortcut/OpenNOWShortcut.nro
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/opennow-forwarder-installer/opennow-forwarder-installer.nro
+        ${PROJECT_ROMFS_DIR}/shortcut/OpenNOWForwarderInstaller.nro
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/font
         ${PROJECT_ROMFS_DIR}/font

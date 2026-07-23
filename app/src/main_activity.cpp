@@ -2,15 +2,19 @@
 
 #include "app_state.hpp"
 #include "gfn_client.hpp"
+#include "home_shortcut_policy.hpp"
 #include "main_tabs_view.hpp"
 #include "localization.hpp"
+#include "ui_helpers.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace opennow
 {
@@ -70,8 +74,10 @@ class StartupPulseView final : public brls::View
 class StartupGateView final : public brls::Box
 {
   public:
-    StartupGateView()
+    explicit StartupGateView(
+        std::optional<shortcut::LaunchRequest> launch_request)
         : brls::Box(brls::Axis::COLUMN)
+        , launch_request_(std::move(launch_request))
     {
         setGrow(1.0f);
         setAlignItems(brls::AlignItems::CENTER);
@@ -100,7 +106,7 @@ class StartupGateView final : public brls::Box
     void BuildStatusView(const AuthSession& saved)
     {
         auto* brand = new brls::Label();
-        brand->setText("SwitchNOW");
+        brand->setText("OpenNOW");
         brand->setFontSize(30);
         brand->setTextColor(nvgRGB(77, 218, 130));
         brand->setHorizontalAlign(brls::HorizontalAlign::CENTER);
@@ -186,7 +192,7 @@ class StartupGateView final : public brls::Box
 
                 if (!alive->load())
                     return;
-                SetStatus("Account verified", "Loading SwitchNOW and your saved profile.");
+                SetStatus("Account verified", "Loading OpenNOW and your saved profile.");
                 verified.reauthentication_required = false;
                 Complete(std::move(verified), "NVIDIA account is ready");
             }
@@ -210,7 +216,7 @@ class StartupGateView final : public brls::Box
                 saved.reauthentication_required = saved.reauthentication_required || expired;
                 Complete(std::move(saved),
                          expired
-                            ? "Automatic sign-in could not finish; it will retry in SwitchNOW"
+                            ? "Automatic sign-in could not finish; it will retry in OpenNOW"
                             : "Session check is temporarily unavailable; using the saved account");
                 brls::Logger::warning("Startup authentication check failed: {}", ex.what());
             }
@@ -233,18 +239,57 @@ class StartupGateView final : public brls::Box
         addView(tabs);
         invalidate();
         brls::Application::giveFocus(tabs);
+        const auto alive = alive_;
+        brls::sync([this, alive] {
+            if (alive->load())
+                MaybeLaunchShortcut();
+        });
+    }
+
+    void MaybeLaunchShortcut()
+    {
+        if (!launch_request_)
+            return;
+
+        const shortcut::LaunchRequest request = std::move(*launch_request_);
+        launch_request_.reset();
+        const auto& session = AppState::Instance().session();
+        if (!session)
+        {
+            ShowError(
+                "Shortcut needs sign-in",
+                "OpenNOW could not start " + request.title +
+                " because no saved GeForce NOW account is connected. Sign in, "
+                "then open the shortcut again.");
+            return;
+        }
+        if (session->reauthentication_required)
+        {
+            ShowError(
+                "Shortcut needs sign-in",
+                "Reconnect the saved GeForce NOW account, then open the " +
+                request.title + " shortcut again.");
+            return;
+        }
+
+        GfnClient client;
+        LaunchSessionDialog(
+            client, *session, request.launch_app_id, request.title,
+            request.store, request.title, request.game_id, request.image_url);
     }
 
     brls::Label* status_label_ = nullptr;
     brls::Label* detail_label_ = nullptr;
     std::shared_ptr<std::atomic_bool> alive_ = std::make_shared<std::atomic_bool>(true);
+    std::optional<shortcut::LaunchRequest> launch_request_;
     bool finished_ = false;
 };
 
 } // namespace
 
-MainActivity::MainActivity()
-    : brls::Activity(new StartupGateView())
+MainActivity::MainActivity(
+    std::optional<shortcut::LaunchRequest> launch_request)
+    : brls::Activity(new StartupGateView(std::move(launch_request)))
 {
 }
 

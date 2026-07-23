@@ -3,6 +3,7 @@
 #include "app_state.hpp"
 #include "cover_image_cache.hpp"
 #include "game_detail_policy.hpp"
+#include "home_shortcut.hpp"
 #include "nte_credentials.hpp"
 #include "ui_helpers.hpp"
 #include "localization.hpp"
@@ -149,7 +150,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
 
     auto* poster = new brls::Image();
     poster->setWidth(310);
-    poster->setHeight(420);
+    poster->setHeight(380);
     poster->setCornerRadius(14);
     poster->setScalingType(brls::ImageScalingType::FILL);
     poster->setMarginBottom(16);
@@ -170,7 +171,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
 
     store_button_ = new brls::Button();
     store_button_->setMarginTop(10);
-    store_button_->setHeight(46);
+    store_button_->setHeight(44);
     store_button_->setCornerRadius(10);
     store_button_->registerClickAction([this](brls::View*) {
         ShowStoreSelector(false);
@@ -178,6 +179,18 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     });
     UpdateStoreButton();
     poster_column->addView(store_button_);
+
+    auto* shortcut_button = new brls::Button();
+    shortcut_button->setMarginTop(10);
+    shortcut_button->setHeight(44);
+    shortcut_button->setCornerRadius(10);
+    shortcut_button->setStyle(&brls::BUTTONSTYLE_BORDERED);
+    shortcut_button->setText(Tr("Create Switch shortcut"));
+    shortcut_button->registerClickAction([this](brls::View*) {
+        CreateSwitchShortcut();
+        return true;
+    });
+    poster_column->addView(shortcut_button);
 
     content->addView(poster_column);
 
@@ -247,6 +260,11 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
         brls::Application::popActivity();
         return true;
     });
+}
+
+GameDetailView::~GameDetailView()
+{
+    alive_->store(false);
 }
 
 void GameDetailView::Play()
@@ -399,6 +417,65 @@ void GameDetailView::LaunchSelectedVariant()
     LaunchSessionDialog(client_, *AppState::Instance().session(), launch_app_id,
                         data_.title, store, data_.title, data_.game_id,
                         data_.image_url);
+}
+
+void GameDetailView::CreateSwitchShortcut()
+{
+    shortcut::LaunchRequest request;
+    request.launch_app_id = data_.launch_app_id;
+    request.store = data_.stores;
+    if (selected_variant_index_ < data_.variants.size())
+    {
+        request.launch_app_id = data_.variants[selected_variant_index_].id;
+        request.store = data_.variants[selected_variant_index_].store;
+    }
+    request.game_id = data_.game_id;
+    request.title = data_.title;
+    request.image_url = data_.image_url;
+    if (!shortcut::IsValid(request))
+    {
+        ShowError(
+            "Shortcut Error",
+            "This game does not have a valid numeric GeForce NOW App ID.");
+        return;
+    }
+
+    brls::Application::notify("Creating shortcut for " + request.title);
+    const auto alive = alive_;
+    brls::async([request = std::move(request), alive]() mutable {
+        shortcut::CreateResult result =
+            shortcut::CreateGameShortcut(std::move(request));
+        brls::sync([result = std::move(result), alive]() {
+            if (!alive->load())
+                return;
+            if (!result.success)
+            {
+                ShowError("Shortcut Error", result.error);
+                return;
+            }
+
+            std::string body =
+                "OpenNOW created a lightweight launcher with this game's "
+                "title and icon.\n\nInstall it to SD storage now to add it "
+                "directly to the Horizon HOME screen?";
+            if (!result.used_game_cover)
+                body += "\n\nThe OpenNOW icon was used because the game cover "
+                    "could not be converted.";
+
+            auto* dialog = new brls::Dialog(body);
+            dialog->addButton(
+                "Install on HOME",
+                [path = result.nro_path, title = result.title] {
+                    std::string error;
+                    if (!shortcut::StartForwarderInstaller(
+                            path, title, error))
+                        ShowError("HOME Install Failed", error);
+                });
+            dialog->addButton("Not now", [] {});
+            dialog->setCancelable(true);
+            dialog->open();
+        });
+    }, false);
 }
 
 GameDetailData MakeLibraryGameDetail(const GameInfo& game)

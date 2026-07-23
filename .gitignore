@@ -6,6 +6,8 @@
 *.elf
 *.nacp
 *.nro
+!tools/opennow-forwarder-installer/opennow-forwarder-installer.nro
+tools/opennow-forwarder-installer/romfs/main.js
 *.o
 *.obj
 *.pdb

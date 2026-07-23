@@ -2,6 +2,7 @@
 
 #include "app_state.hpp"
 #include "app_paths.hpp"
+#include "home_shortcut.hpp"
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
 #include "qr_login_dialog.hpp"
@@ -649,6 +650,16 @@ void SettingsTab::BuildAppPage()
         [this](brls::View* view) { return ToggleStatsOverlay(view); }));
     content_container_->addView(interface);
 
+    auto* shortcuts = MakeSection(
+        "Switch HOME screen",
+        "OpenNOW can install its own Horizon HOME application.");
+    shortcuts->addView(MakeActionRow(
+        "Add OpenNOW to HOME",
+        "Create and install the OpenNOW forwarder to SD storage.",
+        "Install",
+        [this](brls::View* view) { return ShowHomeScreenHelp(view); }));
+    content_container_->addView(shortcuts);
+
     const ImageCacheInfo images = ReadImageCacheInfo();
     auto* cache = MakeSection("Storage", "Cover artwork is cached to keep the library responsive.");
     AddInfoLine(cache, "Cached covers", std::to_string(images.files));
@@ -1256,6 +1267,26 @@ bool SettingsTab::ChooseGameLanguage(brls::View* view)
         },
         selected);
     brls::Application::pushActivity(new brls::Activity(dropdown));
+    return true;
+}
+
+bool SettingsTab::ShowHomeScreenHelp(brls::View* view)
+{
+    (void)view;
+    auto* dialog = new brls::Dialog(
+        "OpenNOW will generate a Horizon forwarder and install it to SD "
+        "storage. The HOME icon starts the existing OpenNOW NRO, so future "
+        "OpenNOW updates do not require reinstalling the forwarder.\n\n"
+        "Continue?");
+    dialog->addButton("Install on HOME", [] {
+        std::string error;
+        if (!shortcut::StartForwarderInstaller(
+                shortcut::ExecutablePath(), "OpenNOW", error))
+            ShowError("HOME Install Failed", error);
+    });
+    dialog->addButton("Cancel", [] {});
+    dialog->setCancelable(true);
+    dialog->open();
     return true;
 }
 
