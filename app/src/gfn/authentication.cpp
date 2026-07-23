@@ -2,6 +2,8 @@
 #include "persistence_internal.hpp"
 
 #include "../auth_policy.hpp"
+#include "../server_location_policy.hpp"
+#include "../stream_settings.hpp"
 
 #include <algorithm>
 #include <array>
@@ -484,8 +486,12 @@ std::string FetchVpcId(const HttpClient& http_client, const AuthSession& session
     if (token.empty())
         return "NP-AMS-08";
 
-    const std::string url = EnsureTrailingSlash(session.provider.streaming_service_url) +
-        "v2/serverInfo";
+    const StreamSettings settings = LoadStreamSettings();
+    const std::string base_url = server_location::ResolveStreamingBaseUrl(
+        settings.region, session.provider.streaming_service_url);
+    if (base_url.empty())
+        return "NP-AMS-08";
+    const std::string url = base_url + "v2/serverInfo";
     std::vector<std::string> headers = BuildMembershipHeaders(token);
     for (std::string& header : headers)
     {

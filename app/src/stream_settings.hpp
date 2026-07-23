@@ -21,6 +21,7 @@ struct StreamSettings
     int audio_buffer_ms   = 40;
     std::string video_backend = "Auto";
     bool debug_diagnostics = false;
+    bool stats_overlay_enabled = false;
     std::string game_language = "en_US";
     bool persist_game_settings = true;
     std::string controller_layout = "Xbox";

@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "dtls_srtp.h"
+#include "ports.h"
 #include "sctp.h"
 #include "utils.h"
 #if CONFIG_USE_USRSCTP
@@ -213,6 +214,8 @@ int sctp_outgoing_data(Sctp* sctp, char* buf, size_t len, SctpDataPpid ppid, uin
 
     if (sctp_outgoing_data_cb(sctp, sctp->buf, SCTP_MTU, 0, 0) < 0)
       return -1;
+    sctp->last_outbound_tsn = ntohl(chunk->tsn);
+    sctp->last_outbound_sent_ms = ports_get_epoch_time();
     chunk->iube = 0x04;
     len -= payload_max;
     pos += payload_max;
@@ -232,6 +235,8 @@ int sctp_outgoing_data(Sctp* sctp, char* buf, size_t len, SctpDataPpid ppid, uin
 
     if (sctp_outgoing_data_cb(sctp, sctp->buf, padding_len, 0, 0) < 0)
       return -1;
+    sctp->last_outbound_tsn = ntohl(chunk->tsn);
+    sctp->last_outbound_sent_ms = ports_get_epoch_time();
   }
   return (int)original_len;
 #endif
@@ -439,10 +444,22 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         sctp_diag_log("internal_cookie_echo prepared peerTag=%08x cookieBytes=%u",
                       ntohl(sctp->verification_tag), ntohs(param->length) - 4);
       } break;
-      case SCTP_SACK:
+      case SCTP_SACK: {
+        SctpSackChunk* sack = (SctpSackChunk*)(buf + pos);
+        if (sctp->last_outbound_sent_ms != 0 &&
+            (int32_t)(ntohl(sack->cumulative_tsn_ack) -
+                      sctp->last_outbound_tsn) >= 0) {
+          const uint32_t sample_ms =
+              ports_get_epoch_time() - sctp->last_outbound_sent_ms;
+          if (sample_ms > 0 && sample_ms <= 5000) {
+            sctp->smoothed_rtt_ms = sctp->smoothed_rtt_ms == 0
+                ? sample_ms
+                : (sctp->smoothed_rtt_ms * 7 + sample_ms) / 8;
+          }
+          sctp->last_outbound_sent_ms = 0;
+        }
 #if 0
         LOGD("SCTP_SACK");
-        sack = (SctpSackChunk*)in_packet->chunks;
         LOGD("cumulative_tsn_ack %d", ntohl(sack->cumulative_tsn_ack));
         LOGD("a_rwnd %d", ntohl(sack->a_rwnd));
         LOGD("number_of_gap_ack_blocks %d", sack->number_of_gap_ack_blocks);
@@ -470,7 +487,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
            ntohs(sack->number_of_dup_tsns));
         }
 #endif
-        break;
+      } break;
       case SCTP_COOKIE_ECHO: {
         LOGD("SCTP_COOKIE_ECHO");
         SctpChunkCommon* common = (SctpChunkCommon*)out_packet->chunks;
@@ -799,6 +816,29 @@ void sctp_destroy_association(Sctp* sctp) {
 
 int sctp_is_connected(Sctp* sctp) {
   return sctp->connected;
+}
+
+int sctp_get_rtt_ms(Sctp* sctp) {
+#if CONFIG_USE_USRSCTP
+  if (!sctp || !sctp->sock || !sctp->connected)
+    return -1;
+
+  struct sctp_status status;
+  socklen_t status_len = sizeof(status);
+  memset(&status, 0, sizeof(status));
+  if (usrsctp_getsockopt(
+          sctp->sock, IPPROTO_SCTP, SCTP_STATUS, &status, &status_len) < 0) {
+    return -1;
+  }
+
+  return status.sstat_primary.spinfo_srtt > 0
+      ? (int)status.sstat_primary.spinfo_srtt
+      : -1;
+#else
+  return sctp && sctp->smoothed_rtt_ms > 0
+      ? (int)sctp->smoothed_rtt_ms
+      : -1;
+#endif
 }
 
 void sctp_onmessage(Sctp* sctp, void (*onmessage)(char* msg, size_t len, void* userdata, uint16_t sid)) {

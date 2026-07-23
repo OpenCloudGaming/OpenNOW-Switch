@@ -144,6 +144,7 @@ StreamView::StreamView(
     , game_title_(game_title) {
     const auto stream_settings = opennow::LoadStreamSettings();
     debug_diagnostics_ = stream_settings.debug_diagnostics;
+    stats_overlay_enabled_ = stream_settings.stats_overlay_enabled;
     controller_layout_ = stream_settings.controller_layout;
     opennow::SetStreamDiagnosticsEnabled(debug_diagnostics_);
     free_tier_session_ = auth_.user.membership_tier_verified &&
@@ -774,35 +775,53 @@ void StreamView::UpdatePerformanceCounter(const VideoPerformanceCounters& counte
         now - fps_window_started_);
     if (elapsed >= std::chrono::milliseconds(750)) {
         const float scale = elapsed.count() > 0 ? 1000.0f / static_cast<float>(elapsed.count()) : 0.0f;
-        incoming_fps_ = static_cast<float>(counters.access_units - previous_video_counters_.access_units) * scale;
-        decoded_fps_ = static_cast<float>(counters.decoded_frames - previous_video_counters_.decoded_frames) * scale;
-        presented_fps_ = static_cast<float>(counters.presented_frames - previous_video_counters_.presented_frames) * scale;
+        const auto delta = [](uint64_t current, uint64_t previous) {
+            return current >= previous ? current - previous : uint64_t {0};
+        };
+        incoming_fps_ = static_cast<float>(
+            delta(counters.access_units, previous_video_counters_.access_units)) * scale;
+        decoded_fps_ = static_cast<float>(
+            delta(counters.decoded_frames, previous_video_counters_.decoded_frames)) * scale;
+        presented_fps_ = static_cast<float>(
+            delta(counters.presented_frames, previous_video_counters_.presented_frames)) * scale;
+        stream_bitrate_mbps_ = static_cast<float>(
+            delta(counters.access_unit_bytes, previous_video_counters_.access_unit_bytes)) *
+            scale * 8.0f / 1000000.0f;
+        network_rtt_ms_ = session_ ? session_->get_network_rtt_ms() : -1;
         previous_video_counters_ = counters;
         fps_window_started_ = now;
     }
 }
 
 void StreamView::DrawPerformanceOverlay(NVGcontext* vg, float x, float y) {
-    char text[80];
-    std::snprintf(text, sizeof(text), "IN %.0f  DEC %.0f  OUT %.0f", incoming_fps_, decoded_fps_, presented_fps_);
+    char text[128];
+    if (network_rtt_ms_ >= 0) {
+        std::snprintf(
+            text, sizeof(text), "FPS  %.0f     BITRATE  %.1f Mbps     PING  %d ms",
+            presented_fps_, stream_bitrate_mbps_, network_rtt_ms_);
+    } else {
+        std::snprintf(
+            text, sizeof(text), "FPS  %.0f     BITRATE  %.1f Mbps     PING  -- ms",
+            presented_fps_, stream_bitrate_mbps_);
+    }
 
     const float box_x = x + 16.0f;
     const float box_y = y + 16.0f;
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, box_x, box_y, 310.0f, 42.0f, 8.0f);
+    nvgRoundedRect(vg, box_x, box_y, 520.0f, 46.0f, 8.0f);
     nvgFillColor(vg, nvgRGBA(8, 12, 14, 205));
     nvgFill(vg);
 
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, box_x + 6.0f, box_y + 7.0f, 4.0f, 28.0f, 2.0f);
+    nvgRoundedRect(vg, box_x + 6.0f, box_y + 7.0f, 4.0f, 32.0f, 2.0f);
     nvgFillColor(vg, nvgRGB(55, 220, 125));
     nvgFill(vg);
 
-    nvgFontSize(vg, 24.0f);
+    nvgFontSize(vg, 18.0f);
     nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
     nvgFillColor(vg, nvgRGB(245, 250, 247));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgText(vg, box_x + 18.0f, box_y + 21.0f, text, nullptr);
+    nvgText(vg, box_x + 20.0f, box_y + 23.0f, text, nullptr);
 }
 
 void StreamView::DrawNteAutoLoginStatus(
@@ -1327,7 +1346,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
     }
 
     const auto notice_now = std::chrono::steady_clock::now();
-    if (debug_diagnostics_ &&
+    if ((debug_diagnostics_ || stats_overlay_enabled_) &&
         stream_end_reason_ == opennow::StreamEndReason::None)
         DrawPerformanceOverlay(vg, x, y);
     if (stream_end_reason_ == opennow::StreamEndReason::None)

@@ -26,6 +26,9 @@ class GfnClient
     std::vector<PublicGame> FetchCatalogGames(
         AuthSession& session, const std::string& search_query = {}) const;
     std::vector<GameInfo> FetchLibraryGames(AuthSession& session) const;
+    std::vector<StreamRegion> FetchStreamRegions(AuthSession& session) const;
+    std::vector<StreamRegion> MeasureStreamRegionLatencies(
+        std::vector<StreamRegion> regions) const;
     std::string ProvisionCommunityProxy() const;
 
     AuthSession LoginWithQrCode(

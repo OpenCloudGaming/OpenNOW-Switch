@@ -35,6 +35,10 @@ class HttpClient
         const std::vector<std::string>& headers,
         const std::string& body,
         const std::string& proxy_url = {}) const;
+
+    int MeasureConnectLatencyMs(
+        const std::string& url,
+        long timeout_ms = 3000) const noexcept;
 };
 
 } // namespace opennow

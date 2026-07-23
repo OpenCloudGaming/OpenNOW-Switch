@@ -11,6 +11,7 @@ int main()
     value.persist_game_settings = false;
     value.controller_layout = "Switch";
     value.image_quality_mode = "Adaptive";
+    value.stats_overlay_enabled = true;
     value.community_proxy_enabled = true;
     value.community_proxy_url =
         "http://client:secret@opennow-proxy-tcp.zortos.me:3128";
@@ -22,6 +23,7 @@ int main()
     assert(value.game_language == "ru_RU" && !value.persist_game_settings);
     assert(value.controller_layout == "Switch");
     assert(value.image_quality_mode == "Adaptive");
+    assert(value.stats_overlay_enabled);
     assert(value.community_proxy_enabled);
     assert(!value.community_proxy_url.empty());
 
@@ -39,6 +41,13 @@ int main()
     value.bitrate_kbps = 25000;
     opennow::settings::CycleBitrate(value);
     assert(value.bitrate_kbps == 8000);
+
+    opennow::settings::CycleVideoBackend(value);
+    assert(value.video_backend == "Software");
+    opennow::settings::CycleVideoBackend(value);
+    assert(value.video_backend == "Auto");
+    opennow::settings::CycleVideoBackend(value);
+    assert(value.video_backend == "NVDEC");
 
     opennow::settings::CycleImageQuality(value);
     assert(value.image_quality_mode == "Clarity");

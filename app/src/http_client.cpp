@@ -2,6 +2,7 @@
 
 #include <curl/curl.h>
 
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -113,6 +114,35 @@ HttpResponse HttpClient::Post(
     const std::string& proxy_url) const
 {
     return Request("POST", url, user_agent, headers, body, proxy_url);
+}
+
+int HttpClient::MeasureConnectLatencyMs(
+    const std::string& url,
+    long timeout_ms) const noexcept
+{
+    CURL* raw = curl_easy_init();
+    if (!raw)
+        return -1;
+
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(raw, &curl_easy_cleanup);
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECT_ONLY, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, timeout_ms);
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, timeout_ms);
+    curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_FRESH_CONNECT, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 2L);
+
+    if (curl_easy_perform(curl.get()) != CURLE_OK)
+        return -1;
+
+    double connect_seconds = 0.0;
+    if (curl_easy_getinfo(curl.get(), CURLINFO_CONNECT_TIME, &connect_seconds) != CURLE_OK ||
+        connect_seconds < 0.0)
+        return -1;
+
+    return static_cast<int>(std::lround(connect_seconds * 1000.0));
 }
 
 } // namespace opennow

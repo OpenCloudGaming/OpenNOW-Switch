@@ -128,6 +128,13 @@ struct IceServerInfo
     std::string credential;
 };
 
+struct StreamRegion
+{
+    std::string name;
+    std::string url;
+    int ping_ms = -1;
+};
+
 struct SessionInfo
 {
     std::string session_id;

@@ -5,6 +5,7 @@
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
 #include "qr_login_dialog.hpp"
+#include "server_location_policy.hpp"
 #include "stream_settings.hpp"
 #include "stream_settings_policy.hpp"
 #include "stream_diagnostics.hpp"
@@ -126,6 +127,7 @@ bool SameSettings(const StreamSettings& left, const StreamSettings& right)
            left.audio_buffer_ms == right.audio_buffer_ms &&
            left.video_backend == right.video_backend &&
            left.debug_diagnostics == right.debug_diagnostics &&
+           left.stats_overlay_enabled == right.stats_overlay_enabled &&
            left.game_language == right.game_language &&
            left.persist_game_settings == right.persist_game_settings &&
            left.controller_layout == right.controller_layout &&
@@ -514,25 +516,58 @@ void SettingsTab::BuildAccountPage()
 
 void SettingsTab::BuildStreamPage()
 {
-    auto* quality = MakeSection(
-        "Stream quality",
-        "Each profile sets resolution, frame rate and bitrate together.");
-    quality->addView(MakeOptionRow(
-        "Quality profile", "Safe favors stability; Quality favors detail.",
+    auto* location = MakeSection(
+        "Server location",
+        "Use automatic routing or choose a specific GeForce NOW data center.");
+    location->addView(MakeOptionRow(
+        "Location",
+        "Locations are ranked by direct latency from this console.",
+        [this] { return ServerLocationValue(); },
+        [this](brls::View* view) { return ChooseServerLocation(view); }));
+    location->addView(MakeActionRow(
+        "Latency test",
+        "Reload available locations and test each connection again.",
+        "Refresh",
+        [this](brls::View* view) { return RefreshServerLocations(view); }));
+    content_container_->addView(location);
+
+    auto* video = MakeSection(
+        "Video",
+        "Choose resolution, frame rate, bitrate and video processing separately.");
+    video->addView(MakeOptionRow(
+        "Resolution", "720p reduces load; 1080p improves detail.",
         [this] {
-            return draft_settings_.label + " / " +
-                std::to_string(draft_settings_.height) + "p / " +
-                std::to_string(draft_settings_.fps);
+            return std::to_string(draft_settings_.width) + " x " +
+                std::to_string(draft_settings_.height);
         },
-        [this](brls::View* view) { return CycleStreamPreset(view); }));
-    quality->addView(MakeOptionRow(
+        [this](brls::View* view) { return CycleResolution(view); }));
+    video->addView(MakeOptionRow(
+        "FPS", "60 FPS is smoother; 30 FPS is more resilient.",
+        [this] { return std::to_string(draft_settings_.fps) + " FPS"; },
+        [this](brls::View* view) { return CycleFrameRate(view); }));
+    video->addView(MakeOptionRow(
+        "Bitrate", "Higher values improve motion detail but need stronger Wi-Fi.",
+        [this] {
+            return std::to_string(draft_settings_.bitrate_kbps / 1000) + " Mbps";
+        },
+        [this](brls::View* view) { return CycleBitrate(view); }));
+    AddInfoLine(video, "Encoder", "H.264");
+    video->addView(MakeOptionRow(
+        "Decoder", "Choose automatic fallback, hardware-only or software-only decode.",
+        [this] {
+            if (draft_settings_.video_backend == "NVDEC")
+                return std::string("Hardware");
+            if (draft_settings_.video_backend == "Software")
+                return std::string("Software");
+            return std::string("Auto");
+        },
+        [this](brls::View* view) { return CycleVideoBackend(view); }));
+    video->addView(MakeOptionRow(
         "Picture processing",
         "Adaptive is recommended; Clarity sharpens motion; Original keeps the source unchanged.",
         [this] { return draft_settings_.image_quality_mode; },
         [this](brls::View* view) { return CycleImageQuality(view); }));
-    AddInfoLine(quality, "Decoder", "Automatic hardware decode with fallback");
-    AddInfoLine(quality, "Server", "Automatic selection for best latency");
-    content_container_->addView(quality);
+    content_container_->addView(video);
 
     auto* connection = MakeSection(
         "Connection",
@@ -549,6 +584,9 @@ void SettingsTab::BuildStreamPage()
         },
         [this](brls::View* view) { return ToggleCommunityProxy(view); }));
     content_container_->addView(connection);
+
+    if (!server_locations_loaded_ && !server_locations_loading_)
+        BeginServerLocationLoad(false, false);
 }
 
 void SettingsTab::BuildPreferencesPage()
@@ -597,6 +635,19 @@ void SettingsTab::BuildAppPage()
         [this] { return InterfaceLanguageLabel(draft_settings_.interface_language); },
         [this](brls::View* view) { return ChooseInterfaceLanguage(view); }));
     content_container_->addView(language);
+
+    auto* interface = MakeSection(
+        "Interface", "Choose what OpenNOW shows while you play.");
+    interface->addView(MakeOptionRow(
+        "Stream stats overlay",
+        "Show stream FPS, received bitrate and network ping during a session.",
+        [this] {
+            return draft_settings_.stats_overlay_enabled
+                ? std::string("Enabled")
+                : std::string("Disabled");
+        },
+        [this](brls::View* view) { return ToggleStatsOverlay(view); }));
+    content_container_->addView(interface);
 
     const ImageCacheInfo images = ReadImageCacheInfo();
     auto* cache = MakeSection("Storage", "Cover artwork is cached to keep the library responsive.");
@@ -844,36 +895,269 @@ bool SettingsTab::ClearCoverCache(brls::View* view)
     return true;
 }
 
-bool SettingsTab::CycleStreamPreset(brls::View* view)
+bool SettingsTab::CycleResolution(brls::View* view)
 {
     (void)view;
-    const bool audio_enabled = draft_settings_.audio_enabled;
-    const int audio_volume = draft_settings_.audio_volume;
-    const int audio_buffer_ms = draft_settings_.audio_buffer_ms;
-    const std::string backend = draft_settings_.video_backend;
-    const bool debug_diagnostics = draft_settings_.debug_diagnostics;
-    const std::string game_language = draft_settings_.game_language;
-    const bool persist_game_settings = draft_settings_.persist_game_settings;
-    const std::string controller_layout = draft_settings_.controller_layout;
-    const std::string image_quality_mode = draft_settings_.image_quality_mode;
-    const std::string interface_language = draft_settings_.interface_language;
-    const bool community_proxy_enabled = draft_settings_.community_proxy_enabled;
-    const std::string community_proxy_url = draft_settings_.community_proxy_url;
-
-    draft_settings_ = NextStreamPreset(draft_settings_);
-    draft_settings_.audio_enabled = audio_enabled;
-    draft_settings_.audio_volume = audio_volume;
-    draft_settings_.audio_buffer_ms = audio_buffer_ms;
-    draft_settings_.video_backend = backend;
-    draft_settings_.debug_diagnostics = debug_diagnostics;
-    draft_settings_.game_language = game_language;
-    draft_settings_.persist_game_settings = persist_game_settings;
-    draft_settings_.controller_layout = controller_layout;
-    draft_settings_.image_quality_mode = image_quality_mode;
-    draft_settings_.interface_language = interface_language;
-    draft_settings_.community_proxy_enabled = community_proxy_enabled;
-    draft_settings_.community_proxy_url = community_proxy_url;
+    settings::CycleResolution(draft_settings_);
     MarkDirty();
+    return true;
+}
+
+bool SettingsTab::CycleFrameRate(brls::View* view)
+{
+    (void)view;
+    settings::CycleFrameRate(draft_settings_);
+    MarkDirty();
+    return true;
+}
+
+bool SettingsTab::CycleBitrate(brls::View* view)
+{
+    (void)view;
+    settings::CycleBitrate(draft_settings_);
+    MarkDirty();
+    return true;
+}
+
+bool SettingsTab::CycleVideoBackend(brls::View* view)
+{
+    (void)view;
+    settings::CycleVideoBackend(draft_settings_);
+    MarkDirty();
+    return true;
+}
+
+std::string SettingsTab::ServerLocationValue() const
+{
+    if (server_locations_loading_)
+        return "Testing locations...";
+
+    const auto best = std::find_if(
+        server_locations_.begin(), server_locations_.end(),
+        [](const StreamRegion& region) { return region.ping_ms >= 0; });
+
+    if (server_location::IsAutomatic(draft_settings_.region))
+    {
+        if (best == server_locations_.end())
+            return "Auto (best)";
+        return "Auto · " + best->name + " · " +
+            std::to_string(best->ping_ms) + " ms";
+    }
+
+    const auto selected = std::find_if(
+        server_locations_.begin(), server_locations_.end(),
+        [this](const StreamRegion& region) {
+            return region.url == draft_settings_.region;
+        });
+    if (selected == server_locations_.end())
+        return "Selected server";
+
+    std::string value = selected->name;
+    if (selected->ping_ms >= 0)
+        value += " · " + std::to_string(selected->ping_ms) + " ms";
+    return value;
+}
+
+void SettingsTab::BeginServerLocationLoad(
+    bool open_when_ready,
+    bool notify_result)
+{
+    if (server_locations_loading_)
+    {
+        open_server_location_when_ready_ =
+            open_server_location_when_ready_ || open_when_ready;
+        if (notify_result)
+            brls::Application::notify("Server location test is already running");
+        return;
+    }
+
+    EnsureSessionLoaded();
+    auto& state = AppState::Instance();
+    if (!state.HasSession())
+    {
+        if (open_when_ready || notify_result)
+        {
+            ShowError(
+                "Server Locations Unavailable",
+                "Connect a GeForce NOW account before loading server locations.");
+        }
+        return;
+    }
+
+    server_locations_loading_ = true;
+    server_locations_error_.clear();
+    open_server_location_when_ready_ = open_when_ready;
+    UpdateOptionValues();
+
+    GfnClient client = client_;
+    AuthSession session = *state.session();
+    brls::async(
+        [this, client, session = std::move(session), notify_result]() mutable {
+            try
+            {
+                std::vector<StreamRegion> regions =
+                    client.FetchStreamRegions(session);
+                regions = client.MeasureStreamRegionLatencies(std::move(regions));
+                std::stable_sort(
+                    regions.begin(), regions.end(),
+                    [](const StreamRegion& left, const StreamRegion& right) {
+                        const bool left_ok = left.ping_ms >= 0;
+                        const bool right_ok = right.ping_ms >= 0;
+                        if (left_ok != right_ok)
+                            return left_ok;
+                        if (left_ok && left.ping_ms != right.ping_ms)
+                            return left.ping_ms < right.ping_ms;
+                        return left.name < right.name;
+                    });
+
+                brls::sync(
+                    [this, session = std::move(session),
+                     regions = std::move(regions), notify_result]() mutable {
+                        auto& current = AppState::Instance();
+                        if (current.HasSession() &&
+                            current.session()->user.user_id == session.user.user_id)
+                        {
+                            current.SetSession(std::move(session));
+                        }
+
+                        server_locations_ = std::move(regions);
+                        server_locations_loaded_ = true;
+                        server_locations_loading_ = false;
+                        if (server_locations_.empty())
+                        {
+                            server_locations_error_ =
+                                "GeForce NOW did not return any server locations.";
+                        }
+                        UpdateOptionValues();
+
+                        const bool should_open =
+                            open_server_location_when_ready_ &&
+                            category_ == Category::Stream;
+                        open_server_location_when_ready_ = false;
+                        if (should_open)
+                        {
+                            ChooseServerLocation(nullptr);
+                        }
+                        else if (notify_result)
+                        {
+                            brls::Application::notify(
+                                server_locations_.empty()
+                                    ? server_locations_error_
+                                    : "Server location latency test complete");
+                        }
+                    });
+            }
+            catch (const std::exception& ex)
+            {
+                const std::string message = ex.what();
+                brls::sync([this, message, notify_result] {
+                    const bool should_open =
+                        open_server_location_when_ready_ &&
+                        category_ == Category::Stream;
+                    server_locations_loading_ = false;
+                    server_locations_loaded_ =
+                        !server_locations_.empty() || should_open;
+                    server_locations_error_ = message;
+                    open_server_location_when_ready_ = false;
+                    UpdateOptionValues();
+                    if (should_open)
+                    {
+                        brls::Application::notify(
+                            "Latency test failed; automatic routing is still available");
+                        ChooseServerLocation(nullptr);
+                    }
+                    else if (notify_result)
+                    {
+                        ShowError("Server Location Test Failed", message);
+                    }
+                });
+            }
+        },
+        false);
+}
+
+bool SettingsTab::ChooseServerLocation(brls::View* view)
+{
+    (void)view;
+    if (server_locations_loading_)
+    {
+        open_server_location_when_ready_ = true;
+        brls::Application::notify("Testing GeForce NOW server locations...");
+        return true;
+    }
+
+    if (!server_locations_loaded_)
+    {
+        BeginServerLocationLoad(true, false);
+        return true;
+    }
+
+    const auto best = std::find_if(
+        server_locations_.begin(), server_locations_.end(),
+        [](const StreamRegion& region) { return region.ping_ms >= 0; });
+
+    std::vector<StreamRegion> options = server_locations_;
+    if (!server_location::IsAutomatic(draft_settings_.region))
+    {
+        const bool selected_available = std::any_of(
+            options.begin(), options.end(), [this](const StreamRegion& region) {
+                return region.url == draft_settings_.region;
+            });
+        if (!selected_available)
+        {
+            options.push_back(
+                {"Current server (not advertised)", draft_settings_.region, -1});
+        }
+    }
+
+    std::vector<std::string> labels;
+    labels.reserve(options.size() + 1);
+    std::string automatic = "Auto (best)";
+    if (best != server_locations_.end())
+    {
+        automatic += " — " + best->name + " · " +
+            std::to_string(best->ping_ms) + " ms";
+    }
+    labels.push_back(std::move(automatic));
+
+    int selected_index = 0;
+    for (size_t index = 0; index < options.size(); ++index)
+    {
+        const StreamRegion& region = options[index];
+        std::string label = region.name;
+        if (region.ping_ms >= 0)
+            label += " — " + std::to_string(region.ping_ms) + " ms";
+        else
+            label += " — Unavailable";
+        if (best != server_locations_.end() && region.url == best->url)
+            label += " · Best";
+        labels.push_back(std::move(label));
+
+        if (region.url == draft_settings_.region)
+            selected_index = static_cast<int>(index + 1);
+    }
+
+    auto* dropdown = new brls::Dropdown(
+        "Server location", labels,
+        [this, options = std::move(options)](int index) {
+            if (index < 0)
+                return;
+            draft_settings_.region =
+                index == 0 || static_cast<size_t>(index) > options.size()
+                ? "Auto"
+                : options[static_cast<size_t>(index - 1)].url;
+            MarkDirty();
+            UpdateOptionValues();
+        },
+        selected_index);
+    brls::Application::pushActivity(new brls::Activity(dropdown));
+    return true;
+}
+
+bool SettingsTab::RefreshServerLocations(brls::View* view)
+{
+    (void)view;
+    BeginServerLocationLoad(false, true);
     return true;
 }
 
@@ -934,6 +1218,14 @@ bool SettingsTab::CycleImageQuality(brls::View* view)
 {
     (void)view;
     settings::CycleImageQuality(draft_settings_);
+    MarkDirty();
+    return true;
+}
+
+bool SettingsTab::ToggleStatsOverlay(brls::View* view)
+{
+    (void)view;
+    draft_settings_.stats_overlay_enabled = !draft_settings_.stats_overlay_enabled;
     MarkDirty();
     return true;
 }

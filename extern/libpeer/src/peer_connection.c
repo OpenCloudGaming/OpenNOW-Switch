@@ -1021,6 +1021,11 @@ int peer_connection_get_ice_candidate_pair_stats(PeerConnection* pc,
     *failed = stats.failed;
   return 0;
 }
+
+int peer_connection_get_rtt_ms(PeerConnection* pc) {
+  return pc ? sctp_get_rtt_ms(&pc->sctp) : -1;
+}
+
 int peer_connection_get_video_rtp_stats(PeerConnection* pc, PeerVideoRtpStats* stats) {
   if (pc == NULL || stats == NULL)
     return -1;

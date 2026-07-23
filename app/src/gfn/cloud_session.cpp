@@ -1,6 +1,7 @@
 #include "internal.hpp"
 
 #include "../community_proxy_policy.hpp"
+#include "../server_location_policy.hpp"
 #include "../stream_diagnostics.hpp"
 #include "../stream_settings.hpp"
 
@@ -451,7 +452,8 @@ std::string GetActiveCloudSessionPath()
 void RememberActiveCloudSession(
     const AuthSession& auth,
     const std::string& session_id,
-    const std::string& launch_app_id)
+    const std::string& launch_app_id,
+    const std::string& streaming_base_url)
 {
     if (session_id.empty())
         return;
@@ -462,6 +464,8 @@ void RememberActiveCloudSession(
         json_object_set_new(root.get(), "session_id", json_string(session_id.c_str()));
         json_object_set_new(root.get(), "user_id", json_string(auth.user.user_id.c_str()));
         json_object_set_new(root.get(), "launch_app_id", json_string(launch_app_id.c_str()));
+        json_object_set_new(
+            root.get(), "streaming_base_url", json_string(streaming_base_url.c_str()));
         json_object_set_new(root.get(), "created_at_ms", json_integer(NowMs()));
         WriteJsonToFile(GetActiveCloudSessionPath(), root.get());
     }
@@ -469,6 +473,39 @@ void RememberActiveCloudSession(
     {
         AppendAuthLog("session: unable to persist active session error=" + std::string(e.what()));
     }
+}
+
+std::string LoadActiveCloudSessionStreamingBaseUrl(
+    const AuthSession& auth,
+    const std::string& session_id)
+{
+    const std::string body = ReadTextFile(GetActiveCloudSessionPath());
+    if (body.empty())
+        return {};
+
+    try
+    {
+        JsonPtr root = LoadJson(body);
+        if (GetString(root.get(), "user_id") != auth.user.user_id ||
+            GetString(root.get(), "session_id") != session_id)
+            return {};
+        return server_location::NormalizeStreamingBaseUrl(
+            GetString(root.get(), "streaming_base_url"));
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+std::string ResolveConfiguredStreamingBaseUrl(const AuthSession& session)
+{
+    const StreamSettings settings = LoadStreamSettings();
+    const std::string base_url = server_location::ResolveStreamingBaseUrl(
+        settings.region, session.provider.streaming_service_url);
+    if (base_url.empty())
+        throw std::runtime_error("The selected GeForce NOW server location is invalid.");
+    return base_url;
 }
 
 std::string LoadActiveCloudSessionId(const AuthSession& auth)
@@ -664,7 +701,11 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
 
     const StreamSettings stream_settings = LoadStreamSettings();
     const std::string proxy_url = community_proxy::EnabledUrl(stream_settings);
-    std::string url = session.provider.streaming_service_url +
+    const std::string streaming_base_url = server_location::ResolveStreamingBaseUrl(
+        stream_settings.region, session.provider.streaming_service_url);
+    if (streaming_base_url.empty())
+        throw std::runtime_error("The selected GeForce NOW server location is invalid.");
+    std::string url = streaming_base_url +
         "v2/session?keyboardLayout=en-US_qwerty&languageCode=" +
         stream_settings.game_language;
 
@@ -782,7 +823,8 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
 
     if (app_patching)
         AppendSessionTraceLog("START pending reason=app_patching; polling created session");
-    RememberActiveCloudSession(session, info.session_id, launch_app_id);
+    RememberActiveCloudSession(
+        session, info.session_id, launch_app_id, streaming_base_url);
     AppendSessionTraceLog("START parsed: " + SessionInfoTraceSummary(info));
     return info;
 }
@@ -793,7 +835,11 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
     const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
-    std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
+    std::string streaming_base_url =
+        LoadActiveCloudSessionStreamingBaseUrl(session, session_id);
+    if (streaming_base_url.empty())
+        streaming_base_url = ResolveConfiguredStreamingBaseUrl(session);
+    std::string url = streaming_base_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
         "Authorization: GFNJWT " + jwt_token,
@@ -902,7 +948,11 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
     const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
-    std::string url = session.provider.streaming_service_url + "v2/session/" + session_id;
+    std::string streaming_base_url =
+        LoadActiveCloudSessionStreamingBaseUrl(session, session_id);
+    if (streaming_base_url.empty())
+        streaming_base_url = ResolveConfiguredStreamingBaseUrl(session);
+    std::string url = streaming_base_url + "v2/session/" + session_id;
 
     std::vector<std::string> headers = {
         "Authorization: GFNJWT " + jwt_token,
