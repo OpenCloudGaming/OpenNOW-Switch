@@ -235,8 +235,11 @@ class StartupGateView final : public brls::Box
         setJustifyContent(brls::JustifyContent::FLEX_START);
         setPadding(0);
         auto* tabs = new MainTabsView();
-        tabs->setWidth(brls::Application::windowWidth);
-        tabs->setHeight(brls::Application::windowHeight);
+        // The activity is measured in Borealis' logical content coordinates.
+        // windowWidth/windowHeight are physical framebuffer dimensions and are
+        // 1920x1080 while docked, so assigning them here scales the tab layout
+        // twice and places part of the UI outside the visible 1280x720 area.
+        // Let flex sizing follow the activity across dock/undock changes.
         tabs->setGrow(1.0f);
         addView(tabs);
         invalidate();
