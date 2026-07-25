@@ -31,7 +31,7 @@ MainTabsView::MainTabsView()
             {
                 session.reauthentication_required = true;
                 brls::Application::notify(
-                    "NVIDIA session expired; reconnect with a QR code from Library");
+                    "Saved session expired; reconnect the account from Settings");
             }
             catch (const std::exception&)
             {
@@ -93,7 +93,7 @@ void MainTabsView::MaybeRefreshAuthentication()
                     invalid.reauthentication_required = true;
                     current.SetSession(std::move(invalid));
                     brls::Application::notify(
-                        "NVIDIA session expired; reconnect with a QR code from Library");
+                        "Saved session expired; reconnect the account from Settings");
                 }
                 guard->store(false);
             });

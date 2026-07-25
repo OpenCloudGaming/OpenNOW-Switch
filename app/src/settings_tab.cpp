@@ -5,6 +5,7 @@
 #include "home_shortcut.hpp"
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
+#include "providers_tab.hpp"
 #include "qr_login_dialog.hpp"
 #include "server_location_policy.hpp"
 #include "stream_settings.hpp"
@@ -500,7 +501,7 @@ void SettingsTab::BuildAccountPage()
         state.HasSession() && state.session()->reauthentication_required
             ? "Reconnect account"
             : "Add account",
-        "Connect with NVIDIA using a QR code.",
+        "Connect with NVIDIA or a GeForce NOW Alliance partner using a QR code.",
         state.HasSession() && state.session()->reauthentication_required ? "Reconnect" : "Add",
         [this](brls::View* view) { return BeginLogin(view); }));
     actions->addView(MakeActionRow(
@@ -791,15 +792,21 @@ bool SettingsTab::BeginLogin(brls::View* view)
         if (providers.empty())
             throw std::runtime_error("No GeForce NOW login providers were returned");
 
-        const LoginProvider provider =
-            state.HasSession() && state.session()->reauthentication_required
-            ? state.session()->provider
-            : providers.front();
-        auto* dialog = new QrLoginDialog(provider, client_, [this]() {
+        const auto refresh_account = [this]() {
             RefreshSummary();
             RebuildCategory();
-        });
-        brls::Application::pushActivity(new brls::Activity(dialog));
+        };
+        if (state.HasSession() && state.session()->reauthentication_required)
+        {
+            auto* dialog = new QrLoginDialog(
+                state.session()->provider, client_, refresh_account);
+            brls::Application::pushActivity(new brls::Activity(dialog));
+        }
+        else
+        {
+            auto* providers_view = new ProvidersTab(refresh_account);
+            brls::Application::pushActivity(new brls::Activity(providers_view));
+        }
     }
     catch (const std::exception& ex)
     {

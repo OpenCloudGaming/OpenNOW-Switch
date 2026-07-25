@@ -49,6 +49,14 @@ struct StreamTransportHealth {
     std::chrono::milliseconds video_idle {0};
 };
 
+struct StreamNetworkCounters {
+    std::uint32_t packets_received = 0;
+    std::uint32_t sequence_gaps = 0;
+    std::uint32_t late_packets_dropped = 0;
+    std::uint32_t access_units_dropped = 0;
+    std::uint32_t nack_requests = 0;
+};
+
 class WebRtcSession {
 public:
     WebRtcSession(
@@ -91,6 +99,7 @@ public:
     int64_t video_target_rtp_timestamp() const;
     VideoPerformanceCounters get_video_performance() const;
     int get_network_rtt_ms() const;
+    StreamNetworkCounters get_network_counters() const;
     StreamTransportHealth get_transport_health() const;
     std::string get_debug_info() const;
     bool is_terminal() const { return peer_terminal_.load(std::memory_order_acquire); }

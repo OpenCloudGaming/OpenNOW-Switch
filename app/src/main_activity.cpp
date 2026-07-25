@@ -121,7 +121,9 @@ class StartupGateView final : public brls::Box
         card->setCornerRadius(18);
 
         auto* eyebrow = new brls::Label();
-        eyebrow->setText(Tr("SAVED NVIDIA ACCOUNT"));
+        const std::string provider = saved.provider.display_name.empty()
+            ? "GEFORCE NOW" : saved.provider.display_name;
+        eyebrow->setText(Tr("SAVED ACCOUNT") + "  /  " + provider);
         eyebrow->setFontSize(13);
         eyebrow->setTextColor(nvgRGB(77, 218, 130));
         eyebrow->setHorizontalAlign(brls::HorizontalAlign::CENTER);
@@ -186,7 +188,7 @@ class StartupGateView final : public brls::Box
         brls::async([this, alive, client = std::move(client), saved = std::move(saved)]() mutable {
             try
             {
-                SetStatus("Checking NVIDIA session",
+                SetStatus("Checking saved session",
                           "Refreshing authorization and verifying account access.");
                 AuthSession verified = client.RecoverSavedSession(saved, true);
 
@@ -194,7 +196,7 @@ class StartupGateView final : public brls::Box
                     return;
                 SetStatus("Account verified", "Loading OpenNOW and your saved profile.");
                 verified.reauthentication_required = false;
-                Complete(std::move(verified), "NVIDIA account is ready");
+                Complete(std::move(verified), "GeForce NOW account is ready");
             }
             catch (const ReauthenticationRequired& ex)
             {
@@ -202,7 +204,7 @@ class StartupGateView final : public brls::Box
                     return;
                 saved.reauthentication_required = true;
                 Complete(std::move(saved),
-                         "NVIDIA requires a new QR code sign-in from Library");
+                         "The provider requires a new QR code sign-in from Settings");
                 brls::Logger::warning("Startup sign-in requires QR reconnection: {}", ex.what());
             }
             catch (const std::exception& ex)

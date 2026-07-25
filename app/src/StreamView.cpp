@@ -1,6 +1,7 @@
 #include "StreamView.hpp"
 #include "controller_layout.hpp"
 #include "input/TouchMapping.hpp"
+#include "keyboard_input_policy.hpp"
 #include "network_utils.hpp"
 #include "nte_autologin_log.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
@@ -47,76 +48,6 @@ bool IsFreeTier(std::string tier)
     return tier == "FREE";
 }
 
-struct KeyboardStroke {
-    uint16_t keycode = 0;
-    uint16_t scancode = 0;
-    uint16_t modifiers = 0;
-};
-
-bool MapAsciiKey(char character, KeyboardStroke& stroke)
-{
-    constexpr uint16_t kShift = 0x0001;
-    static constexpr uint8_t letter_scans[26] = {
-        0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32,
-        0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c,
-    };
-    if (character >= 'a' && character <= 'z') {
-        const int index = character - 'a';
-        stroke = {static_cast<uint16_t>('A' + index), letter_scans[index], 0};
-        return true;
-    }
-    if (character >= 'A' && character <= 'Z') {
-        const int index = character - 'A';
-        stroke = {static_cast<uint16_t>('A' + index), letter_scans[index], kShift};
-        return true;
-    }
-    if (character >= '1' && character <= '9') {
-        stroke = {static_cast<uint16_t>(character), static_cast<uint16_t>(0x02 + character - '1'), 0};
-        return true;
-    }
-    if (character == '0') {
-        stroke = {'0', 0x0b, 0};
-        return true;
-    }
-
-    switch (character) {
-        case ' ': stroke = {0x20, 0x39, 0}; return true;
-        case '@': stroke = {'2', 0x03, kShift}; return true;
-        case '.': stroke = {0xbe, 0x34, 0}; return true;
-        case ',': stroke = {0xbc, 0x33, 0}; return true;
-        case '-': stroke = {0xbd, 0x0c, 0}; return true;
-        case '_': stroke = {0xbd, 0x0c, kShift}; return true;
-        case '=': stroke = {0xbb, 0x0d, 0}; return true;
-        case '+': stroke = {0xbb, 0x0d, kShift}; return true;
-        case '/': stroke = {0xbf, 0x35, 0}; return true;
-        case '?': stroke = {0xbf, 0x35, kShift}; return true;
-        case '\\': stroke = {0xdc, 0x2b, 0}; return true;
-        case '|': stroke = {0xdc, 0x2b, kShift}; return true;
-        case '[': stroke = {0xdb, 0x1a, 0}; return true;
-        case '{': stroke = {0xdb, 0x1a, kShift}; return true;
-        case ']': stroke = {0xdd, 0x1b, 0}; return true;
-        case '}': stroke = {0xdd, 0x1b, kShift}; return true;
-        case ':': stroke = {0xba, 0x27, kShift}; return true;
-        case ';': stroke = {0xba, 0x27, 0}; return true;
-        case '\'': stroke = {0xde, 0x28, 0}; return true;
-        case '"': stroke = {0xde, 0x28, kShift}; return true;
-        case '`': stroke = {0xc0, 0x29, 0}; return true;
-        case '~': stroke = {0xc0, 0x29, kShift}; return true;
-        case '<': stroke = {0xbc, 0x33, kShift}; return true;
-        case '>': stroke = {0xbe, 0x34, kShift}; return true;
-        case '!': stroke = {'1', 0x02, kShift}; return true;
-        case '#': stroke = {'3', 0x04, kShift}; return true;
-        case '$': stroke = {'4', 0x05, kShift}; return true;
-        case '%': stroke = {'5', 0x06, kShift}; return true;
-        case '^': stroke = {'6', 0x07, kShift}; return true;
-        case '&': stroke = {'7', 0x08, kShift}; return true;
-        case '*': stroke = {'8', 0x09, kShift}; return true;
-        case '(': stroke = {'9', 0x0a, kShift}; return true;
-        case ')': stroke = {'0', 0x0b, kShift}; return true;
-        default: return false;
-    }
-}
-
 int16_t ClampMouseDelta(float value)
 {
     return static_cast<int16_t>(std::clamp<long>(std::lround(value), -32768L, 32767L));
@@ -145,6 +76,8 @@ StreamView::StreamView(
     const auto stream_settings = opennow::LoadStreamSettings();
     debug_diagnostics_ = stream_settings.debug_diagnostics;
     stats_overlay_enabled_ = stream_settings.stats_overlay_enabled;
+    stream_codec_ = stream_settings.codec;
+    stream_region_ = stream_settings.region;
     controller_layout_ = stream_settings.controller_layout;
     opennow::SetStreamDiagnosticsEnabled(debug_diagnostics_);
     free_tier_session_ = auth_.user.membership_tier_verified &&
@@ -198,12 +131,12 @@ void StreamView::SendKeyboardCharacter(char character) {
     if (!session_)
         return;
 
-    KeyboardStroke stroke {};
+    opennow::input::KeyboardStroke stroke {};
     if (character == '\b')
         stroke = {0x08, 0x0e, 0};
     else if (character == '\n' || character == '\r')
         stroke = {0x0d, 0x1c, 0};
-    else if (!MapAsciiKey(character, stroke)) {
+    else if (!opennow::input::MapAsciiKey(character, stroke)) {
         session_->record_ui_event("keyboard unsupported UTF-8 byte=" +
                                   std::to_string(static_cast<unsigned char>(character)));
         return;
@@ -788,6 +721,8 @@ void StreamView::UpdatePerformanceCounter(const VideoPerformanceCounters& counte
             delta(counters.access_unit_bytes, previous_video_counters_.access_unit_bytes)) *
             scale * 8.0f / 1000000.0f;
         network_rtt_ms_ = session_ ? session_->get_network_rtt_ms() : -1;
+        network_counters_ =
+            session_ ? session_->get_network_counters() : StreamNetworkCounters {};
         previous_video_counters_ = counters;
         fps_window_started_ = now;
     }
@@ -822,6 +757,189 @@ void StreamView::DrawPerformanceOverlay(NVGcontext* vg, float x, float y) {
     nvgFillColor(vg, nvgRGB(245, 250, 247));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgText(vg, box_x + 20.0f, box_y + 23.0f, text, nullptr);
+}
+
+void StreamView::SetStreamOverlayVisible(bool visible)
+{
+    if (stream_overlay_visible_ == visible)
+        return;
+
+    stream_overlay_visible_ = visible;
+    stream_overlay_b_was_down_ = false;
+    gamepad_state_initialized_ = false;
+    plus_was_down_ = false;
+    plus_long_press_ = false;
+    start_pulse_ = {};
+
+    if (touch_was_down_ && session_)
+    {
+        session_->send_mouse_left_button(false);
+        touch_was_down_ = false;
+    }
+    if (session_)
+    {
+        session_->send_gamepad_input(0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+        session_->record_ui_event(
+            visible ? "stream overlay opened by Minus+Plus"
+                    : "stream overlay closed");
+    }
+
+    if (!visible)
+        keyboard_release_guard_ = true;
+}
+
+void StreamView::DrawStreamOverlay(
+    NVGcontext* vg, float x, float y, float width, float height,
+    std::chrono::steady_clock::time_point now)
+{
+    if (!stream_overlay_visible_)
+        return;
+
+    const VideoPerformanceCounters counters = previous_video_counters_;
+    const StreamTransportHealth health =
+        session_ ? session_->get_transport_health() : StreamTransportHealth {};
+    const StreamNetworkCounters network = network_counters_;
+
+    nvgBeginPath(vg);
+    nvgRect(vg, x, y, width, height);
+    nvgFillColor(vg, nvgRGBA(2, 5, 7, 178));
+    nvgFill(vg);
+
+    const float panel_x = x + 34.0f;
+    const float panel_y = y + 28.0f;
+    const float panel_width = width - 68.0f;
+    const float panel_height = height - 56.0f;
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, panel_x, panel_y, panel_width, panel_height, 20.0f);
+    nvgFillColor(vg, nvgRGBA(13, 17, 20, 246));
+    nvgFill(vg);
+    nvgStrokeWidth(vg, 1.5f);
+    nvgStrokeColor(vg, nvgRGBA(90, 105, 112, 100));
+    nvgStroke(vg);
+
+    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgFontSize(vg, 13.0f);
+    nvgFillColor(vg, nvgRGB(77, 218, 130));
+    nvgText(vg, panel_x + 30.0f, panel_y + 28.0f, "OPENNOW  /  IN-STREAM MENU", nullptr);
+    nvgFontSize(vg, 26.0f);
+    nvgFillColor(vg, nvgRGB(244, 248, 246));
+    nvgText(vg, panel_x + 30.0f, panel_y + 62.0f,
+            game_title_.empty() ? "GeForce NOW session" : game_title_.c_str(), nullptr);
+    nvgFontSize(vg, 14.0f);
+    nvgFillColor(vg, nvgRGB(142, 153, 160));
+    const std::string provider =
+        auth_.provider.display_name.empty() ? "GeForce NOW" : auth_.provider.display_name;
+    nvgText(vg, panel_x + 30.0f, panel_y + 88.0f,
+            (provider + "  |  B Close  |  Minus + Plus Toggle menu").c_str(), nullptr);
+
+    const float divider_x = panel_x + panel_width * 0.56f;
+    nvgBeginPath(vg);
+    nvgRect(vg, divider_x, panel_y + 112.0f, 1.0f, panel_height - 140.0f);
+    nvgFillColor(vg, nvgRGBA(94, 106, 112, 92));
+    nvgFill(vg);
+
+    const float left_x = panel_x + 30.0f;
+    const float right_x = divider_x + 28.0f;
+    float left_y = panel_y + 132.0f;
+    float right_y = left_y;
+    nvgFontSize(vg, 18.0f);
+    nvgFillColor(vg, nvgRGB(239, 244, 241));
+    nvgText(vg, left_x, left_y, "STREAM STATISTICS", nullptr);
+    nvgText(vg, right_x, right_y, "CONTROLLER SHORTCUTS", nullptr);
+    left_y += 34.0f;
+    right_y += 34.0f;
+
+    auto draw_row = [vg](float row_x, float& row_y, float value_x,
+                         const std::string& label, const std::string& value) {
+        nvgFontSize(vg, 15.0f);
+        nvgFillColor(vg, nvgRGB(139, 150, 157));
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgText(vg, row_x, row_y, label.c_str(), nullptr);
+        nvgFillColor(vg, nvgRGB(238, 244, 240));
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+        nvgText(vg, value_x, row_y, value.c_str(), nullptr);
+        row_y += 31.0f;
+    };
+
+    char number[96];
+    const std::string resolution = session_
+        ? std::to_string(session_->stream_width()) + " x " +
+              std::to_string(session_->stream_height())
+        : "--";
+    draw_row(left_x, left_y, divider_x - 28.0f, "Resolution", resolution);
+    std::snprintf(number, sizeof(number), "%.0f / %.0f / %.0f",
+                  incoming_fps_, decoded_fps_, presented_fps_);
+    draw_row(left_x, left_y, divider_x - 28.0f, "FPS  in / decode / display", number);
+    std::snprintf(number, sizeof(number), "%.1f Mbps", stream_bitrate_mbps_);
+    draw_row(left_x, left_y, divider_x - 28.0f, "Bitrate", number);
+    draw_row(left_x, left_y, divider_x - 28.0f, "Network latency",
+             network_rtt_ms_ >= 0 ? std::to_string(network_rtt_ms_) + " ms" : "-- ms");
+    const std::uint64_t packet_total =
+        static_cast<std::uint64_t>(network.packets_received) + network.sequence_gaps;
+    const double packet_loss = packet_total > 0
+        ? static_cast<double>(network.sequence_gaps) * 100.0 /
+              static_cast<double>(packet_total)
+        : 0.0;
+    std::snprintf(number, sizeof(number), "%.2f%%  (%u gaps / %u late)",
+                  packet_loss, network.sequence_gaps, network.late_packets_dropped);
+    draw_row(left_x, left_y, divider_x - 28.0f, "Packet loss", number);
+    draw_row(left_x, left_y, divider_x - 28.0f, "Dropped video frames",
+             std::to_string(network.access_units_dropped));
+    draw_row(left_x, left_y, divider_x - 28.0f, "NACK recovery requests",
+             std::to_string(network.nack_requests));
+    draw_row(left_x, left_y, divider_x - 28.0f, "Decode latency p95",
+             std::to_string(counters.decode_us_p95 / 1000) + " ms");
+    draw_row(left_x, left_y, divider_x - 28.0f, "Render latency p95",
+             std::to_string(counters.render_us_p95 / 1000) + " ms");
+    draw_row(left_x, left_y, divider_x - 28.0f, "Decoder queue",
+             std::to_string(counters.decode_queue_size) + " / " +
+                 std::to_string(counters.decode_queue_high_water) + " high");
+    draw_row(left_x, left_y, divider_x - 28.0f, "Connection",
+             health.peer_completed ? "Connected" : "Negotiating");
+    draw_row(left_x, left_y, divider_x - 28.0f, "Codec / location",
+             stream_codec_ + "  /  " + stream_region_);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        now - stream_started_at_).count();
+    std::snprintf(number, sizeof(number), "%lld:%02lld",
+                  static_cast<long long>(elapsed / 60),
+                  static_cast<long long>(elapsed % 60));
+    draw_row(left_x, left_y, divider_x - 28.0f, "Session time", number);
+
+    auto draw_shortcut = [vg, right_x](
+                             float& row_y, const char* keys, const char* action) {
+        const float key_width = 126.0f;
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, right_x, row_y - 13.0f, key_width, 28.0f, 6.0f);
+        nvgFillColor(vg, nvgRGBA(39, 47, 51, 230));
+        nvgFill(vg);
+        nvgStrokeWidth(vg, 1.0f);
+        nvgStrokeColor(vg, nvgRGBA(113, 129, 137, 130));
+        nvgStroke(vg);
+        nvgFontSize(vg, 14.0f);
+        nvgFillColor(vg, nvgRGB(240, 245, 242));
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgText(vg, right_x + key_width * 0.5f, row_y + 1.0f, keys, nullptr);
+        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+        nvgFillColor(vg, nvgRGB(188, 198, 202));
+        nvgText(vg, right_x + key_width + 18.0f, row_y + 1.0f, action, nullptr);
+        row_y += 42.0f;
+    };
+
+    draw_shortcut(right_y, "Minus + Plus", "Open / close this menu");
+    draw_shortcut(right_y, "Minus + Y", "On-screen keyboard");
+    draw_shortcut(right_y, "B", "Close menu or keyboard");
+    draw_shortcut(right_y, "ZL + ZR + Minus", "Exit the stream");
+    draw_shortcut(right_y, "Hold +", "Xbox Guide button");
+    draw_shortcut(right_y, "Touch", "Remote pointer and click");
+    if (is_nte_session_)
+        draw_shortcut(right_y, "L + X", "NTE auto-login");
+
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgFontSize(vg, 13.0f);
+    nvgFillColor(vg, nvgRGB(103, 116, 122));
+    nvgText(vg, right_x, panel_y + panel_height - 26.0f,
+            "Menu input stays local and is never sent to the cloud game.", nullptr);
 }
 
 void StreamView::DrawNteAutoLoginStatus(
@@ -1095,7 +1213,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
 
         const auto input_now = std::chrono::steady_clock::now();
         bool nte_owned_input = false;
-        if (is_nte_session_ &&
+        if (is_nte_session_ && !stream_overlay_visible_ &&
             stream_end_reason_ == opennow::StreamEndReason::None) {
             const bool nte_combo = state.buttons[brls::BUTTON_LB] &&
                                    state.buttons[brls::BUTTON_X];
@@ -1113,11 +1231,44 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
             nte_owned_input = was_active || nte_combo;
         }
 
-        const bool keyboard_combo = state.buttons[brls::BUTTON_BACK] &&
-                                    state.buttons[brls::BUTTON_Y];
-        bool keyboard_owned_input = keyboard_visible_ || nte_owned_input ||
-            stream_end_reason_ != opennow::StreamEndReason::None;
+        const bool minus_down = state.buttons[brls::BUTTON_BACK];
+        const bool plus_down_for_overlay = state.buttons[brls::BUTTON_START];
+        const auto chord_now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            input_now.time_since_epoch()).count();
+        const auto overlay_decision = opennow::input::EvaluateOverlayChord(
+            minus_down, plus_down_for_overlay, overlay_chord_state_, chord_now_ms);
+        overlay_chord_state_ = overlay_decision.next_state;
+        if (!minus_down && !plus_down_for_overlay)
+            overlay_chord_latched_ = false;
+        if (overlay_decision.toggle_overlay && !overlay_chord_latched_ &&
+            !keyboard_visible_ && !nte_owned_input &&
+            stream_end_reason_ == opennow::StreamEndReason::None)
+        {
+            overlay_chord_latched_ = true;
+            SetStreamOverlayVisible(!stream_overlay_visible_);
+        }
+
+        if (stream_overlay_visible_)
+        {
+            const bool b_down = state.buttons[brls::BUTTON_B];
+            if (b_down && !stream_overlay_b_was_down_)
+            {
+                suppress_b_until_release_ = true;
+                SetStreamOverlayVisible(false);
+            }
+            stream_overlay_b_was_down_ = b_down;
+        }
+        else
+        {
+            stream_overlay_b_was_down_ = false;
+        }
+
+        const bool keyboard_combo = minus_down && state.buttons[brls::BUTTON_Y];
+        bool keyboard_owned_input = keyboard_visible_ || stream_overlay_visible_ ||
+            overlay_decision.preempt_input || overlay_chord_latched_ ||
+            nte_owned_input || stream_end_reason_ != opennow::StreamEndReason::None;
         if (keyboard_combo && !keyboard_combo_was_down_ && !nte_owned_input &&
+            !stream_overlay_visible_ &&
             stream_end_reason_ == opennow::StreamEndReason::None) {
             OpenInlineKeyboard();
             keyboard_owned_input = keyboard_visible_;
@@ -1354,6 +1505,8 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
     DrawStreamEndNotice(vg, x, y, width, notice_now);
     if (stream_end_reason_ == opennow::StreamEndReason::None)
         DrawNteAutoLoginStatus(vg, x, y, width, height, notice_now);
+    if (stream_end_reason_ == opennow::StreamEndReason::None)
+        DrawStreamOverlay(vg, x, y, width, height, notice_now);
 
     brls::Box::draw(vg, x, y, width, height, style, ctx);
 }

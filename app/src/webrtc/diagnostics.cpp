@@ -337,6 +337,21 @@ int WebRtcSession::get_network_rtt_ms() const {
     return pc_ ? peer_connection_get_rtt_ms(pc_) : -1;
 }
 
+StreamNetworkCounters WebRtcSession::get_network_counters() const {
+    std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
+    PeerVideoRtpStats stats {};
+    if (pc_)
+        (void)peer_connection_get_video_rtp_stats(pc_, &stats);
+
+    StreamNetworkCounters counters;
+    counters.packets_received = stats.packets_received;
+    counters.sequence_gaps = stats.sequence_gaps;
+    counters.late_packets_dropped = stats.late_packets_dropped;
+    counters.access_units_dropped = stats.access_units_dropped;
+    counters.nack_requests = stats.nack_requests;
+    return counters;
+}
+
 StreamTransportHealth WebRtcSession::get_transport_health() const {
     StreamTransportHealth health;
     health.peer_completed = peer_ever_completed_.load(std::memory_order_acquire);

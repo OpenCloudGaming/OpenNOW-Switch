@@ -568,7 +568,7 @@ AuthSession GfnClient::RecoverSavedSession(
 {
     if (session.reauthentication_required)
         throw ReauthenticationRequired(
-            "The NVIDIA session expired. Reconnect this account with a QR code.");
+            "The saved session expired. Reconnect this account with a QR code.");
 
     try
     {
@@ -581,7 +581,7 @@ AuthSession GfnClient::RecoverSavedSession(
     catch (const ReauthenticationRequired&)
     {
         throw ReauthenticationRequired(
-            "The NVIDIA session expired. Reconnect this account with a QR code.");
+            "The saved session expired. Reconnect this account with a QR code.");
     }
 }
 
@@ -630,7 +630,7 @@ AuthSession GfnClient::LoginWithQrCode(
         challenge.verification_uri.empty() || challenge.verification_uri_complete.empty())
     {
         throw std::runtime_error(
-            "NVIDIA did not return the data required for QR login");
+            "The login provider did not return the data required for QR login");
     }
 
     if (on_challenge)
