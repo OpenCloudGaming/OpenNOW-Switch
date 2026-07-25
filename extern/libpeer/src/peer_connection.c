@@ -1054,8 +1054,16 @@ int peer_connection_get_rtt_ms(PeerConnection* pc) {
   if (!pc)
     return -1;
 
+  // The ICE RTT is sampled during the initial connectivity check and is not
+  // refreshed after the transport completes. Prefer SCTP's live, smoothed RTT
+  // once data-channel acknowledgements are available so startup scheduling
+  // delays do not remain in the gameplay overlay for the whole session.
+  const int sctp_rtt_ms = sctp_get_rtt_ms(&pc->sctp);
+  if (sctp_rtt_ms >= 0)
+    return sctp_rtt_ms;
+
   const int ice_rtt_ms = agent_get_rtt_ms(&pc->agent);
-  return ice_rtt_ms >= 0 ? ice_rtt_ms : sctp_get_rtt_ms(&pc->sctp);
+  return ice_rtt_ms;
 }
 
 int peer_connection_get_video_rtp_stats(PeerConnection* pc, PeerVideoRtpStats* stats) {
