@@ -24,7 +24,9 @@ QrLoginDialog::QrLoginDialog(
     setAlignItems(brls::AlignItems::CENTER);
 
     auto* header = new brls::Header();
-    header->setTitle(Tr("Sign in with QR code"));
+    const std::string provider_name =
+        provider_.display_name.empty() ? "GeForce NOW" : provider_.display_name;
+    header->setTitle(Tr("Sign in with QR code") + "  /  " + provider_name);
     header->setMarginBottom(14);
     addView(header);
 
@@ -38,7 +40,7 @@ QrLoginDialog::QrLoginDialog(
 
     instruction_label_ = new brls::Label();
     instruction_label_->setText(
-        Tr("Scan the code with your phone, approve the NVIDIA sign-in, and return here."));
+        Tr("Scan the code with your phone, approve the provider sign-in, and return here."));
     instruction_label_->setFontSize(17);
     instruction_label_->setHorizontalAlign(brls::HorizontalAlign::CENTER);
     instruction_label_->setTextColor(nvgRGB(145, 153, 165));
@@ -142,7 +144,8 @@ void QrLoginDialog::StartLogin()
     is_cancelled_.store(false);
     status_label_->setText(Tr("Preparing secure QR login..."));
     instruction_label_->setText(
-        Tr("Requesting a short-lived device code directly from NVIDIA."));
+        Tr("Requesting a short-lived device code for ") +
+        (provider_.display_name.empty() ? "GeForce NOW" : provider_.display_name) + ".");
     user_code_label_->setText("");
     {
         std::lock_guard<std::mutex> lock(qr_mutex_);
@@ -165,7 +168,7 @@ void QrLoginDialog::StartLogin()
                             return;
                         status_label_->setText(Tr("Scan to sign in"));
                         instruction_label_->setText(Tr(
-                            "Open your camera, scan the QR code, then approve the NVIDIA request."));
+                            "Open your camera, scan the QR code, then approve the provider request."));
                         user_code_label_->setText(
                             Tr("Code: ") + challenge.user_code);
                     });

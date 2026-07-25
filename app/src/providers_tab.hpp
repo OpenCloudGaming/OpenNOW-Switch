@@ -5,6 +5,7 @@
 
 #include <borealis.hpp>
 
+#include <functional>
 #include <vector>
 
 namespace opennow
@@ -13,7 +14,7 @@ namespace opennow
 class ProvidersTab : public brls::Box
 {
   public:
-    ProvidersTab();
+    explicit ProvidersTab(std::function<void()> on_success = {});
 
     void willAppear(bool resetState) override;
 
@@ -27,6 +28,7 @@ class ProvidersTab : public brls::Box
     brls::Label* status_label_             = nullptr;
     brls::ScrollingFrame* scrolling_frame_ = nullptr;
     brls::Box* list_container_             = nullptr;
+    std::function<void()> on_success_;
     bool loading_                          = false;
 };
 

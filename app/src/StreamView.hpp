@@ -3,6 +3,7 @@
 #include "gfn_client.hpp"
 #include "controller_delivery_policy.hpp"
 #include "nte_credentials.hpp"
+#include "stream_overlay_policy.hpp"
 #include "webrtc_session.hpp"
 #include <memory>
 #include <vector>
@@ -47,6 +48,9 @@ private:
     void DrawPreparingStream(NVGcontext* vg, float x, float y, float width, float height);
     void UpdatePerformanceCounter(const VideoPerformanceCounters& counters);
     void DrawPerformanceOverlay(NVGcontext* vg, float x, float y);
+    void SetStreamOverlayVisible(bool visible);
+    void DrawStreamOverlay(NVGcontext* vg, float x, float y, float width, float height,
+                           std::chrono::steady_clock::time_point now);
     void UpdateSessionLimitNotice(std::chrono::steady_clock::time_point now);
     void DrawSessionLimitNotice(NVGcontext* vg, float x, float y, float width,
                                 std::chrono::steady_clock::time_point now);
@@ -104,6 +108,12 @@ private:
     bool cloud_stop_requested_ = false;
     bool debug_diagnostics_ = false;
     bool stats_overlay_enabled_ = false;
+    bool stream_overlay_visible_ = false;
+    bool stream_overlay_b_was_down_ = false;
+    bool overlay_chord_latched_ = false;
+    opennow::input::OverlayChordState overlay_chord_state_;
+    std::string stream_codec_ = "H264";
+    std::string stream_region_ = "Auto";
     std::string controller_layout_ = "Xbox";
     bool show_debug_overlay_ = false;
     bool is_nte_session_ = false;
@@ -146,6 +156,7 @@ private:
     float presented_fps_ = 0.0f;
     float stream_bitrate_mbps_ = 0.0f;
     int network_rtt_ms_ = -1;
+    StreamNetworkCounters network_counters_ {};
     bool gamepad_state_initialized_ = false;
     uint16_t last_gamepad_buttons_ = 0;
     uint8_t last_left_trigger_ = 0;

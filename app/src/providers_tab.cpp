@@ -5,6 +5,8 @@
 #include "qr_login_dialog.hpp"
 #include "localization.hpp"
 
+#include <utility>
+
 namespace opennow
 {
 namespace
@@ -35,18 +37,21 @@ class InputBlocker
 
 } // namespace
 
-ProvidersTab::ProvidersTab()
+ProvidersTab::ProvidersTab(std::function<void()> on_success)
     : brls::Box(brls::Axis::COLUMN)
+    , on_success_(std::move(on_success))
 {
     setPadding(28, 40, 28, 40);
 
     auto* header = new brls::Header();
-    header->setTitle("Providers");
-    header->setSubtitle("Add another GeForce NOW account");
+    header->setTitle("Choose a login provider");
+    header->setSubtitle("NVIDIA and GeForce NOW Alliance partners");
     addView(header);
 
     addView(MakeParagraph(
-        "Choose an NVIDIA identity provider. SwitchNOW signs in internally with the Switch keyboard; QR/LAN is only a fallback for CAPTCHA or passkey. Saved tokens refresh automatically.", 20.0f));
+        "Choose the company that operates GeForce NOW for your account. "
+        "The list comes from GeForce NOW and includes supported Alliance partners. "
+        "Saved tokens refresh automatically.", 20.0f));
 
     auto* refresh_button = new brls::Button();
     refresh_button->setStyle(&brls::BUTTONSTYLE_PRIMARY);
@@ -125,7 +130,10 @@ void ProvidersTab::RebuildList()
     {
         const LoginProvider& provider = providers_[index];
         auto* button                  = new brls::Button();
-        button->setText(provider.display_name + "  [" + provider.code + "]");
+        const std::string provider_type =
+            provider.code == "NVIDIA" ? "NVIDIA" : "Alliance";
+        button->setText(
+            provider.display_name + "  [" + provider_type + " / " + provider.code + "]");
         button->setMarginBottom(10);
         button->registerClickAction([this, index](brls::View* view) {
             return OpenProviderDialog(view, index);
@@ -141,7 +149,15 @@ bool ProvidersTab::OpenProviderDialog(brls::View* view, size_t index)
 
     const LoginProvider& provider = providers_[index];
     
-    auto* dialog = new QrLoginDialog(provider, client_);
+    auto* dialog = new QrLoginDialog(provider, client_, [this]() {
+        // QrLoginDialog first removes itself. Queue the second pop so the
+        // provider picker closes on the following UI turn.
+        brls::sync([this]() {
+            if (on_success_)
+                on_success_();
+            brls::Application::popActivity();
+        });
+    });
     brls::Application::pushActivity(new brls::Activity(dialog));
     
     return true;
