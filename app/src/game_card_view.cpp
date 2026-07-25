@@ -46,7 +46,11 @@ GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
     setBorderThickness(2);
     setShadowType(brls::ShadowType::GENERIC);
     setFocusable(true);
-    setHideHighlight(true);
+    // Keep the card surface dark, but retain Borealis' animated focus outline.
+    // The branded border color alone is too subtle at TV viewing distance.
+    setHideHighlightBackground(true);
+    setHighlightPadding(2);
+    setHighlightCornerRadius(12);
 
     image_ = new brls::Image();
     image_->setWidth(212);
