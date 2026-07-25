@@ -1062,13 +1062,21 @@ void StreamView::UpdateStreamEndState(std::chrono::steady_clock::time_point now)
     if (!session_ || stream_end_reason_ != opennow::StreamEndReason::None)
         return;
 
-    if (last_network_check_at_.time_since_epoch().count() == 0 ||
-        now - last_network_check_at_ >= std::chrono::seconds(1)) {
+    const StreamTransportHealth health = session_->get_transport_health();
+    // nifmGetInternetConnectionStatus() is synchronous Switch IPC. Calling it
+    // once per second from draw() stalls controller polling and frame
+    // presentation together on some systems. The transport already provides
+    // the healthy-session signal; only classify internet loss after transport
+    // termination or a substantial video outage.
+    const bool network_diagnosis_needed = opennow::ShouldProbeInternetConnection(
+        health.peer_terminal, health.video_started, health.video_idle);
+    if (network_diagnosis_needed &&
+        (last_network_check_at_.time_since_epoch().count() == 0 ||
+         now - last_network_check_at_ >= std::chrono::seconds(1))) {
         internet_connected_ = opennow::NetworkUtils::HasInternetConnection();
         last_network_check_at_ = now;
     }
 
-    const StreamTransportHealth health = session_->get_transport_health();
     opennow::StreamEndSignals signals;
     signals.free_tier = free_tier_session_;
     signals.session_elapsed = std::chrono::duration_cast<std::chrono::seconds>(

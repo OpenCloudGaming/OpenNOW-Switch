@@ -39,5 +39,12 @@ int main()
 
     signals.video_idle = std::chrono::seconds(2);
     assert(DetectStreamEnd(signals) == StreamEndReason::None);
+
+    assert(!ShouldProbeInternetConnection(
+        PeerTerminalKind::None, true, std::chrono::seconds(7)));
+    assert(ShouldProbeInternetConnection(
+        PeerTerminalKind::None, true, std::chrono::seconds(8)));
+    assert(ShouldProbeInternetConnection(
+        PeerTerminalKind::Closed, false, std::chrono::milliseconds(0)));
     return 0;
 }

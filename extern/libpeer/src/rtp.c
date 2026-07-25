@@ -5,6 +5,7 @@
 #include "address.h"
 #include "config.h"
 #include "peer_connection.h"
+#include "ports.h"
 #include "rtp.h"
 #include "utils.h"
 
@@ -691,25 +692,80 @@ static int rtp_decoder_drain_reorder_buffer(RtpDecoder* rtp_decoder) {
   return result;
 }
 
+static void rtp_decoder_track_reorder_wait(
+    RtpDecoder* rtp_decoder, uint32_t now_ms) {
+  if (rtp_decoder->reorder_buffered_packets == 0) {
+    rtp_decoder->reorder_wait_started_ms = 0;
+  } else if (rtp_decoder->reorder_wait_started_ms == 0) {
+    rtp_decoder->reorder_wait_started_ms = now_ms;
+  }
+}
+
+static void rtp_decoder_expire_reorder_wait(
+    RtpDecoder* rtp_decoder, uint32_t now_ms) {
+  if (rtp_decoder->reorder_buffered_packets == 0 ||
+      rtp_decoder->reorder_wait_started_ms == 0 ||
+      (uint32_t)(now_ms - rtp_decoder->reorder_wait_started_ms) <
+          RTP_REORDER_MAX_HOLD_MS) {
+    return;
+  }
+
+  // Packet counts are not a time bound: 64 packets may arrive in one large
+  // frame or take hundreds of milliseconds during a quiet scene. After one
+  // short retransmission opportunity, advance to the nearest buffered packet
+  // and release everything already contiguous from there.
+  for (size_t pass = 0;
+       pass < RTP_REORDER_WINDOW &&
+       rtp_decoder->reorder_buffered_packets > 0;
+       ++pass) {
+    uint16_t nearest_distance = 0;
+    for (uint16_t distance = 1; distance < RTP_REORDER_WINDOW; ++distance) {
+      const uint16_t sequence =
+          (uint16_t)(rtp_decoder->reorder_expected_sequence + distance);
+      const size_t slot = sequence % RTP_REORDER_WINDOW;
+      if (rtp_decoder->reorder_used[slot] &&
+          rtp_decoder->reorder_sequences[slot] == sequence) {
+        nearest_distance = distance;
+        break;
+      }
+    }
+
+    if (nearest_distance == 0)
+      break;
+
+    rtp_decoder->reorder_expected_sequence =
+        (uint16_t)(rtp_decoder->reorder_expected_sequence + nearest_distance);
+    rtp_decoder->forced_sequence_skips += nearest_distance;
+    rtp_decoder_drain_reorder_buffer(rtp_decoder);
+  }
+
+  rtp_decoder->reorder_wait_started_ms =
+      rtp_decoder->reorder_buffered_packets > 0 ? now_ms : 0;
+}
+
 static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* buf, size_t size) {
   if (!rtp_decoder->reorder_buf || size < 4 || size > RTP_REORDER_PACKET_CAPACITY)
     return -1;
 
+  const uint32_t now_ms = ports_get_epoch_time();
   const uint16_t sequence = read_be16(buf + 2);
   if (!rtp_decoder->reorder_has_expected_sequence) {
     rtp_decoder->reorder_has_expected_sequence = 1;
     rtp_decoder->reorder_expected_sequence = sequence;
   }
 
+  rtp_decoder_expire_reorder_wait(rtp_decoder, now_ms);
+
   int16_t distance = (int16_t)(sequence - rtp_decoder->reorder_expected_sequence);
   if (distance < 0) {
     rtp_decoder->late_packets_dropped++;
+    rtp_decoder_track_reorder_wait(rtp_decoder, now_ms);
     return 0;
   }
 
-  // Leave roughly one network RTT for retransmission, but do not block the
-  // decoder behind the full allocation window after permanent packet loss.
-  while (distance >= RTP_REORDER_MAX_HOLD_PACKETS) {
+  // Keep the incoming packet representable in the fixed ring. Normal loss is
+  // handled by the time bound above; this is only a far-jump safety valve.
+  while (distance >= RTP_REORDER_WINDOW) {
     rtp_decoder->reorder_expected_sequence++;
     rtp_decoder->forced_sequence_skips++;
     rtp_decoder_drain_reorder_buffer(rtp_decoder);
@@ -720,6 +776,7 @@ static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* 
     const int result = rtp_decoder->decode_func(rtp_decoder, (uint8_t*)buf, size);
     rtp_decoder->reorder_expected_sequence++;
     rtp_decoder_drain_reorder_buffer(rtp_decoder);
+    rtp_decoder_track_reorder_wait(rtp_decoder, now_ms);
     return result;
   }
 
@@ -737,6 +794,7 @@ static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* 
   rtp_decoder->reorder_used[slot] = 1;
   rtp_decoder->reorder_buffered_packets++;
   rtp_decoder->reordered_packets++;
+  rtp_decoder_track_reorder_wait(rtp_decoder, now_ms);
   return 0;
 }
 

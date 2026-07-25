@@ -36,6 +36,15 @@ struct StreamEndSignals
     std::chrono::milliseconds video_idle {0};
 };
 
+constexpr bool ShouldProbeInternetConnection(
+    PeerTerminalKind peer_terminal,
+    bool video_started,
+    std::chrono::milliseconds video_idle)
+{
+    return peer_terminal != PeerTerminalKind::None ||
+           (video_started && video_idle >= std::chrono::seconds(8));
+}
+
 inline StreamEndReason DetectStreamEnd(const StreamEndSignals& signals)
 {
     constexpr auto kFreeLimit = std::chrono::hours(1);
