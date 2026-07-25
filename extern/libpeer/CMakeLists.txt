@@ -70,6 +70,7 @@ endif()
 
 ExternalProject_Add(cjson
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cJSON
+  BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/dist/lib/libcjson.a
   CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -81,8 +82,13 @@ ExternalProject_Add(cjson
 
 ExternalProject_Add(mbedtls
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mbedtls
+  BUILD_BYPRODUCTS
+    ${CMAKE_BINARY_DIR}/dist/lib/libmbedtls.a
+    ${CMAKE_BINARY_DIR}/dist/lib/libmbedx509.a
+    ${CMAKE_BINARY_DIR}/dist/lib/libmbedcrypto.a
   CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    -DGEN_FILES=ON
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     -DENABLE_TESTING=off
     -DENABLE_PROGRAMS=off
@@ -101,6 +107,7 @@ endif()
 
 ExternalProject_Add(srtp2
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libsrtp
+  BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/dist/lib/libsrtp2.a
   CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -111,6 +118,7 @@ ExternalProject_Add(srtp2
 
 ExternalProject_Add(usrsctp
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/usrsctp
+  BUILD_BYPRODUCTS ${CMAKE_BINARY_DIR}/dist/lib/libusrsctp.a
   CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON

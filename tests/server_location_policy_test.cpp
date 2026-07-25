@@ -33,6 +33,17 @@ int main()
     assert(NormalizeStreamingBaseUrl("not a URL").empty());
 
     assert(
+        CompactServerLabel(
+            "https://np-ams-06.cloudmatchbeta.nvidiagrid.net:443/path") ==
+        "NP-AMS-06");
+    assert(
+        CompactServerLabel("np-lax-01.cloudmatchbeta.nvidiagrid.net") ==
+        "NP-LAX-01");
+    assert(CompactServerLabel("80.250.97.40") == "80.250.97.40");
+    assert(CompactServerLabel("  ") == "--");
+    assert(CompactServerLabel("very-long-server-name.example", 10) == "VERY-LONG~");
+
+    assert(
         ResolveStreamingBaseUrl("Auto", "https://prod.example") ==
         "https://prod.example/");
     assert(

@@ -38,6 +38,72 @@ inline std::string NormalizeStreamingBaseUrl(std::string value)
     return value;
 }
 
+inline std::string CompactServerLabel(std::string value, size_t max_length = 15)
+{
+    const auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    value.erase(value.begin(), std::find_if_not(value.begin(), value.end(), is_space));
+    value.erase(std::find_if_not(value.rbegin(), value.rend(), is_space).base(), value.end());
+    if (value.empty())
+        return "--";
+
+    const size_t scheme = value.find("://");
+    if (scheme != std::string::npos)
+        value.erase(0, scheme + 3);
+
+    const size_t authority_end = value.find_first_of("/?#");
+    if (authority_end != std::string::npos)
+        value.resize(authority_end);
+    const size_t user_info = value.rfind('@');
+    if (user_info != std::string::npos)
+        value.erase(0, user_info + 1);
+
+    if (!value.empty() && value.front() == '[')
+    {
+        const size_t bracket = value.find(']');
+        if (bracket != std::string::npos)
+            value = value.substr(1, bracket - 1);
+    }
+    else
+    {
+        const size_t colon = value.rfind(':');
+        if (colon != std::string::npos && value.find(':') == colon)
+            value.resize(colon);
+    }
+
+    while (!value.empty() && value.back() == '.')
+        value.pop_back();
+
+    const bool ipv4 = !value.empty() &&
+        std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+            return std::isdigit(ch) != 0 || ch == '.';
+        });
+    if (!ipv4)
+    {
+        const size_t first_dot = value.find('.');
+        if (first_dot != std::string::npos)
+            value.resize(first_dot);
+    }
+
+    std::string label;
+    label.reserve(value.size());
+    for (unsigned char ch : value)
+    {
+        if (std::isalnum(ch) != 0 || ch == '-' || ch == '.' || ch == ':')
+            label.push_back(static_cast<char>(std::toupper(ch)));
+    }
+
+    if (label.empty())
+        return "--";
+    if (max_length == 0)
+        return {};
+    if (label.size() > max_length)
+    {
+        label.resize(max_length);
+        label.back() = '~';
+    }
+    return label;
+}
+
 template <typename RegionRange>
 std::string SelectBestMeasuredRegionUrl(const RegionRange& regions)
 {

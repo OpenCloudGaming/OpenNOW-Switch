@@ -516,10 +516,7 @@ std::string BuildNvstSdp(
     const std::string ice_pwd = ExtractSdpValue(answer_sdp, "a=ice-pwd:");
     const std::string fingerprint = ExtractSdpValue(answer_sdp, "a=fingerprint:sha-256 ");
     const auto tuning = opennow::video::ResolveQualityTuning(settings.image_quality_mode);
-    const int min_bitrate = std::max(
-        5000, (settings.bitrate_kbps * tuning.minimum_bitrate_percent) / 100);
-    const int initial_bitrate = std::max(
-        min_bitrate, (settings.bitrate_kbps * tuning.initial_bitrate_percent) / 100);
+    const auto bitrate = opennow::video::ResolveBitrateTuning(settings.bitrate_kbps);
 
     std::vector<std::string> lines = {
         "v=0",
@@ -570,15 +567,15 @@ std::string BuildNvstSdp(
         "a=video.clientViewportWd:" + std::to_string(settings.width),
         "a=video.clientViewportHt:" + std::to_string(settings.height),
         "a=video.maxFPS:" + std::to_string(settings.fps),
-        "a=video.initialBitrateKbps:" + std::to_string(initial_bitrate),
-        "a=video.initialPeakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.maximumBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.minimumBitrateKbps:" + std::to_string(min_bitrate),
-        "a=vqos.bw.peakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.serverPeakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
+        "a=video.initialBitrateKbps:" + std::to_string(bitrate.initial_kbps),
+        "a=video.initialPeakBitrateKbps:" + std::to_string(bitrate.initial_kbps),
+        "a=vqos.bw.maximumBitrateKbps:" + std::to_string(bitrate.maximum_kbps),
+        "a=vqos.bw.minimumBitrateKbps:" + std::to_string(bitrate.minimum_kbps),
+        "a=vqos.bw.peakBitrateKbps:" + std::to_string(bitrate.maximum_kbps),
+        "a=vqos.bw.serverPeakBitrateKbps:" + std::to_string(bitrate.maximum_kbps),
         "a=vqos.bw.enableBandwidthEstimation:1",
         "a=vqos.bw.disableBitrateLimit:0",
-        "a=vqos.grc.maximumBitrateKbps:" + std::to_string(settings.bitrate_kbps),
+        "a=vqos.grc.maximumBitrateKbps:" + std::to_string(bitrate.maximum_kbps),
         "a=vqos.grc.enable:0",
         "a=video.maxNumReferenceFrames:4",
         "a=video.mapRtpTimestampsToFrames:1",

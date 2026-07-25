@@ -4,6 +4,7 @@
 #include "community_proxy_policy.hpp"
 #include "localization.hpp"
 #include "server_location_policy.hpp"
+#include "video_quality_policy.hpp"
 
 #include <jansson.h>
 
@@ -92,6 +93,8 @@ StreamSettings Sanitize(StreamSettings settings)
     if (settings.width <= 0 || settings.height <= 0 || settings.fps <= 0 || settings.bitrate_kbps <= 0)
         return StreamPresets().front();
 
+    settings.bitrate_kbps = video::ClampSelectableBitrateKbps(settings.bitrate_kbps);
+
     if (settings.codec != "H264")
         settings.codec = "H264";
 
@@ -160,7 +163,7 @@ const std::vector<StreamSettings>& StreamPresets()
     static const std::vector<StreamSettings> presets = {
         make_preset("safe", "Safe", 1280, 720, 30, 8000),
         make_preset("balanced", "Balanced", 1280, 720, 60, 12000),
-        make_preset("quality", "Quality", 1920, 1080, 60, 20000),
+        make_preset("quality", "Quality", 1920, 1080, 60, 35000),
     };
     return presets;
 }

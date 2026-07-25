@@ -20,6 +20,7 @@ public:
         const std::string& session_id,
         const std::string& media_ip,
         int media_port,
+        const std::string& server_endpoint,
         const std::vector<opennow::IceServerInfo>& ice_servers,
         const opennow::GfnClient& client,
         const opennow::AuthSession& auth,
@@ -36,6 +37,7 @@ public:
         const std::string& session_id,
         const std::string& media_ip,
         int media_port,
+        const std::string& server_endpoint,
         const std::vector<opennow::IceServerInfo>& ice_servers,
         const opennow::GfnClient& client,
         const opennow::AuthSession& auth,
@@ -113,7 +115,7 @@ private:
     bool overlay_chord_latched_ = false;
     opennow::input::OverlayChordState overlay_chord_state_;
     std::string stream_codec_ = "H264";
-    std::string stream_region_ = "Auto";
+    std::string stream_server_ = "--";
     std::string controller_layout_ = "Xbox";
     bool show_debug_overlay_ = false;
     bool is_nte_session_ = false;

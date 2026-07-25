@@ -21,7 +21,10 @@ extern "C" {
 //#else
 //#define DECODER_BUFFER_SIZE 92 * 1024 * 2
 //#endif
-#define DECODER_BUFFER_SIZE (1024 * 1024)
+// Match libpeer's maximum assembled H.264 access unit. Higher bitrate mostly
+// raises packet count, but IDR frames can legitimately exceed the old 1 MiB
+// guard even when the average frame remains small.
+#define DECODER_BUFFER_SIZE (2 * 1024 * 1024)
 
 #if defined(PLATFORM_ANDROID)
 #include <jni.h>

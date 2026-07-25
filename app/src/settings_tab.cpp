@@ -548,7 +548,9 @@ void SettingsTab::BuildStreamPage()
         [this] { return std::to_string(draft_settings_.fps) + " FPS"; },
         [this](brls::View* view) { return CycleFrameRate(view); }));
     video->addView(MakeOptionRow(
-        "Bitrate", "Higher values improve motion detail but need stronger Wi-Fi.",
+        "Bitrate",
+        "Higher values improve fast-motion detail but need a stable connection; "
+        "too high can increase packet loss.",
         [this] {
             return std::to_string(draft_settings_.bitrate_kbps / 1000) + " Mbps";
         },

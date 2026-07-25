@@ -4,6 +4,7 @@
 #include "keyboard_input_policy.hpp"
 #include "network_utils.hpp"
 #include "nte_autologin_log.hpp"
+#include "server_location_policy.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "stream_diagnostics.hpp"
 #include "stream_settings.hpp"
@@ -65,6 +66,7 @@ StreamView::StreamView(
     const std::string& session_id,
     const std::string& media_ip,
     int media_port,
+    const std::string& server_endpoint,
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
@@ -77,7 +79,8 @@ StreamView::StreamView(
     debug_diagnostics_ = stream_settings.debug_diagnostics;
     stats_overlay_enabled_ = stream_settings.stats_overlay_enabled;
     stream_codec_ = stream_settings.codec;
-    stream_region_ = stream_settings.region;
+    stream_server_ = opennow::server_location::CompactServerLabel(
+        server_endpoint.empty() ? media_ip : server_endpoint);
     controller_layout_ = stream_settings.controller_layout;
     opennow::SetStreamDiagnosticsEnabled(debug_diagnostics_);
     free_tier_session_ = auth_.user.membership_tier_verified &&
@@ -729,15 +732,15 @@ void StreamView::UpdatePerformanceCounter(const VideoPerformanceCounters& counte
 }
 
 void StreamView::DrawPerformanceOverlay(NVGcontext* vg, float x, float y) {
-    char text[128];
+    char text[160];
     if (network_rtt_ms_ >= 0) {
         std::snprintf(
-            text, sizeof(text), "FPS  %.0f     BITRATE  %.1f Mbps     PING  %d ms",
-            presented_fps_, stream_bitrate_mbps_, network_rtt_ms_);
+            text, sizeof(text), "FPS %.0f   BIT %.1fM   PING %dms   SRV %s",
+            presented_fps_, stream_bitrate_mbps_, network_rtt_ms_, stream_server_.c_str());
     } else {
         std::snprintf(
-            text, sizeof(text), "FPS  %.0f     BITRATE  %.1f Mbps     PING  -- ms",
-            presented_fps_, stream_bitrate_mbps_);
+            text, sizeof(text), "FPS %.0f   BIT %.1fM   PING --   SRV %s",
+            presented_fps_, stream_bitrate_mbps_, stream_server_.c_str());
     }
 
     const float box_x = x + 16.0f;
@@ -752,7 +755,7 @@ void StreamView::DrawPerformanceOverlay(NVGcontext* vg, float x, float y) {
     nvgFillColor(vg, nvgRGB(55, 220, 125));
     nvgFill(vg);
 
-    nvgFontSize(vg, 18.0f);
+    nvgFontSize(vg, 17.0f);
     nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
     nvgFillColor(vg, nvgRGB(245, 250, 247));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -898,7 +901,7 @@ void StreamView::DrawStreamOverlay(
     draw_row(left_x, left_y, divider_x - 28.0f, "Connection",
              health.peer_completed ? "Connected" : "Negotiating");
     draw_row(left_x, left_y, divider_x - 28.0f, "Codec / location",
-             stream_codec_ + "  /  " + stream_region_);
+             stream_codec_ + "  /  " + stream_server_);
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         now - stream_started_at_).count();
     std::snprintf(number, sizeof(number), "%lld:%02lld",
@@ -1517,10 +1520,11 @@ brls::View* StreamView::create(
     const std::string& session_id,
     const std::string& media_ip,
     int media_port,
+    const std::string& server_endpoint,
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
     const std::string& game_title) {
     return new StreamView(signaling_url, jwt_token, session_id, media_ip, media_port,
-                          ice_servers, client, auth, game_title);
+                          server_endpoint, ice_servers, client, auth, game_title);
 }

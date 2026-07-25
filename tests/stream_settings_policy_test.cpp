@@ -40,6 +40,11 @@ int main()
     assert(value.bitrate_kbps == 16000);
     value.bitrate_kbps = 25000;
     opennow::settings::CycleBitrate(value);
+    assert(value.bitrate_kbps == 30000);
+    value.bitrate_kbps = 60000;
+    opennow::settings::CycleBitrate(value);
+    assert(value.bitrate_kbps == 75000);
+    opennow::settings::CycleBitrate(value);
     assert(value.bitrate_kbps == 8000);
 
     opennow::settings::CycleVideoBackend(value);
