@@ -89,7 +89,8 @@ int main(int argc, char* argv[])
     appletSetWirelessPriorityMode(AppletWirelessPriorityMode_OptimizedForWlan);
 #endif
 
-    brls::Logger::setLogLevel(brls::LogLevel::LOG_DEBUG);
+    // Raised to LOG_DEBUG below once debug_diagnostics is known.
+    brls::Logger::setLogLevel(brls::LogLevel::LOG_INFO);
 
     try
     {
@@ -125,6 +126,8 @@ int main(int argc, char* argv[])
         brls::Application::setFPSStatus(false);
         opennow::SetStreamDiagnosticsEnabled(
             startup_settings.debug_diagnostics);
+        if (startup_settings.debug_diagnostics)
+            brls::Logger::setLogLevel(brls::LogLevel::LOG_DEBUG);
 
         AppendBootLog("boot: pushing main activity");
         brls::Application::pushActivity(
