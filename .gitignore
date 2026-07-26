@@ -31,3 +31,15 @@ Thumbs.db
 *.suo
 __pycache__/
 node_modules/
+
+# Agentic Files
+/agent/
+.claude/
+CLAUDE.md
+
+# Private planning canon for this optimization fork — never commit or push.
+# These are the fork's plan of record and working notes; upstream must never see them.
+optimization-plan.md
+learnings.md
+olearnings.md
+decisions-log.md
