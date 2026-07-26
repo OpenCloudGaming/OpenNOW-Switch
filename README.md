@@ -1,3 +1,6 @@
+<!-- fork-notice -->
+> **Optimization fork.** This is a performance/UX optimization fork of upstream OpenNOW-Switch. See **[FORK.md](FORK.md)** for how it works and the list of patched files.
+
 <h1 align="center">OpenNOW for Nintendo Switch</h1>
 
 <p align="center">
