@@ -1,4 +1,5 @@
 #include "webrtc_session.hpp"
+#include "stream/StreamDiagnosticsPolicy.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "stream_diagnostics.hpp"
 #include "internal.hpp"
@@ -192,6 +193,10 @@ void WebRtcSession::maybe_log_stream_diagnostics() {
 
 
 void WebRtcSession::log_stream_summary(const char* reason) {
+    using opennow::diagnostics::DeliveredKbps;
+    using opennow::diagnostics::FramePathLabel;
+    using opennow::diagnostics::PerSecondRate;
+
     const auto now = std::chrono::steady_clock::now();
     long long since_start_ms = -1;
     long long since_completed_ms = -1;
@@ -210,15 +215,12 @@ void WebRtcSession::log_stream_summary(const char* reason) {
     if (last_video_metric_snapshot_.time_since_epoch().count() != 0) {
         metric_seconds = std::chrono::duration<double>(now - last_video_metric_snapshot_).count();
     }
-    const auto rate = [metric_seconds](uint64_t current, uint64_t previous) {
-        return metric_seconds > 0.0 && current >= previous
-            ? static_cast<double>(current - previous) / metric_seconds
-            : 0.0;
-    };
-    const double incoming_fps = rate(video.access_units, last_logged_video_performance_.access_units);
-    const double decoded_fps = rate(video.decoded_frames, last_logged_video_performance_.decoded_frames);
-    const double presented_fps = rate(video.presented_frames, last_logged_video_performance_.presented_frames);
-    const double bitrate_mbps = rate(video.access_unit_bytes, last_logged_video_performance_.access_unit_bytes) * 8.0 / 1000000.0;
+    // Note: "access units" received over the wire are one per video RTP
+    // frame payload, i.e. this is also packets/s -- see packetsPerSec below.
+    const double packets_per_sec = PerSecondRate(video.access_units, last_logged_video_performance_.access_units, metric_seconds);
+    const double decode_fps = PerSecondRate(video.decoded_frames, last_logged_video_performance_.decoded_frames, metric_seconds);
+    const double presented_fps = PerSecondRate(video.presented_frames, last_logged_video_performance_.presented_frames, metric_seconds);
+    const double delivered_kbps = DeliveredKbps(video.access_unit_bytes, last_logged_video_performance_.access_unit_bytes, metric_seconds);
     last_video_metric_snapshot_ = now;
     last_logged_video_performance_ = video;
 
@@ -239,7 +241,16 @@ void WebRtcSession::log_stream_summary(const char* reason) {
         if (const auto* stats = renderer_->video_render_stats())
             render_backend_stats = *stats;
     }
+    const bool uses_hardware_frames = decoder_ && decoder_->uses_hardware_frames();
+    const int64_t audio_buffer_ms = audio_ ? audio_->queued_ms() : -1;
+    // Worst gap between presented frames since the last time this line was
+    // printed (any reason). Read-and-reset so each line reports its own window.
+    const uint64_t frame_gap_worst_us_window = frame_gap_us_window_max_.exchange(0, std::memory_order_relaxed);
 
+    // Stable, single-value key=value tokens, space separated. Every key here
+    // is a fixed name for the lifetime of this diagnostics format; a diff
+    // script can rely on tokenizing this line by whitespace then by the
+    // first '='.
     AppendStreamLog("STREAM diag reason=" + std::string(reason ? reason : "unknown") +
                     " state=" + current_state_ +
                     " sinceStartMs=" + std::to_string(since_start_ms) +
@@ -248,11 +259,11 @@ void WebRtcSession::log_stream_summary(const char* reason) {
                     " offers=" + std::to_string(offer_count_) +
                     " iceRemote=" + std::to_string(remote_ice_count_) +
                     " iceLocal=" + std::to_string(local_ice_count_) +
-                    " icePairs=" + std::to_string(pair_total) +
-                    "/" + std::to_string(pair_frozen) +
-                    "/" + std::to_string(pair_checking) +
-                    "/" + std::to_string(pair_succeeded) +
-                    "/" + std::to_string(pair_failed) +
+                    " icePairsTotal=" + std::to_string(pair_total) +
+                    " icePairsFrozen=" + std::to_string(pair_frozen) +
+                    " icePairsChecking=" + std::to_string(pair_checking) +
+                    " icePairsSucceeded=" + std::to_string(pair_succeeded) +
+                    " icePairsFailed=" + std::to_string(pair_failed) +
                     " hbRx=" + std::to_string(heartbeat_rx_count_) +
                     " hbTx=" + std::to_string(heartbeat_tx_count_) +
                     " dcOpen=" + std::to_string(datachannel_opened_ ? 1 : 0) +
@@ -265,50 +276,101 @@ void WebRtcSession::log_stream_summary(const char* reason) {
                     " inputProto=" + std::to_string(input_protocol_version_) +
                     " inputHbTx=" + std::to_string(input_heartbeat_tx_count_) +
                     " packets=" + std::to_string(packets_received_.load()) +
+                    " packetsPerSec=" + std::to_string(packets_per_sec) +
                     " frames=" + std::to_string(frames_decoded_.load()) +
                     " decodeErrors=" + std::to_string(decode_errors_.load()) +
-                    " keyframes=" + std::to_string(keyframe_request_attempts_) +
+                    " pliCount=" + std::to_string(keyframe_request_attempts_) +
                     " videoBackend=" + video_backend_name_ +
-                    " in/dec/outFps=" + std::to_string(incoming_fps) + "/" +
-                    std::to_string(decoded_fps) + "/" + std::to_string(presented_fps) +
-                    " bitrateMbps=" + std::to_string(bitrate_mbps) +
-                    " auBytesTotal/max=" + std::to_string(video.access_unit_bytes) + "/" +
-                    std::to_string(video_access_unit_max_bytes_.load()) +
-                    " decodeUsP95/max=" + std::to_string(video.decode_us_p95) + "/" +
-                    std::to_string(video.decode_us_max) +
-                    " queueWaitUsP95/max=" + std::to_string(video.queue_wait_us_p95) + "/" +
-                    std::to_string(video.queue_wait_us_max) +
-                    " renderUsP95/max=" + std::to_string(video.render_us_p95) + "/" +
-                    std::to_string(video.render_us_max) +
-                    " decodeQueue/current/high=" + std::to_string(video.decode_queue_size) + "/" +
-                    std::to_string(video.decode_queue_high_water) +
-                    " bufferPool reuse/alloc=" + std::to_string(decoder_buffer_reuses_.load()) + "/" +
-                    std::to_string(decoder_buffer_allocations_.load()) +
-                    " transport batches/datagrams/max=" +
-                    std::to_string(transport_batches_.load()) + "/" +
-                    std::to_string(transport_datagrams_.load()) + "/" +
-                    std::to_string(transport_batch_high_water_.load()) +
-                    " gpu retained/mappings=" +
-                    std::to_string(render_backend_stats.retained_surfaces) + "/" +
-                    std::to_string(render_backend_stats.surface_mappings) +
-                    " rtp packets/gaps/reordered/late/forced/buffered=" +
-                    std::to_string(rtp_stats.packets_received) + "/" +
-                    std::to_string(rtp_stats.sequence_gaps) + "/" +
-                    std::to_string(rtp_stats.reordered_packets) + "/" +
-                    std::to_string(rtp_stats.late_packets_dropped) + "/" +
-                    std::to_string(rtp_stats.forced_sequence_skips) + "/" +
-                    std::to_string(rtp_stats.reorder_buffered_packets) +
-                    " nack requests/packets=" +
-                    std::to_string(rtp_stats.nack_requests) + "/" +
-                    std::to_string(rtp_stats.nack_packets_requested) +
-                    " rtpAu ok/drop=" + std::to_string(rtp_stats.access_units_completed) + "/" +
-                    std::to_string(rtp_stats.access_units_dropped) +
-                    " frameQueue size/dropTiming/dropOverflow/hold/reuse=" +
-                    std::to_string(frame_holder.getFrameQueueSize()) + "/" +
-                    std::to_string(frame_holder.getTimingDropStat()) + "/" +
-                    std::to_string(frame_holder.getOverflowDropStat()) + "/" +
-                    std::to_string(frame_holder.getTimingHoldStat()) + "/" +
-                    std::to_string(frame_holder.getFakeFrameStat()));
+                    " framePath=" + FramePathLabel(uses_hardware_frames) +
+                    " decodeFps=" + std::to_string(decode_fps) +
+                    " presentedFps=" + std::to_string(presented_fps) +
+                    " deliveredKbps=" + std::to_string(delivered_kbps) +
+                    " auBytesTotal=" + std::to_string(video.access_unit_bytes) +
+                    " auBytesMax=" + std::to_string(video_access_unit_max_bytes_.load()) +
+                    " decodeUsP95=" + std::to_string(video.decode_us_p95) +
+                    " decodeUsMax=" + std::to_string(video.decode_us_max) +
+                    " queueWaitUsP95=" + std::to_string(video.queue_wait_us_p95) +
+                    " queueWaitUsMax=" + std::to_string(video.queue_wait_us_max) +
+                    " renderUsP95=" + std::to_string(video.render_us_p95) +
+                    " renderUsMax=" + std::to_string(video.render_us_max) +
+                    " decodeQueueDepth=" + std::to_string(video.decode_queue_size) +
+                    " decodeQueueHighWater=" + std::to_string(video.decode_queue_high_water) +
+                    " bufferPoolReuse=" + std::to_string(decoder_buffer_reuses_.load()) +
+                    " bufferPoolAlloc=" + std::to_string(decoder_buffer_allocations_.load()) +
+                    " transportBatches=" + std::to_string(transport_batches_.load()) +
+                    " transportDatagrams=" + std::to_string(transport_datagrams_.load()) +
+                    " transportBatchHighWater=" + std::to_string(transport_batch_high_water_.load()) +
+                    " gpuRetainedSurfaces=" + std::to_string(render_backend_stats.retained_surfaces) +
+                    " gpuSurfaceMappings=" + std::to_string(render_backend_stats.surface_mappings) +
+                    " rtpPackets=" + std::to_string(rtp_stats.packets_received) +
+                    " rtpGaps=" + std::to_string(rtp_stats.sequence_gaps) +
+                    " rtpReordered=" + std::to_string(rtp_stats.reordered_packets) +
+                    " rtpLate=" + std::to_string(rtp_stats.late_packets_dropped) +
+                    " rtpForced=" + std::to_string(rtp_stats.forced_sequence_skips) +
+                    " rtpBuffered=" + std::to_string(rtp_stats.reorder_buffered_packets) +
+                    " nackRequests=" + std::to_string(rtp_stats.nack_requests) +
+                    " nackPacketsRequested=" + std::to_string(rtp_stats.nack_packets_requested) +
+                    " rtpAuOk=" + std::to_string(rtp_stats.access_units_completed) +
+                    " rtpAuDrop=" + std::to_string(rtp_stats.access_units_dropped) +
+                    " frameQueueSize=" + std::to_string(frame_holder.getFrameQueueSize()) +
+                    " frameQueueDropTiming=" + std::to_string(frame_holder.getTimingDropStat()) +
+                    " frameQueueDropOverflow=" + std::to_string(frame_holder.getOverflowDropStat()) +
+                    " frameQueueHold=" + std::to_string(frame_holder.getTimingHoldStat()) +
+                    " frameQueueReuse=" + std::to_string(frame_holder.getFakeFrameStat()) +
+                    " audioBufferMs=" + std::to_string(audio_buffer_ms) +
+                    " frameGapWorstUsWindow=" + std::to_string(frame_gap_worst_us_window));
+}
+
+void WebRtcSession::log_session_end_summary() {
+    const auto now = std::chrono::steady_clock::now();
+    long long session_duration_ms = -1;
+    if (session_started_at_.time_since_epoch().count() != 0) {
+        session_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - session_started_at_).count();
+    }
+
+    const VideoPerformanceCounters video = get_video_performance();
+    const double duration_seconds = session_duration_ms > 0
+        ? static_cast<double>(session_duration_ms) / 1000.0 : 0.0;
+    const double avg_decode_fps = duration_seconds > 0.0
+        ? static_cast<double>(video.decoded_frames) / duration_seconds : 0.0;
+    const double avg_presented_fps = duration_seconds > 0.0
+        ? static_cast<double>(video.presented_frames) / duration_seconds : 0.0;
+    const double avg_delivered_kbps = duration_seconds > 0.0
+        ? static_cast<double>(video.access_unit_bytes) * 8.0 / 1000.0 / duration_seconds : 0.0;
+    const uint64_t decode_us_sum = decode_us_total_.load(std::memory_order_relaxed);
+    const double avg_decode_ms = video.decoded_frames > 0
+        ? (static_cast<double>(decode_us_sum) / static_cast<double>(video.decoded_frames)) / 1000.0 : 0.0;
+
+    PeerVideoRtpStats rtp_stats {};
+    if (pc_)
+        (void)peer_connection_get_video_rtp_stats(pc_, &rtp_stats);
+    const auto& frame_holder = AVFrameHolder::instance();
+
+    // Session totals/worsts, written once at shutdown.
+    AppendStreamLog("SUMMARY stream durationMs=" + std::to_string(session_duration_ms) +
+                    " packetsTotal=" + std::to_string(packets_received_.load()) +
+                    " framesTotal=" + std::to_string(frames_decoded_.load()) +
+                    " decodeErrorsTotal=" + std::to_string(decode_errors_.load()) +
+                    " pliCountTotal=" + std::to_string(keyframe_request_attempts_) +
+                    " avgDecodeFps=" + std::to_string(avg_decode_fps) +
+                    " avgPresentedFps=" + std::to_string(avg_presented_fps) +
+                    " avgDeliveredKbps=" + std::to_string(avg_delivered_kbps) +
+                    " avgDecodeMs=" + std::to_string(avg_decode_ms) +
+                    " decodeUsMaxWorst=" + std::to_string(video.decode_us_max) +
+                    " queueWaitUsMaxWorst=" + std::to_string(video.queue_wait_us_max) +
+                    " renderUsMaxWorst=" + std::to_string(video.render_us_max) +
+                    " decodeQueueHighWaterWorst=" + std::to_string(video.decode_queue_high_water) +
+                    " frameGapWorstUsSession=" + std::to_string(frame_gap_us_session_max_.load()) +
+                    " nackRequestsTotal=" + std::to_string(rtp_stats.nack_requests) +
+                    " nackPacketsRequestedTotal=" + std::to_string(rtp_stats.nack_packets_requested) +
+                    " rtpGapsTotal=" + std::to_string(rtp_stats.sequence_gaps) +
+                    " rtpLateTotal=" + std::to_string(rtp_stats.late_packets_dropped) +
+                    " rtpAuDropTotal=" + std::to_string(rtp_stats.access_units_dropped) +
+                    " frameQueueDropTimingTotal=" + std::to_string(frame_holder.getTimingDropStat()) +
+                    " frameQueueDropOverflowTotal=" + std::to_string(frame_holder.getOverflowDropStat()) +
+                    " bufferPoolReuseTotal=" + std::to_string(decoder_buffer_reuses_.load()) +
+                    " bufferPoolAllocTotal=" + std::to_string(decoder_buffer_allocations_.load()));
 }
 
 

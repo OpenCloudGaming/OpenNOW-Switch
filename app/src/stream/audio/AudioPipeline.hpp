@@ -20,6 +20,10 @@ public:
     void set_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_t rtp_timestamp);
     std::string debug_info() const;
     int64_t playback_ntp_us() const;
+    // Currently buffered audio, in milliseconds (submitted-but-not-yet-played
+    // samples). Same derivation debug_info() already reports inline; exposed
+    // numerically for the stream diagnostics summary.
+    int64_t queued_ms() const;
 
 private:
     struct Impl;

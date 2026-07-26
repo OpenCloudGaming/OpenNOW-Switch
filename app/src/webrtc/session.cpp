@@ -393,6 +393,7 @@ void WebRtcSession::stop() {
         return;
 
     log_stream_summary("stop");
+    log_session_end_summary();
     AppendInputLog("SUMMARY attempts=" + std::to_string(gamepad_input_attempt_count_) +
                    " blocked=" + std::to_string(gamepad_input_blocked_count_) +
                    " reportsSent=" + std::to_string(gamepad_tx_count_) +

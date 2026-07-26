@@ -763,3 +763,10 @@ std::string AudioPipeline::debug_info() const {
         static_cast<unsigned long long>(impl_->limited_frames.load()));
     return text;
 }
+
+int64_t AudioPipeline::queued_ms() const {
+    const uint64_t played = impl_->played_samples.load();
+    const uint64_t submitted = impl_->submitted_samples.load();
+    const uint64_t queued = submitted > played ? submitted - played : 0;
+    return static_cast<int64_t>(queued * 1000 / kSampleRate);
+}

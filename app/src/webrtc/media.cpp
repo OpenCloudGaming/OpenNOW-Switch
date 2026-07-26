@@ -1,6 +1,7 @@
 #include "webrtc_session.hpp"
 #include "stream/audio/AudioRtpUtils.hpp"
 #include "stream/DecodeQueuePolicy.hpp"
+#include "stream/StreamDiagnosticsPolicy.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "internal.hpp"
 
@@ -181,8 +182,17 @@ void WebRtcSession::draw(NVGcontext* vg, int width, int height, AVFrame* frame, 
         RecordLatency(render_latency_buckets_, render_us);
         AtomicMax(render_us_max_, render_us);
         const uint64_t previous_generation = last_presented_generation_.exchange(generation);
-        if (generation != 0 && generation != previous_generation)
+        if (generation != 0 && generation != previous_generation) {
             presented_frames_.fetch_add(1, std::memory_order_relaxed);
+            const uint64_t presented_at_us = NowUs();
+            const uint64_t previous_presented_at_us =
+                last_presented_at_us_.exchange(presented_at_us, std::memory_order_relaxed);
+            const uint64_t gap_us = opennow::diagnostics::FrameGapUs(previous_presented_at_us, presented_at_us);
+            if (gap_us > 0) {
+                AtomicMax(frame_gap_us_window_max_, gap_us);
+                AtomicMax(frame_gap_us_session_max_, gap_us);
+            }
+        }
     }
 }
 

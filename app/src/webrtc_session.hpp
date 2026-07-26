@@ -174,6 +174,13 @@ private:
     std::atomic<uint64_t> video_access_unit_max_bytes_ {0};
     std::atomic<uint64_t> presented_frames_ {0};
     std::atomic<uint64_t> last_presented_generation_ {0};
+    // Wall-clock (steady_clock, us) bookkeeping for the worst gap between
+    // presented frames. `_window_` is read-and-reset by each diagnostics
+    // summary line; `_session_` is a running max never reset, for the
+    // session-end summary. See app/src/stream/StreamDiagnosticsPolicy.hpp.
+    std::atomic<uint64_t> last_presented_at_us_ {0};
+    std::atomic<uint64_t> frame_gap_us_window_max_ {0};
+    std::atomic<uint64_t> frame_gap_us_session_max_ {0};
     std::atomic<uint64_t> decode_us_total_ {0};
     std::atomic<uint64_t> decode_us_max_ {0};
     std::atomic<uint64_t> queue_wait_us_max_ {0};
@@ -281,6 +288,7 @@ private:
     void maybe_recover_decode_stall();
     void maybe_recover_rtp_damage();
     void log_stream_summary(const char* reason);
+    void log_session_end_summary();
     void request_keyframe(const char* reason);
     int next_ack_id();
 };
