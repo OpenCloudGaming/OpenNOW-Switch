@@ -35,6 +35,15 @@ void StreamView::SendKeyboardCharacter(char character) {
     session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, false);
 }
 
+void StreamView::SendKeyboardShortcut(opennow::input::KeyboardShortcut shortcut) {
+    if (!session_)
+        return;
+
+    const auto stroke = opennow::input::MapKeyboardShortcut(shortcut);
+    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, true);
+    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, false);
+}
+
 void StreamView::SendNteClick(float normalized_x, float normalized_y) {
     if (!session_) {
         opennow::AppendNteAutoLoginLog("CLICK skipped reason=no_session");
@@ -310,6 +319,10 @@ void StreamView::OpenInlineKeyboard() {
     keyboard_visible_ = true;
     keyboard_b_was_down_ = false;
     keyboard_plus_was_down_ = false;
+    keyboard_escape_chord_was_down_ = false;
+    keyboard_tab_chord_was_down_ = false;
+    keyboard_alt_tab_chord_was_down_ = false;
+    keyboard_windows_chord_was_down_ = false;
     gamepad_state_initialized_ = false;
     if (touch_was_down_) {
         session_->send_mouse_left_button(false);
@@ -317,6 +330,8 @@ void StreamView::OpenInlineKeyboard() {
     }
     session_->send_gamepad_input(0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
     session_->record_ui_event("keyboard opened by Minus+Y");
+    brls::Application::notify(
+        "Keyboard shortcuts: MINUS + ZL Esc / L Tab / R Alt+Tab / ZR Windows");
 #endif
 }
 
@@ -329,6 +344,10 @@ void StreamView::HideInlineKeyboard(bool send_enter) {
     swkbdInlineDisappear(&inline_keyboard_);
     keyboard_visible_ = false;
     keyboard_text_.clear();
+    keyboard_escape_chord_was_down_ = false;
+    keyboard_tab_chord_was_down_ = false;
+    keyboard_alt_tab_chord_was_down_ = false;
+    keyboard_windows_chord_was_down_ = false;
     gamepad_state_initialized_ = false;
     suppress_b_until_release_ = true;
     keyboard_release_guard_ = true;
@@ -363,6 +382,10 @@ void StreamView::KeyboardEnterCallback(const char* text, SwkbdDecidedEnterArg*) 
     active_keyboard_view_->SendKeyboardCharacter('\n');
     active_keyboard_view_->keyboard_visible_ = false;
     active_keyboard_view_->keyboard_text_.clear();
+    active_keyboard_view_->keyboard_escape_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_tab_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_alt_tab_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_windows_chord_was_down_ = false;
     active_keyboard_view_->gamepad_state_initialized_ = false;
     active_keyboard_view_->keyboard_release_guard_ = true;
     if (active_keyboard_view_->session_)
@@ -374,6 +397,10 @@ void StreamView::KeyboardCancelCallback() {
         return;
     active_keyboard_view_->keyboard_visible_ = false;
     active_keyboard_view_->keyboard_text_.clear();
+    active_keyboard_view_->keyboard_escape_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_tab_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_alt_tab_chord_was_down_ = false;
+    active_keyboard_view_->keyboard_windows_chord_was_down_ = false;
     active_keyboard_view_->gamepad_state_initialized_ = false;
     active_keyboard_view_->suppress_b_until_release_ = true;
     active_keyboard_view_->keyboard_release_guard_ = true;
