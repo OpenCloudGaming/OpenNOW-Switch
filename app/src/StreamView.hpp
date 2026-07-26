@@ -4,11 +4,16 @@
 #include "controller_delivery_policy.hpp"
 #include "network_utils.hpp"
 #include "nte_credentials.hpp"
+#include "stream_end_policy.hpp"
 #include "stream_overlay_policy.hpp"
 #include "webrtc_session.hpp"
-#include <memory>
-#include <vector>
+
 #include <chrono>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
@@ -73,6 +78,7 @@ private:
     void UpdateNteAutoLogin(std::chrono::steady_clock::time_point now);
     void SendNteClick(float normalized_x, float normalized_y);
     void ReanchorRemotePointer(float target_x, float target_y);
+    static int16_t ClampMouseDelta(float value);
     void ClearNteFocusedField();
     void SubmitNteFocusedField(const char* stage);
     void DrawNteAutoLoginStatus(NVGcontext* vg, float x, float y, float width, float height,

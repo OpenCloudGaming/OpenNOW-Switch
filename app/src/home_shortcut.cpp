@@ -1,5 +1,6 @@
 #include "home_shortcut.hpp"
 
+#include "app_version.hpp"
 #include "atomic_file_replace.hpp"
 #include "cover_image_cache.hpp"
 #include "nro_shortcut_policy.hpp"
@@ -328,7 +329,7 @@ bool StartForwarderInstaller(
         "  \"version\": 1,\n"
         "  \"name\": \"" + JsonEscape(title) + "\",\n"
         "  \"author\": \"OpenCloudGaming\",\n"
-        "  \"displayVersion\": \"1.0.0\",\n"
+        "  \"displayVersion\": \"" + std::string(kAppVersion) + "\",\n"
         "  \"nroPath\": \"" + JsonEscape(nro_path) + "\",\n"
         "  \"args\": \"" + JsonEscape(arguments) + "\"\n"
         "}\n";

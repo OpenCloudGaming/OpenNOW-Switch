@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "0.0.5",
     [string]$BuildDirectory = "switch",
     [string]$Flavor = ""
 )

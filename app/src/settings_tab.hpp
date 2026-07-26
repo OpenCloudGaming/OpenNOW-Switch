@@ -4,6 +4,7 @@
 
 #include <borealis.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <utility>
@@ -54,6 +55,9 @@ class SettingsTab : public brls::Box
     void BeginServerLocationLoad(bool open_when_ready, bool notify_result);
     std::string ServerLocationValue() const;
 
+    static brls::Label* MakeParagraph(
+        const std::string& text, float bottom_margin = 16.0f);
+    static std::string FormatBytes(std::uint64_t bytes);
     brls::Box* MakeSection(const std::string& title, const std::string& subtitle = {});
     brls::Box* MakeOptionRow(
         const std::string& title,
@@ -66,7 +70,8 @@ class SettingsTab : public brls::Box
         const std::string& button_text,
         std::function<bool(brls::View*)> action,
         bool destructive = false);
-    void AddInfoLine(brls::Box* parent, const std::string& label, const std::string& value);
+    brls::Label* AddInfoLine(
+        brls::Box* parent, const std::string& label, const std::string& value);
 
     bool ClearSavedLogin(brls::View* view);
     bool SwitchSavedAccount(brls::View* view);

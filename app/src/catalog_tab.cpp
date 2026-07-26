@@ -1,12 +1,12 @@
 #include "catalog_tab.hpp"
 
 #include "app_state.hpp"
+#include "game_browser_header.hpp"
 #include "game_detail_view.hpp"
 #include "game_card_view.hpp"
 #include "game_grid_navigation.hpp"
 #include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
-#include "ui_text_policy.hpp"
 #include "localization.hpp"
 
 #include <algorithm>
@@ -31,19 +31,6 @@ brls::Label* MakeParagraph(const std::string& text, float bottom_margin = 16.0f)
     label->setFontSize(18);
     label->setMarginBottom(bottom_margin);
     return label;
-}
-
-brls::Button* MakeToolbarButton(const std::string& text)
-{
-    auto* button = new brls::Button();
-    const std::string localized = Tr(text);
-    button->setText(localized);
-    button->setFontSize(15);
-    button->setStyle(&brls::BUTTONSTYLE_BORDERED);
-    button->setHeight(42);
-    button->setWidth(ui::ToolbarButtonWidth(localized));
-    button->setMarginRight(10);
-    return button;
 }
 
 std::string ToLower(std::string value)
@@ -82,33 +69,13 @@ CatalogTab::CatalogTab()
     setPadding(18, 32, 18, 32);
     setBackgroundColor(nvgRGB(16, 16, 20));
 
-    auto* heading = new brls::Box(brls::Axis::ROW);
-    heading->setAlignItems(brls::AlignItems::CENTER);
-    heading->setMarginBottom(10);
-    auto* accent = new brls::Rectangle();
-    accent->setWidth(4);
-    accent->setHeight(30);
-    accent->setMarginRight(12);
-    accent->setColor(nvgRGB(88, 217, 138));
-    heading->addView(accent);
-    auto* title = MakeParagraph("Store", 0.0f);
-    title->setFontSize(28);
-    title->setTextColor(nvgRGB(248, 249, 251));
-    heading->addView(title);
-    addView(heading);
-
-    auto* toolbar = new brls::Box(brls::Axis::ROW);
-    toolbar->setAlignItems(brls::AlignItems::CENTER);
-    toolbar->setMarginBottom(8);
-    search_button_ = MakeToolbarButton("Y  Search");
-    filter_button_ = MakeToolbarButton("ZL  All stores");
-    sort_button_   = MakeToolbarButton("ZR  A-Z");
-    more_button_   = MakeToolbarButton("X  More / Refresh");
+    search_button_ = ui::MakeGameBrowserActionButton("Y  Search");
+    filter_button_ = ui::MakeGameBrowserActionButton("ZL  All stores");
+    sort_button_   = ui::MakeGameBrowserActionButton("ZR  A-Z");
+    more_button_   = ui::MakeGameBrowserActionButton("X  More / Refresh");
     search_button_->setStyle(&brls::BUTTONSTYLE_HIGHLIGHT);
     toolbar_buttons_ = {search_button_, filter_button_, sort_button_, more_button_};
-    for (brls::View* button : toolbar_buttons_)
-        toolbar->addView(button);
-    addView(toolbar);
+    addView(ui::MakeGameBrowserHeader("Store", toolbar_buttons_));
 
     search_button_->registerClickAction([this](brls::View*) {
         return RunUiAction("catalog.search.button", [this]() { BeginSearch(); });

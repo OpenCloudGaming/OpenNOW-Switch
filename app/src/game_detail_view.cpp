@@ -4,6 +4,7 @@
 #include "cover_image_cache.hpp"
 #include "game_detail_policy.hpp"
 #include "home_shortcut.hpp"
+#include "membership_tier_style.hpp"
 #include "nte_credentials.hpp"
 #include "ui_helpers.hpp"
 #include "localization.hpp"
@@ -216,7 +217,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     {
         metadata->addView(MakeLabel(
             "Membership  ·  " + data_.membership_tier_label,
-            17.0f, nvgRGB(246, 196, 80), 6.0f));
+            17.0f, membership::TextColor(data_.membership_tier_label), 6.0f));
     }
     if (!game_detail::IsUnknownMetadata(data_.publisher))
         metadata->addView(MakeLabel(

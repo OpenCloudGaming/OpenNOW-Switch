@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "opennow-forwarder-installer",
-  "version": "1.0.0",
+  "version": "0.0.5",
   "license": "MIT",
   "description": "OpenNOW-owned Horizon forwarder generator and installer",
   "nacp": {
