@@ -1,13 +1,14 @@
 #include "cover_image_cache.hpp"
 
+#include "app_paths.hpp"
 #include "gfn_client.hpp"
 #include "http_client.hpp"
 
-#ifdef __SWITCH__
 #include <sys/stat.h>
-#endif
 
 #include <cstdint>
+#include <cstdio>
+#include <dirent.h>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -20,13 +21,20 @@ namespace
 
 constexpr const char* kFallbackCoverRes = "img/opennow_switch_icon.jpg";
 
+std::string ImageCachePath()
+{
+    return AppHomePath() + "/cache/images";
+}
+
 void EnsureImageCacheDirectory()
 {
 #ifdef __SWITCH__
+    const std::string app_home = AppHomePath();
+    const std::string cache_path = app_home + "/cache";
     mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/SwitchNOW", 0777);
-    mkdir("sdmc:/switch/SwitchNOW/cache", 0777);
-    mkdir("sdmc:/switch/SwitchNOW/cache/images", 0777);
+    mkdir(app_home.c_str(), 0777);
+    mkdir(cache_path.c_str(), 0777);
+    mkdir(ImageCachePath().c_str(), 0777);
 #endif
 }
 
@@ -46,7 +54,7 @@ std::string HashUrl(const std::string& url)
 
 std::string CachePathForUrl(const std::string& url)
 {
-    return "sdmc:/switch/SwitchNOW/cache/images/" + HashUrl(url) + ".img";
+    return ImageCachePath() + "/" + HashUrl(url) + ".img";
 }
 
 bool ReadCachedImage(const std::string& path, std::string& data)
@@ -123,6 +131,60 @@ std::string LoadCachedImageData(const std::string& image_url)
 
     WriteCachedImage(cache_path, response.body);
     return response.body;
+}
+
+CoverImageCacheStats InspectCoverImageCache()
+{
+    CoverImageCacheStats stats;
+    const std::string cache_path = ImageCachePath();
+    DIR* dir = opendir(cache_path.c_str());
+    if (!dir)
+        return stats;
+
+    while (dirent* entry = readdir(dir))
+    {
+        const std::string name = entry->d_name;
+        if (name.empty() || name == "." || name == "..")
+            continue;
+
+        const std::string path = cache_path + "/" + name;
+        struct stat st {};
+        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+
+        ++stats.files;
+        stats.bytes += static_cast<std::uint64_t>(st.st_size);
+    }
+
+    closedir(dir);
+    return stats;
+}
+
+std::size_t ClearCoverImageCache()
+{
+    std::size_t removed = 0;
+    const std::string cache_path = ImageCachePath();
+    DIR* dir = opendir(cache_path.c_str());
+    if (!dir)
+        return removed;
+
+    while (dirent* entry = readdir(dir))
+    {
+        const std::string name = entry->d_name;
+        if (name.empty() || name == "." || name == "..")
+            continue;
+
+        const std::string path = cache_path + "/" + name;
+        struct stat st {};
+        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+
+        if (std::remove(path.c_str()) == 0)
+            ++removed;
+    }
+
+    closedir(dir);
+    return removed;
 }
 
 void SetCachedCoverImage(brls::Image* image, const std::string& image_url)
