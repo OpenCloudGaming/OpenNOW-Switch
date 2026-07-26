@@ -2,6 +2,7 @@
 #include <borealis.hpp>
 #include "gfn_client.hpp"
 #include "controller_delivery_policy.hpp"
+#include "keyboard_input_policy.hpp"
 #include "network_utils.hpp"
 #include "nte_credentials.hpp"
 #include "stream_end_policy.hpp"
@@ -73,6 +74,7 @@ private:
     void UpdateInlineKeyboard();
     void HandleKeyboardText(const char* text);
     void SendKeyboardCharacter(char character);
+    void SendKeyboardShortcut(opennow::input::KeyboardShortcut shortcut);
     void StartNteAutoLogin(std::chrono::steady_clock::time_point now);
     void CancelNteAutoLogin();
     void UpdateNteAutoLogin(std::chrono::steady_clock::time_point now);
@@ -149,6 +151,10 @@ private:
     bool keyboard_combo_was_down_ = false;
     bool keyboard_b_was_down_ = false;
     bool keyboard_plus_was_down_ = false;
+    bool keyboard_escape_chord_was_down_ = false;
+    bool keyboard_tab_chord_was_down_ = false;
+    bool keyboard_alt_tab_chord_was_down_ = false;
+    bool keyboard_windows_chord_was_down_ = false;
     bool suppress_b_until_release_ = false;
     bool keyboard_release_guard_ = false;
     bool keyboard_visible_ = false;
