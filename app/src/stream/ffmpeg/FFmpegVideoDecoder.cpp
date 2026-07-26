@@ -46,6 +46,26 @@ FFmpegVideoDecoder::FFmpegVideoDecoder() {
 
 FFmpegVideoDecoder::~FFmpegVideoDecoder() = default;
 
+// BY ID, NEVER BY NAME.
+//
+// There is no "h264_nvtegra" AVCodec registered in this FFmpeg build: `nm`
+// against extern/ffmpeg/lib/libavcodec.a shows ff_h264_nvtegra_hwaccel (an
+// AVHWAccel), not an AVCodec of that name. NVDEC hardware decode is that
+// hwaccel hanging off the plain H264 decoder (ff_h264_decoder), selected via
+// this get_format callback returning AV_PIX_FMT_NVTEGRA -- not via a decoder
+// name lookup. Looking it up by name always returned NULL, so hardware
+// decode had never engaged; every session silently ran the software decoder.
+enum AVPixelFormat FFmpegVideoDecoder::choose_format(AVCodecContext* ctx, const enum AVPixelFormat* fmt) {
+    (void)ctx;
+#if defined(OPENNOW_ENABLE_NVDEC)
+    for (const enum AVPixelFormat* p = fmt; p && *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == AV_PIX_FMT_NVTEGRA)
+            return AV_PIX_FMT_NVTEGRA;
+    }
+#endif
+    return (fmt && fmt[0] != AV_PIX_FMT_NONE) ? fmt[0] : AV_PIX_FMT_NONE;
+}
+
 void ffmpegLog(void* ptr, int level, const char* fmt, va_list vargs) {
     (void)ptr;
     (void)level;
@@ -121,9 +141,10 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
 #else
     if (video_format & VIDEO_FORMAT_MASK_H264) {
 #if defined(OPENNOW_ENABLE_NVDEC)
-        m_decoder = m_uses_hardware_frames
-            ? avcodec_find_decoder_by_name("h264_nvtegra")
-            : avcodec_find_decoder(AV_CODEC_ID_H264);
+        // The hardware and software paths use the SAME decoder found by
+        // codec ID; which one actually runs on NVDEC is decided by
+        // hw_device_ctx + the get_format callback below, not by decoder name.
+        m_decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
 #else
         m_uses_hardware_frames = false;
         m_decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
@@ -197,8 +218,17 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
         brls::Logger::info("FFmpeg: using software frames for OpenGL renderer");
     }
 
-    if (m_uses_hardware_frames)
-        m_decoder_context->pix_fmt = AV_PIX_FMT_NVTEGRA;
+    if (m_uses_hardware_frames) {
+        // get_format owns pix_fmt selection now; setting pix_fmt directly
+        // here would conflict with the callback FFmpeg is about to invoke.
+        m_decoder_context->opaque = this;
+        m_decoder_context->get_format = &FFmpegVideoDecoder::choose_format;
+
+        // NVDEC's internal clock-scaling (DFS) is driven off avctx->framerate.
+        // Left unset, this silently underclocks the decoder -- no error, it
+        // just falls behind. Use the stream's negotiated fps.
+        m_decoder_context->framerate = AVRational{ m_stream_fps, 1 };
+    }
 
     err = avcodec_open2(m_decoder_context, m_decoder, nullptr);
     if (err < 0) {

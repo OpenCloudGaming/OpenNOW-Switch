@@ -17,6 +17,7 @@ Work lands on `optimization`, then merges to `main`. We track upstream
 | `webrtc/{media,session}.cpp`, `webrtc_session.hpp` | Frame-gap / decode counters | WP-0 |
 | `stream/audio/AudioPipeline.{hpp,cpp}` | Audio-buffer occupancy accessor | WP-0 |
 | `settings_tab.{cpp,hpp}` | "Debug diagnostics" toggle | WP-0 |
+| `stream/ffmpeg/FFmpegVideoDecoder.{cpp,hpp}` | Engage NVDEC (h264 + nvtegra hwaccel via get_format; fixes silent SW fallback) | WP-16 |
 
 New files (not conflict surfaces): `stream/StreamDiagnosticsPolicy.hpp` + its test.
 

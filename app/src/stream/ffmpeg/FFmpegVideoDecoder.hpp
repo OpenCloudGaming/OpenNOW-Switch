@@ -20,6 +20,12 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     int decode(char* indata, int inlen, int64_t pts);
     AVFrame* get_frame(bool native_frame);
 
+    // avctx->get_format callback. Runs on the decode thread, inside
+    // avcodec_send_packet. Picks AV_PIX_FMT_NVTEGRA when the plain H264
+    // decoder offers it (hardware hwaccel path), otherwise falls back to
+    // whatever format FFmpeg offers first (software path).
+    static enum AVPixelFormat choose_format(AVCodecContext* ctx, const enum AVPixelFormat* fmt);
+
     AVPacket* m_packet = nullptr;
     AVBufferRef *hw_device_ctx = nullptr;
     const AVCodec* m_decoder = nullptr;
