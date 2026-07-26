@@ -34,7 +34,7 @@ better.
 
 | Build | avg decode ms | present fps | delivered Mbps | dropped | worst gap ms | A/V (subjective) | Notes |
 |---|---|---|---|---|---|---|---|
-| baseline · WP-0 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ | first hardware run |
+| b63c3fa | 7.0 | 48.0 | 2.79 | 35 (21 lost, 14 overflow) | 1932 | dark, muted, low; laggy input; ~2 s freeze | ⚠ **SW-decode fallback (NVDEC failed)** — not a representative baseline; fix decode first |
 
 After key builds: run the NRO, capture the log, add a row from its `SUMMARY`
 line; fill the A/V column by hand.
