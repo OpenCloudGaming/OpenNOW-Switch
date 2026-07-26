@@ -447,6 +447,14 @@ bool SettingsTab::TogglePersistGameSettings(brls::View* view)
     return true;
 }
 
+bool SettingsTab::ToggleConsoleMode(brls::View* view)
+{
+    (void)view;
+    draft_settings_.launch_in_console_mode = !draft_settings_.launch_in_console_mode;
+    MarkDirty();
+    return true;
+}
+
 bool SettingsTab::ToggleControllerLayout(brls::View* view)
 {
     (void)view;

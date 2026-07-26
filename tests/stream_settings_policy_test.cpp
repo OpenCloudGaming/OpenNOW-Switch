@@ -9,6 +9,7 @@ int main()
     value.audio_volume = 1400;
     value.game_language = "ru_RU";
     value.persist_game_settings = false;
+    value.launch_in_console_mode = false;
     value.controller_layout = "Switch";
     value.image_quality_mode = "Adaptive";
     value.stats_overlay_enabled = true;
@@ -21,6 +22,7 @@ int main()
     assert(value.preset_id == "custom" && value.label == "Custom");
     assert(value.video_backend == "NVDEC" && value.audio_volume == 1400);
     assert(value.game_language == "ru_RU" && !value.persist_game_settings);
+    assert(!value.launch_in_console_mode);
     assert(value.controller_layout == "Switch");
     assert(value.image_quality_mode == "Adaptive");
     assert(value.stats_overlay_enabled);

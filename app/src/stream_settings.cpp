@@ -252,6 +252,8 @@ StreamSettings LoadStreamSettings()
     settings.game_language = JsonField(root.get(), "game_language", settings.game_language);
     settings.persist_game_settings = JsonBool(
         root.get(), "persist_game_settings", settings.persist_game_settings);
+    settings.launch_in_console_mode = JsonBool(
+        root.get(), "launch_in_console_mode", settings.launch_in_console_mode);
     settings.controller_layout = JsonField(
         root.get(), "controller_layout", settings.controller_layout);
     settings.image_quality_mode = JsonField(
@@ -290,6 +292,8 @@ bool SaveStreamSettings(const StreamSettings& settings)
     json_object_set_new(root.get(), "game_language", json_string(clean.game_language.c_str()));
     json_object_set_new(
         root.get(), "persist_game_settings", json_boolean(clean.persist_game_settings));
+    json_object_set_new(
+        root.get(), "launch_in_console_mode", json_boolean(clean.launch_in_console_mode));
     json_object_set_new(
         root.get(), "controller_layout", json_string(clean.controller_layout.c_str()));
     json_object_set_new(
@@ -351,6 +355,8 @@ std::string FormatStreamSettings(const StreamSettings& settings)
            " | Game language: " + settings.game_language +
            " | Save game graphics: " +
            (settings.persist_game_settings ? "On" : "Off") +
+           " | Console mode: " +
+           (settings.launch_in_console_mode ? "On" : "Off") +
            " | Controls: " + settings.controller_layout +
            " | Motion quality: " + settings.image_quality_mode +
            " | Stats overlay: " +
