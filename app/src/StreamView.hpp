@@ -1,5 +1,6 @@
 #pragma once
 #include <borealis.hpp>
+#include "controller_assignment_policy.hpp"
 #include "gfn_client.hpp"
 #include "controller_delivery_policy.hpp"
 #include "keyboard_input_policy.hpp"
@@ -9,8 +10,10 @@
 #include "stream_overlay_policy.hpp"
 #include "webrtc_session.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -69,6 +72,18 @@ private:
                         std::chrono::steady_clock::time_point now);
     void DrawStreamEndNotice(NVGcontext* vg, float x, float y, float width,
                              std::chrono::steady_clock::time_point now);
+    void PollControllerStates(std::chrono::steady_clock::time_point now);
+    void SendControllerInputs(std::chrono::steady_clock::time_point now);
+    void ResetControllerDeliveryState();
+    void SendNeutralControllerReports();
+    void QueueControllerConnectedNotice(
+        std::size_t controller, std::chrono::steady_clock::time_point now);
+    void UpdateControllerNotice(std::chrono::steady_clock::time_point now);
+    void DrawControllerNotice(NVGcontext* vg, float x, float y, float width,
+                              std::chrono::steady_clock::time_point now);
+#ifdef __SWITCH__
+    bool ReadSwitchControllerSource(std::size_t source, brls::ControllerState& state);
+#endif
     void OpenInlineKeyboard();
     void HideInlineKeyboard(bool send_enter);
     void UpdateInlineKeyboard();
@@ -112,6 +127,23 @@ private:
         SubmitLogin,
     };
 
+    struct ControllerDeliveryState {
+        bool initialized = false;
+        bool pending_disconnect = false;
+        bool plus_was_down = false;
+        bool plus_long_press = false;
+        uint16_t last_buttons = 0;
+        uint8_t last_left_trigger = 0;
+        uint8_t last_right_trigger = 0;
+        int16_t last_lx = 0;
+        int16_t last_ly = 0;
+        int16_t last_rx = 0;
+        int16_t last_ry = 0;
+        std::chrono::steady_clock::time_point plus_pressed_at {};
+        std::chrono::steady_clock::time_point last_report {};
+        opennow::input::StartDeliveryPulse start_pulse;
+    };
+
     std::unique_ptr<WebRtcSession> session_;
     opennow::GfnClient client_;
     opennow::AuthSession auth_;
@@ -138,8 +170,6 @@ private:
     std::string nte_status_;
     std::chrono::steady_clock::time_point nte_next_action_ {};
     std::chrono::steady_clock::time_point nte_status_until_ {};
-    bool plus_was_down_ = false;
-    bool plus_long_press_ = false;
     bool exit_requested_ = false;
     bool exit_combo_was_down_ = false;
     bool touch_was_down_ = false;
@@ -163,8 +193,20 @@ private:
 #ifdef __SWITCH__
     SwkbdInline inline_keyboard_ {};
 #endif
-    std::chrono::steady_clock::time_point plus_pressed_at_ {};
-    opennow::input::StartDeliveryPulse start_pulse_;
+    opennow::input::ControllerAssignments controller_assignments_;
+    std::array<brls::ControllerState, opennow::input::kRemoteControllerCount>
+        controller_states_ {};
+    std::array<bool, opennow::input::kRemoteControllerCount> controller_connected_ {};
+    std::array<ControllerDeliveryState, opennow::input::kRemoteControllerCount>
+        controller_delivery_ {};
+    bool controller_connections_initialized_ = false;
+    std::string controller_notice_text_;
+    std::deque<std::string> controller_notice_queue_;
+    std::chrono::steady_clock::time_point controller_notice_visible_until_ {};
+#ifdef __SWITCH__
+    std::array<PadState, opennow::input::kSwitchControllerSourceCount>
+        switch_controller_sources_ {};
+#endif
     std::chrono::steady_clock::time_point fps_window_started_ {};
     VideoPerformanceCounters previous_video_counters_ {};
     float incoming_fps_ = 0.0f;
@@ -173,15 +215,6 @@ private:
     float stream_bitrate_mbps_ = 0.0f;
     int network_rtt_ms_ = -1;
     StreamNetworkCounters network_counters_ {};
-    bool gamepad_state_initialized_ = false;
-    uint16_t last_gamepad_buttons_ = 0;
-    uint8_t last_left_trigger_ = 0;
-    uint8_t last_right_trigger_ = 0;
-    int16_t last_lx_ = 0;
-    int16_t last_ly_ = 0;
-    int16_t last_rx_ = 0;
-    int16_t last_ry_ = 0;
-    std::chrono::steady_clock::time_point last_gamepad_report_ {};
     bool free_tier_session_ = false;
     bool five_minute_warning_shown_ = false;
     bool one_minute_warning_shown_ = false;

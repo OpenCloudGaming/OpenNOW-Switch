@@ -72,7 +72,8 @@ public:
     void request_stop();
     void stop();
     void poll();
-    bool send_gamepad_input(uint16_t buttons, uint8_t left_trigger, uint8_t right_trigger,
+    bool send_gamepad_input(uint8_t controller_id, uint16_t controller_bitmap,
+                            uint16_t buttons, uint8_t left_trigger, uint8_t right_trigger,
                             float lx, float ly, float rx, float ry);
     void send_mouse_move(int16_t dx, int16_t dy);
     void send_mouse_left_button(bool pressed);
@@ -210,7 +211,7 @@ private:
     int gamepad_send_failure_count_ = 0;
     int consecutive_input_send_failures_ = 0;
     int mouse_tx_count_ = 0;
-    uint16_t gamepad_sequence_ = 1;
+    std::array<uint16_t, 4> gamepad_sequences_ {1, 1, 1, 1};
     bool first_video_packet_logged_ = false;
     bool first_decoded_frame_logged_ = false;
     int last_logged_packet_count_ = 0;
