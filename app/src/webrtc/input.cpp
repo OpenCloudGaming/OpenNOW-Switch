@@ -118,7 +118,8 @@ int16_t AxisToI16(float value)
     return static_cast<int16_t>(value * 32767.0f);
 }
 
-std::vector<uint8_t> BuildGamepadPayload(uint64_t timestamp_us, uint16_t buttons,
+std::vector<uint8_t> BuildGamepadPayload(uint64_t timestamp_us, uint8_t controller_id,
+                                         uint16_t controller_bitmap, uint16_t buttons,
                                          uint8_t left_trigger, uint8_t right_trigger,
                                          int16_t lx, int16_t ly, int16_t rx, int16_t ry)
 {
@@ -126,8 +127,8 @@ std::vector<uint8_t> BuildGamepadPayload(uint64_t timestamp_us, uint16_t buttons
     payload.reserve(38);
     PutU32Le(payload, 12);
     PutU16Le(payload, 26);
-    PutU16Le(payload, 0);
-    PutU16Le(payload, 0x0101);
+    PutU16Le(payload, controller_id);
+    PutU16Le(payload, controller_bitmap);
     PutU16Le(payload, 20);
     PutU16Le(payload, buttons);
     PutU16Le(payload, static_cast<uint16_t>(left_trigger | (right_trigger << 8)));
@@ -189,8 +190,10 @@ namespace opennow::webrtc::internal
 bool InputEncodingSelfTest()
 {
     constexpr uint64_t timestamp = 0x0102030405060708ULL;
-    const auto raw = BuildGamepadPayload(timestamp, 0x1234, 0x56, 0x78, 1, -2, 3, -4);
-    if (raw.size() != 38 || raw[0] != 12 || raw[8] != 0x01 || raw[9] != 0x01 ||
+    const auto raw = BuildGamepadPayload(
+        timestamp, 2, 0x0f0f, 0x1234, 0x56, 0x78, 1, -2, 3, -4);
+    if (raw.size() != 38 || raw[0] != 12 ||
+        raw[6] != 2 || raw[7] != 0 || raw[8] != 0x0f || raw[9] != 0x0f ||
         raw[24] != 0 || raw[25] != 0 || raw[26] != 0x55 || raw[27] != 0 ||
         raw[28] != 0 || raw[29] != 0 || raw[30] != 0x08 || raw[37] != 0x01) {
         return false;
@@ -202,9 +205,9 @@ bool InputEncodingSelfTest()
         return false;
     }
 
-    const auto partial = WrapPartiallyReliableGamepad(3, timestamp, 0, 1, raw);
+    const auto partial = WrapPartiallyReliableGamepad(3, timestamp, 2, 1, raw);
     if (partial.size() != 54 || partial[0] != 0x23 || partial[9] != 0x26 ||
-        partial[10] != 0 || partial[11] != 0 || partial[12] != 1 ||
+        partial[10] != 2 || partial[11] != 0 || partial[12] != 1 ||
         partial[13] != 0x21 || partial[14] != 0 || partial[15] != 38 || partial[16] != 12) {
         return false;
     }
@@ -227,6 +230,8 @@ bool InputEncodingSelfTest()
 } // namespace opennow::webrtc::internal
 
 bool WebRtcSession::send_gamepad_input(
+    uint8_t controller_id,
+    uint16_t controller_bitmap,
     uint16_t buttons,
     uint8_t left_trigger,
     uint8_t right_trigger,
@@ -234,6 +239,9 @@ bool WebRtcSession::send_gamepad_input(
     float ly,
     float rx,
     float ry) {
+    if (controller_id >= gamepad_sequences_.size())
+        return false;
+
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
     gamepad_input_attempt_count_++;
     const PeerConnectionState peer_state = pc_ ? peer_connection_get_state(pc_) : PEER_CONNECTION_CLOSED;
@@ -253,12 +261,15 @@ bool WebRtcSession::send_gamepad_input(
 
     const uint64_t timestamp_us = NowUs();
     const std::vector<uint8_t> payload = BuildGamepadPayload(
-        timestamp_us, buttons, left_trigger, right_trigger,
+        timestamp_us, controller_id, controller_bitmap, buttons,
+        left_trigger, right_trigger,
         AxisToI16(lx), AxisToI16(-ly), AxisToI16(rx), AxisToI16(-ry));
 
     const bool use_partial = partial_input_channel_requested_ && input_protocol_version_ >= 3;
     std::vector<uint8_t> wire_payload = use_partial
-        ? WrapPartiallyReliableGamepad(input_protocol_version_, timestamp_us, 0, gamepad_sequence_++, payload)
+        ? WrapPartiallyReliableGamepad(
+            input_protocol_version_, timestamp_us, controller_id,
+            gamepad_sequences_[controller_id]++, payload)
         : WrapReliableGamepad(input_protocol_version_, timestamp_us, payload);
     const uint16_t sid = use_partial ? 2 : 0;
     const int sent = send_datachannel_binary(sid, "gamepad", wire_payload.data(), wire_payload.size());
@@ -272,6 +283,8 @@ bool WebRtcSession::send_gamepad_input(
                        " report=" + std::to_string(gamepad_tx_count_) +
                        " sid=" + std::to_string(sid) +
                        " protocol=" + std::to_string(input_protocol_version_) +
+                       " controller=" + std::to_string(controller_id) +
+                       " bitmap=" + std::to_string(controller_bitmap) +
                        " buttons=" + std::to_string(buttons) +
                        " lt=" + std::to_string(left_trigger) +
                        " rt=" + std::to_string(right_trigger) +

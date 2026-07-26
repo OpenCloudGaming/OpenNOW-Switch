@@ -1,5 +1,4 @@
 #include "StreamView.hpp"
-#include "controller_layout.hpp"
 #include "input/TouchMapping.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "stream_diagnostics.hpp"
@@ -12,28 +11,6 @@
 
 namespace
 {
-
-void ApplyRadialDeadzone(float& x, float& y)
-{
-    constexpr float deadzone = 0.12f;
-    const float magnitude = std::sqrt(x * x + y * y);
-    if (magnitude <= deadzone) {
-        x = 0.0f;
-        y = 0.0f;
-        return;
-    }
-
-    const float normalized = std::min(1.0f, (magnitude - deadzone) / (1.0f - deadzone));
-    const float scale = normalized / magnitude;
-    x *= scale;
-    y *= scale;
-}
-
-int16_t QuantizeAxis(float value)
-{
-    value = std::max(-1.0f, std::min(1.0f, value));
-    return static_cast<int16_t>(std::lround(value * 32767.0f));
-}
 
 bool IsFreeTier(std::string tier)
 {
@@ -74,6 +51,15 @@ StreamView::StreamView(
         nte_credentials_ = opennow::LoadNteCredentials();
         nte_status_until_ = stream_started_at_ + std::chrono::seconds(12);
     }
+#ifdef __SWITCH__
+    padInitialize(&switch_controller_sources_[0], HidNpadIdType_Handheld);
+    for (std::size_t source = 1; source < switch_controller_sources_.size(); ++source)
+    {
+        padInitialize(
+            &switch_controller_sources_[source],
+            static_cast<HidNpadIdType>(source - 1));
+    }
+#endif
     session_ = std::make_unique<WebRtcSession>(
         signaling_url,
         jwt_token,
@@ -178,6 +164,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         brls::Application::getPlatform()->getInputManager()->updateUnifiedControllerState(&state);
 
         const auto input_now = std::chrono::steady_clock::now();
+        PollControllerStates(input_now);
         bool nte_owned_input = false;
         if (is_nte_session_ && !stream_overlay_visible_ &&
             stream_end_reason_ == opennow::StreamEndReason::None) {
@@ -281,23 +268,6 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         if (!keyboard_owned_input) {
         
         const auto now = std::chrono::steady_clock::now();
-        const bool plus_down = state.buttons[brls::BUTTON_START];
-        if (plus_down && !plus_was_down_) {
-            plus_pressed_at_ = now;
-            plus_long_press_ = false;
-        }
-        if (plus_down && !plus_long_press_ &&
-            now - plus_pressed_at_ >= std::chrono::milliseconds(500)) {
-            plus_long_press_ = true;
-        }
-        if (!plus_down && plus_was_down_ && !plus_long_press_) {
-            // Keep Start pending until SCTP accepts it. Once delivered, keep
-            // it active for multiple reports and then send a clean release.
-            start_pulse_.Queue(now);
-            gamepad_state_initialized_ = false;
-            last_gamepad_report_ = {};
-        }
-        plus_was_down_ = plus_down;
 
         // Preserve the requested Minus -> View mapping. Exit the stream with
         // a deliberate ZL + ZR + Minus combination instead of stealing B.
@@ -311,69 +281,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         }
         exit_combo_was_down_ = exit_combo;
 
-        const bool start_active = start_pulse_.IsActive(now);
-
-        uint16_t buttons = 0;
-        if (state.buttons[brls::BUTTON_UP]) buttons |= 0x0001;
-        if (state.buttons[brls::BUTTON_DOWN]) buttons |= 0x0002;
-        if (state.buttons[brls::BUTTON_LEFT]) buttons |= 0x0004;
-        if (state.buttons[brls::BUTTON_RIGHT]) buttons |= 0x0008;
-        if (start_active) buttons |= 0x0010;
-        if (state.buttons[brls::BUTTON_BACK]) buttons |= 0x0020;
-        if (plus_down && plus_long_press_) buttons |= 0x0400;
-        if (state.buttons[brls::BUTTON_LSB]) buttons |= 0x0040;
-        if (state.buttons[brls::BUTTON_RSB]) buttons |= 0x0080;
-        if (state.buttons[brls::BUTTON_LB]) buttons |= 0x0100;
-        if (state.buttons[brls::BUTTON_RB]) buttons |= 0x0200;
-        buttons |= opennow::MapFaceButtons(
-            controller_layout_,
-            state.buttons[brls::BUTTON_A],
-            state.buttons[brls::BUTTON_B] && !suppress_b_until_release_,
-            state.buttons[brls::BUTTON_X],
-            state.buttons[brls::BUTTON_Y]);
-        
-        float lx = state.axes[brls::LEFT_X];
-        float ly = state.axes[brls::LEFT_Y];
-        float rx = state.axes[brls::RIGHT_X];
-        float ry = state.axes[brls::RIGHT_Y];
-
-        ApplyRadialDeadzone(lx, ly);
-        ApplyRadialDeadzone(rx, ry);
-        const uint8_t left_trigger = state.buttons[brls::BUTTON_LT] ? 0xff : 0x00;
-        const uint8_t right_trigger = state.buttons[brls::BUTTON_RT] ? 0xff : 0x00;
-        const int16_t qlx = QuantizeAxis(lx);
-        const int16_t qly = QuantizeAxis(ly);
-        const int16_t qrx = QuantizeAxis(rx);
-        const int16_t qry = QuantizeAxis(ry);
-        const bool state_changed = !gamepad_state_initialized_ ||
-            buttons != last_gamepad_buttons_ ||
-            left_trigger != last_left_trigger_ || right_trigger != last_right_trigger_ ||
-            qlx != last_lx_ || qly != last_ly_ || qrx != last_rx_ || qry != last_ry_;
-        const bool keepalive_due = last_gamepad_report_.time_since_epoch().count() == 0 ||
-            now - last_gamepad_report_ >= std::chrono::milliseconds(100);
-
-        if (state_changed || keepalive_due) {
-            const bool delivered = session_->send_gamepad_input(
-                buttons, left_trigger, right_trigger, lx, ly, rx, ry);
-            if (delivered) {
-                gamepad_state_initialized_ = true;
-                last_gamepad_buttons_ = buttons;
-                last_left_trigger_ = left_trigger;
-                last_right_trigger_ = right_trigger;
-                last_lx_ = qlx;
-                last_ly_ = qly;
-                last_rx_ = qrx;
-                last_ry_ = qry;
-                last_gamepad_report_ = now;
-                if (start_active && start_pulse_.OnReportDelivered(now)) {
-                    gamepad_state_initialized_ = false;
-                }
-            } else {
-                // Retry on the next frame instead of treating a blocked or
-                // failed report as delivered after a long idle period.
-                gamepad_state_initialized_ = false;
-            }
-        }
+        SendControllerInputs(now);
 
         std::vector<brls::RawTouchState> touches;
         brls::Application::getPlatform()->getInputManager()->updateTouchStates(&touches);
@@ -475,6 +383,8 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         DrawStreamOverlay(vg, x, y, width, height, notice_now);
     if (stream_end_reason_ == opennow::StreamEndReason::None)
         DrawNetworkWarning(vg, x, y, width, height, notice_now);
+    if (stream_end_reason_ == opennow::StreamEndReason::None)
+        DrawControllerNotice(vg, x, y, width, notice_now);
 
     brls::Box::draw(vg, x, y, width, height, style, ctx);
 }

@@ -310,12 +310,12 @@ void StreamView::OpenInlineKeyboard() {
     keyboard_visible_ = true;
     keyboard_b_was_down_ = false;
     keyboard_plus_was_down_ = false;
-    gamepad_state_initialized_ = false;
+    ResetControllerDeliveryState();
     if (touch_was_down_) {
         session_->send_mouse_left_button(false);
         touch_was_down_ = false;
     }
-    session_->send_gamepad_input(0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+    SendNeutralControllerReports();
     session_->record_ui_event("keyboard opened by Minus+Y");
 #endif
 }
@@ -329,7 +329,7 @@ void StreamView::HideInlineKeyboard(bool send_enter) {
     swkbdInlineDisappear(&inline_keyboard_);
     keyboard_visible_ = false;
     keyboard_text_.clear();
-    gamepad_state_initialized_ = false;
+    ResetControllerDeliveryState();
     suppress_b_until_release_ = true;
     keyboard_release_guard_ = true;
     if (session_)
@@ -363,7 +363,7 @@ void StreamView::KeyboardEnterCallback(const char* text, SwkbdDecidedEnterArg*) 
     active_keyboard_view_->SendKeyboardCharacter('\n');
     active_keyboard_view_->keyboard_visible_ = false;
     active_keyboard_view_->keyboard_text_.clear();
-    active_keyboard_view_->gamepad_state_initialized_ = false;
+    active_keyboard_view_->ResetControllerDeliveryState();
     active_keyboard_view_->keyboard_release_guard_ = true;
     if (active_keyboard_view_->session_)
         active_keyboard_view_->session_->record_ui_event("keyboard submitted");
@@ -374,7 +374,7 @@ void StreamView::KeyboardCancelCallback() {
         return;
     active_keyboard_view_->keyboard_visible_ = false;
     active_keyboard_view_->keyboard_text_.clear();
-    active_keyboard_view_->gamepad_state_initialized_ = false;
+    active_keyboard_view_->ResetControllerDeliveryState();
     active_keyboard_view_->suppress_b_until_release_ = true;
     active_keyboard_view_->keyboard_release_guard_ = true;
     if (active_keyboard_view_->session_)

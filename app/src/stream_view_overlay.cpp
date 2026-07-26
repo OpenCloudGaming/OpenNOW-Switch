@@ -233,10 +233,7 @@ void StreamView::SetStreamOverlayVisible(bool visible)
 
     stream_overlay_visible_ = visible;
     stream_overlay_b_was_down_ = false;
-    gamepad_state_initialized_ = false;
-    plus_was_down_ = false;
-    plus_long_press_ = false;
-    start_pulse_ = {};
+    ResetControllerDeliveryState();
 
     if (touch_was_down_ && session_)
     {
@@ -245,7 +242,7 @@ void StreamView::SetStreamOverlayVisible(bool visible)
     }
     if (session_)
     {
-        session_->send_gamepad_input(0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+        SendNeutralControllerReports();
         session_->record_ui_event(
             visible ? "stream overlay opened by Minus+Plus"
                     : "stream overlay closed");
@@ -253,6 +250,38 @@ void StreamView::SetStreamOverlayVisible(bool visible)
 
     if (!visible)
         keyboard_release_guard_ = true;
+}
+
+void StreamView::DrawControllerNotice(
+    NVGcontext* vg, float x, float y, float width,
+    std::chrono::steady_clock::time_point now)
+{
+    UpdateControllerNotice(now);
+    if (controller_notice_text_.empty())
+        return;
+
+    const float box_width = std::min(360.0f, width - 36.0f);
+    const float box_height = 54.0f;
+    const float box_x = x + (width - box_width) * 0.5f;
+    const float box_y = y + 18.0f;
+
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, box_x, box_y, box_width, box_height, 13.0f);
+    nvgFillColor(vg, nvgRGBA(7, 11, 14, 232));
+    nvgFill(vg);
+
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, box_x, box_y, 6.0f, box_height, 3.0f);
+    nvgFillColor(vg, nvgRGB(55, 220, 125));
+    nvgFill(vg);
+
+    nvgFontSize(vg, 21.0f);
+    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFillColor(vg, nvgRGB(248, 252, 249));
+    nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+    nvgText(
+        vg, box_x + box_width * 0.5f, box_y + box_height * 0.5f,
+        controller_notice_text_.c_str(), nullptr);
 }
 
 void StreamView::RefreshNetworkInfo(std::chrono::steady_clock::time_point now)
