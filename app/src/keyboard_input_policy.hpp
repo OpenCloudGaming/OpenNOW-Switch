@@ -12,6 +12,30 @@ struct KeyboardStroke
     std::uint16_t modifiers = 0;
 };
 
+enum class KeyboardShortcut
+{
+    Escape,
+    Tab,
+    AltTab,
+    Windows,
+};
+
+inline KeyboardStroke MapKeyboardShortcut(KeyboardShortcut shortcut)
+{
+    constexpr std::uint16_t kAlt  = 0x0004;
+    constexpr std::uint16_t kMeta = 0x0008;
+
+    switch (shortcut)
+    {
+        case KeyboardShortcut::Escape: return {0x1b, 0x01, 0};
+        case KeyboardShortcut::Tab: return {0x09, 0x0f, 0};
+        case KeyboardShortcut::AltTab: return {0x09, 0x0f, kAlt};
+        case KeyboardShortcut::Windows: return {0x5b, 0x5b, kMeta};
+    }
+
+    return {};
+}
+
 inline bool MapAsciiKey(char character, KeyboardStroke& stroke)
 {
     constexpr std::uint16_t kShift = 0x0001;

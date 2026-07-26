@@ -244,6 +244,22 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         if (keyboard_visible_) {
             const bool b_down = state.buttons[brls::BUTTON_B];
             const bool plus_down = state.buttons[brls::BUTTON_START];
+            const bool escape_chord = minus_down && state.buttons[brls::BUTTON_LT];
+            const bool tab_chord = minus_down && state.buttons[brls::BUTTON_LB];
+            const bool alt_tab_chord = minus_down && state.buttons[brls::BUTTON_RB];
+            const bool windows_chord = minus_down && state.buttons[brls::BUTTON_RT];
+            if (escape_chord && !keyboard_escape_chord_was_down_)
+                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Escape);
+            else if (tab_chord && !keyboard_tab_chord_was_down_)
+                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Tab);
+            else if (alt_tab_chord && !keyboard_alt_tab_chord_was_down_)
+                SendKeyboardShortcut(opennow::input::KeyboardShortcut::AltTab);
+            else if (windows_chord && !keyboard_windows_chord_was_down_)
+                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Windows);
+            keyboard_escape_chord_was_down_ = escape_chord;
+            keyboard_tab_chord_was_down_ = tab_chord;
+            keyboard_alt_tab_chord_was_down_ = alt_tab_chord;
+            keyboard_windows_chord_was_down_ = windows_chord;
             if (plus_down && !keyboard_plus_was_down_)
                 HideInlineKeyboard(true);
             else if (b_down && !keyboard_b_was_down_)
@@ -254,6 +270,10 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         } else {
             keyboard_b_was_down_ = false;
             keyboard_plus_was_down_ = false;
+            keyboard_escape_chord_was_down_ = false;
+            keyboard_tab_chord_was_down_ = false;
+            keyboard_alt_tab_chord_was_down_ = false;
+            keyboard_windows_chord_was_down_ = false;
         }
 
         if (!state.buttons[brls::BUTTON_B])
