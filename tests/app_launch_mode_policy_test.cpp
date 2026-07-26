@@ -4,7 +4,6 @@
 
 int main()
 {
-    assert(opennow::gfn::AppLaunchModeWireValue(false) == 1);
-    assert(opennow::gfn::AppLaunchModeWireValue(true) == 2);
+    assert(opennow::gfn::ConsoleAppLaunchModeWireValue() == 2);
     return 0;
 }

@@ -80,7 +80,6 @@ class SettingsTab : public brls::Box
     bool ToggleCommunityProxy(brls::View* view);
     bool ChooseGameLanguage(brls::View* view);
     bool TogglePersistGameSettings(brls::View* view);
-    bool ToggleConsoleMode(brls::View* view);
     bool ToggleControllerLayout(brls::View* view);
     bool ToggleAudio(brls::View* view);
     bool CycleAudioVolume(brls::View* view);

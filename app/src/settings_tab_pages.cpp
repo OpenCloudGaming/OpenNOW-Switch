@@ -162,15 +162,6 @@ void SettingsTab::BuildPreferencesPage()
         },
         [this](brls::View* view) { return TogglePersistGameSettings(view); }));
     game->addView(MakeOptionRow(
-        "Console mode",
-        "Ask games and launchers such as Steam to start in a gamepad-friendly Big Picture mode.",
-        [this] {
-            return draft_settings_.launch_in_console_mode
-                ? std::string("Enabled")
-                : std::string("Disabled");
-        },
-        [this](brls::View* view) { return ToggleConsoleMode(view); }));
-    game->addView(MakeOptionRow(
         "Face buttons",
         "Choose Xbox positions or matching Switch labels.",
         [this] { return draft_settings_.controller_layout; },

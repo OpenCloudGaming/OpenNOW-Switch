@@ -24,7 +24,6 @@ struct StreamSettings
     bool stats_overlay_enabled = false;
     std::string game_language = "en_US";
     bool persist_game_settings = true;
-    bool launch_in_console_mode = true;
     std::string controller_layout = "Xbox";
     std::string image_quality_mode = "Adaptive";
     std::string interface_language = "en";

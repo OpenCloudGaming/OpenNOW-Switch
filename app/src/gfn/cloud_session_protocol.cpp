@@ -343,7 +343,7 @@ std::string BuildSessionBody(
     json_object_set_new(req, "enhancedStreamMode", json_integer(1));
     json_object_set_new(
         req, "appLaunchMode",
-        json_integer(AppLaunchModeWireValue(stream_settings.launch_in_console_mode)));
+        json_integer(ConsoleAppLaunchModeWireValue()));
     json_object_set_new(req, "secureRTSPSupported", json_false());
     json_object_set_new(req, "partnerCustomData", json_string(""));
     json_object_set_new(req, "accountLinked", json_true());

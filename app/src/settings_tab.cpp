@@ -57,7 +57,6 @@ bool SameSettings(const StreamSettings& left, const StreamSettings& right)
            left.stats_overlay_enabled == right.stats_overlay_enabled &&
            left.game_language == right.game_language &&
            left.persist_game_settings == right.persist_game_settings &&
-           left.launch_in_console_mode == right.launch_in_console_mode &&
            left.controller_layout == right.controller_layout &&
            left.image_quality_mode == right.image_quality_mode &&
            left.interface_language == right.interface_language &&
