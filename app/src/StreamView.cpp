@@ -82,6 +82,7 @@ StreamView::StreamView(
         media_port,
         ice_servers);
     session_->start();
+    RefreshNetworkInfo(stream_started_at_);
     
     // Suggest the view to take all available space
     this->setWidth(brls::Application::windowWidth);
@@ -472,6 +473,8 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         DrawNteAutoLoginStatus(vg, x, y, width, height, notice_now);
     if (stream_end_reason_ == opennow::StreamEndReason::None)
         DrawStreamOverlay(vg, x, y, width, height, notice_now);
+    if (stream_end_reason_ == opennow::StreamEndReason::None)
+        DrawNetworkWarning(vg, x, y, width, height, notice_now);
 
     brls::Box::draw(vg, x, y, width, height, style, ctx);
 }

@@ -2,6 +2,7 @@
 #include <borealis.hpp>
 #include "gfn_client.hpp"
 #include "controller_delivery_policy.hpp"
+#include "network_utils.hpp"
 #include "nte_credentials.hpp"
 #include "stream_end_policy.hpp"
 #include "stream_overlay_policy.hpp"
@@ -56,6 +57,9 @@ private:
     void SetStreamOverlayVisible(bool visible);
     void DrawStreamOverlay(NVGcontext* vg, float x, float y, float width, float height,
                            std::chrono::steady_clock::time_point now);
+    void RefreshNetworkInfo(std::chrono::steady_clock::time_point now);
+    void DrawNetworkWarning(NVGcontext* vg, float x, float y, float width, float height,
+                            std::chrono::steady_clock::time_point now);
     void UpdateSessionLimitNotice(std::chrono::steady_clock::time_point now);
     void DrawSessionLimitNotice(NVGcontext* vg, float x, float y, float width,
                                 std::chrono::steady_clock::time_point now);
@@ -183,5 +187,8 @@ private:
     std::chrono::steady_clock::time_point stream_end_started_at_ {};
     std::chrono::steady_clock::time_point stream_auto_exit_at_ {};
     std::chrono::steady_clock::time_point last_network_check_at_ {};
+    std::chrono::steady_clock::time_point last_network_info_check_at_ {};
+    std::chrono::steady_clock::time_point network_warning_visible_until_ {};
+    opennow::NetworkConnectionInfo network_info_ {};
     bool internet_connected_ = true;
 };

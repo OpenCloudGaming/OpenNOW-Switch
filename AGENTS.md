@@ -138,3 +138,8 @@ retain bounded queues and must not weaken the existing resynchronization paths.
   explicit migration covering accounts, settings, shortcuts and recovery data.
 - Full login and gameplay tests require a real NVIDIA/GeForce NOW account and
   Switch hardware. Never add credentials or captured sessions to tests.
+- For nxlink deployment from this macOS workstation, T3 Code child processes
+  are blocked by Local Network privacy. Run nxlink through Terminal with
+  `sudo /opt/devkitpro/tools/bin/nxlink -a 192.168.1.101 build/switch/SwitchNOW.nro`.
+  Confirm the IP displayed by the Switch NetLoader before sending if the
+  network has changed.
