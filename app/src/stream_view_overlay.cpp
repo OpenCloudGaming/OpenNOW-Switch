@@ -613,6 +613,7 @@ void StreamView::DrawStreamOverlay(
 
     draw_shortcut(right_y, "MINUS  +  PLUS", "Open or close this menu", true);
     draw_shortcut(right_y, "MINUS  +  Y", "Open the on-screen keyboard");
+    draw_shortcut(right_y, "MINUS + ZL/L/R/ZR", "Keyboard: Esc / Tab / Alt+Tab / Win");
     draw_shortcut(right_y, "B", "Close menu or keyboard");
     draw_shortcut(right_y, "ZL + ZR + MINUS", "Exit the stream");
     draw_shortcut(right_y, "HOLD PLUS", "Press the Xbox Guide button");
