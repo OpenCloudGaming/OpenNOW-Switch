@@ -1,4 +1,32 @@
-# OpenNOW for Nintendo Switch
+<p align="center">
+  <img
+    src="./resources/icon/icon.png"
+    alt="OpenNOW cloud gaming icon"
+    width="176"
+  />
+</p>
+
+<h1 align="center">OpenNOW for Nintendo Switch</h1>
+
+<p align="center">
+  <strong>A native, controller-first GeForce NOW client for Nintendo Switch homebrew.</strong>
+</p>
+
+<p align="center">
+  <a href="https://opennow.zortos.me"><strong>Documentation</strong></a>
+  ·
+  <a href="https://github.com/OpenCloudGaming/OpenNOW-Switch/releases"><strong>Releases</strong></a>
+  ·
+  <a href="https://github.com/OpenCloudGaming/OpenNOW-Switch/issues"><strong>Issues</strong></a>
+</p>
+
+<p align="center">
+  <img alt="Platform: Nintendo Switch" src="https://img.shields.io/badge/platform-Nintendo%20Switch-58d98a?style=flat-square&labelColor=101014" />
+  <img alt="Language: C++20" src="https://img.shields.io/badge/C%2B%2B-20-58d98a?style=flat-square&labelColor=101014" />
+  <img alt="Status: Active development" src="https://img.shields.io/badge/status-active%20development-58d98a?style=flat-square&labelColor=101014" />
+</p>
+
+---
 
 OpenNOW is a native GeForce NOW client for Nintendo Switch homebrew. This
 repository contains the Switch launcher, streaming runtime, HOME-screen
