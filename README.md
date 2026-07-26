@@ -47,7 +47,7 @@ no separate NVDEC build flavor.
 Create a release archive with:
 
 ```powershell
-.\scripts\package-release.ps1 -Version 1.0.0
+.\scripts\package-release.ps1 -Version 0.0.5
 ```
 
 ## Repository layout

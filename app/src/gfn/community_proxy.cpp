@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include "../app_version.hpp"
 #include "../community_proxy_policy.hpp"
 #include "../device_identity_policy.hpp"
 
@@ -40,7 +41,7 @@ std::string GfnClient::ProvisionCommunityProxy() const
 
     const HttpResponse response = http_client_.Post(
         std::string(community_proxy::kProvisionUrl),
-        "OpenNOW-Switch/1.0.0",
+        "OpenNOW-Switch/" + std::string(kAppVersion),
         {"Accept: application/json", "Content-Type: application/json"},
         body);
 

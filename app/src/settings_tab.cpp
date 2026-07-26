@@ -72,28 +72,6 @@ SettingsTab::SettingsTab()
     setPadding(16, 28, 18, 28);
     setBackgroundColor(nvgRGB(12, 13, 16));
 
-    auto* top = new brls::Box(brls::Axis::ROW);
-    top->setHeight(62);
-    top->setAlignItems(brls::AlignItems::CENTER);
-    top->setMarginBottom(12);
-
-    auto* title_column = new brls::Box(brls::Axis::COLUMN);
-    title_column->setGrow(1.0f);
-    auto* title = MakeParagraph("Settings", 3.0f);
-    title->setFontSize(30);
-    title_column->addView(title);
-    auto* hint = MakeParagraph("Account, streaming and app preferences in one place.", 0.0f);
-    hint->setFontSize(15);
-    hint->setTextColor(nvgRGB(142, 149, 160));
-    title_column->addView(hint);
-    top->addView(title_column);
-
-    save_status_ = MakeParagraph("All changes saved", 0.0f);
-    save_status_->setFontSize(16);
-    save_status_->setTextColor(nvgRGB(88, 230, 146));
-    top->addView(save_status_);
-    addView(top);
-
     auto* body = new brls::Box(brls::Axis::ROW);
     body->setGrow(1.0f);
 
@@ -163,9 +141,18 @@ SettingsTab::SettingsTab()
     content_shell->setGrow(1.0f);
     content_shell->setPadding(0, 0, 0, 0);
 
-    page_title_ = MakeParagraph("Account", 2.0f);
+    auto* page_heading = new brls::Box(brls::Axis::ROW);
+    page_heading->setAlignItems(brls::AlignItems::CENTER);
+    page_heading->setMarginBottom(2);
+    page_title_ = MakeParagraph("Account", 0.0f);
     page_title_->setFontSize(27);
-    content_shell->addView(page_title_);
+    page_title_->setGrow(1.0f);
+    page_heading->addView(page_title_);
+    save_status_ = MakeParagraph("All changes saved", 0.0f);
+    save_status_->setFontSize(14);
+    save_status_->setTextColor(nvgRGB(88, 230, 146));
+    page_heading->addView(save_status_);
+    content_shell->addView(page_heading);
     page_subtitle_ = MakeParagraph("Manage your GeForce NOW identity and saved sign-in.", 14.0f);
     page_subtitle_->setFontSize(15);
     page_subtitle_->setTextColor(nvgRGB(142, 149, 160));
@@ -290,7 +277,8 @@ brls::Box* SettingsTab::MakeActionRow(
     return row;
 }
 
-void SettingsTab::AddInfoLine(brls::Box* parent, const std::string& label, const std::string& value)
+brls::Label* SettingsTab::AddInfoLine(
+    brls::Box* parent, const std::string& label, const std::string& value)
 {
     auto* row = new brls::Box(brls::Axis::ROW);
     row->setHeight(40);
@@ -310,6 +298,7 @@ void SettingsTab::AddInfoLine(brls::Box* parent, const std::string& label, const
     text->setTextColor(nvgRGB(210, 216, 225));
     row->addView(text);
     parent->addView(row);
+    return text;
 }
 
 void SettingsTab::SelectCategory(Category category)

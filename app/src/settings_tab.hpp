@@ -70,7 +70,8 @@ class SettingsTab : public brls::Box
         const std::string& button_text,
         std::function<bool(brls::View*)> action,
         bool destructive = false);
-    void AddInfoLine(brls::Box* parent, const std::string& label, const std::string& value);
+    brls::Label* AddInfoLine(
+        brls::Box* parent, const std::string& label, const std::string& value);
 
     bool ClearSavedLogin(brls::View* view);
     bool SwitchSavedAccount(brls::View* view);

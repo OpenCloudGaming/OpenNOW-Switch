@@ -1,9 +1,11 @@
 #include "settings_tab.hpp"
 
 #include "app_state.hpp"
+#include "app_version.hpp"
 #include "cover_image_cache.hpp"
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
+#include "membership_tier_style.hpp"
 #include "subscription_display.hpp"
 
 #include <vector>
@@ -26,10 +28,11 @@ void SettingsTab::BuildAccountPage()
     {
         const AuthSession& session = *state.session();
         AddInfoLine(overview, "User", session.user.display_name);
-        AddInfoLine(
-            overview, "Membership",
-            membership::DisplayLabel(
-                session.user.membership_tier, session.user.membership_tier_verified));
+        const std::string membership_tier = membership::DisplayLabel(
+            session.user.membership_tier, session.user.membership_tier_verified);
+        auto* membership_label = AddInfoLine(
+            overview, "Membership", membership_tier);
+        membership_label->setTextColor(membership::TextColor(membership_tier));
         if (session.subscription.available)
         {
             AddInfoLine(
@@ -219,7 +222,7 @@ void SettingsTab::BuildAppPage()
     content_container_->addView(cache);
 
     auto* about = MakeSection("OpenNOW", "Native GeForce NOW client for Nintendo Switch.");
-    AddInfoLine(about, "Version", "1.0.0");
+    AddInfoLine(about, "Version", kAppVersion);
     content_container_->addView(about);
 }
 

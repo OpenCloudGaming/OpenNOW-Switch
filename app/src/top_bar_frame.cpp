@@ -4,6 +4,7 @@
 #include "cover_image_cache.hpp"
 #include "localization.hpp"
 #include "membership_tier_policy.hpp"
+#include "membership_tier_style.hpp"
 #include "subscription_display.hpp"
 #include "ui_refresh_policy.hpp"
 #include <borealis/core/application.hpp>
@@ -409,6 +410,7 @@ void TopBarFrame::UpdateStatusBar(bool force)
         {
             account_name_label_->setText(name);
             account_detail_label_->setText(detail);
+            account_detail_label_->setTextColor(membership::TextColor(""));
             displayed_status_ = status;
         }
         return;
@@ -433,6 +435,7 @@ void TopBarFrame::UpdateStatusBar(bool force)
     {
         account_name_label_->setText(name);
         account_detail_label_->setText(detail);
+        account_detail_label_->setTextColor(membership::TextColor(tier));
         time_remaining_label_->setText(time);
         storage_remaining_label_->setText(storage);
         subscription_container_->setVisibility(brls::Visibility::VISIBLE);

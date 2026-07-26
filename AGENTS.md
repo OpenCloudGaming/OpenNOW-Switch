@@ -94,6 +94,9 @@ retain bounded queues and must not weaken the existing resynchronization paths.
   headers and retain local-only helpers in anonymous namespaces.
 - Reuse existing policy headers for behavior that can be tested without Switch
   hardware.
+- Runtime-visible product version text lives in `app/src/app_version.hpp`.
+  When releasing, keep CMake metadata, packaging defaults, README examples and
+  the HOME forwarder installer version synchronized with it.
 - Match the existing C++20 style and keep public interfaces stable unless the
   task requires a contract change.
 - Do not mix inherited SwitchNOW-to-OpenNOW renaming with unrelated behavior
