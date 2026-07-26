@@ -49,6 +49,7 @@ class SettingsTab : public brls::Box
     bool CycleVideoBackend(brls::View* view);
     bool CycleImageQuality(brls::View* view);
     bool ToggleStatsOverlay(brls::View* view);
+    bool ToggleDebugDiagnostics(brls::View* view);
     bool ChooseServerLocation(brls::View* view);
     bool RefreshServerLocations(brls::View* view);
     void BeginServerLocationLoad(bool open_when_ready, bool notify_result);

@@ -649,6 +649,15 @@ void SettingsTab::BuildAppPage()
                 : std::string("Disabled");
         },
         [this](brls::View* view) { return ToggleStatsOverlay(view); }));
+    interface->addView(MakeOptionRow(
+        "Debug diagnostics",
+        "Write per-second stream metrics to the SD card log for troubleshooting.",
+        [this] {
+            return draft_settings_.debug_diagnostics
+                ? std::string("Enabled")
+                : std::string("Disabled");
+        },
+        [this](brls::View* view) { return ToggleDebugDiagnostics(view); }));
     content_container_->addView(interface);
 
     auto* shortcuts = MakeSection(
@@ -1244,6 +1253,14 @@ bool SettingsTab::ToggleStatsOverlay(brls::View* view)
 {
     (void)view;
     draft_settings_.stats_overlay_enabled = !draft_settings_.stats_overlay_enabled;
+    MarkDirty();
+    return true;
+}
+
+bool SettingsTab::ToggleDebugDiagnostics(brls::View* view)
+{
+    (void)view;
+    draft_settings_.debug_diagnostics = !draft_settings_.debug_diagnostics;
     MarkDirty();
     return true;
 }
