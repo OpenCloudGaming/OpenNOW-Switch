@@ -1,7 +1,7 @@
 <h1 align="center">OpenNOW for Nintendo Switch</h1>
 
 <p align="center">
-  <img src="resources/icon/icon.png" alt="OpenNOW logo" width="180" />
+  <img src="resources/img/opennow-logo-mark.png" alt="OpenNOW cloud logo" width="180" />
 </p>
 
 <p align="center">
