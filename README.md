@@ -34,6 +34,31 @@
   <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++20">
 </p>
 
+## See it in action
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/store.png" alt="OpenNOW Store on Nintendo Switch">
+      <br><sub><strong>Store</strong></sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/library.png" alt="OpenNOW game library on Nintendo Switch">
+      <br><sub><strong>Library</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/game-details.png" alt="OpenNOW game details on Nintendo Switch">
+      <br><sub><strong>Game details</strong></sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/session-launch.png" alt="OpenNOW cloud session launch on Nintendo Switch">
+      <br><sub><strong>Session launch</strong></sub>
+    </td>
+  </tr>
+</table>
+
 > [!WARNING]
 > OpenNOW for Nintendo Switch is under active development. Expect occasional
 > bugs, rough edges, and platform-specific issues while the client matures.
