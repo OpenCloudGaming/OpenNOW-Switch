@@ -1,4 +1,5 @@
 #include "cloud_session_internal.hpp"
+#include "app_launch_mode_policy.hpp"
 
 #include <algorithm>
 #include <ctime>
@@ -340,7 +341,9 @@ std::string BuildSessionBody(
     // Switch stream view. The gamepad reports use the same active bitmap.
     json_object_set_new(req, "remoteControllersBitmap", json_integer(1));
     json_object_set_new(req, "enhancedStreamMode", json_integer(1));
-    json_object_set_new(req, "appLaunchMode", json_integer(1));
+    json_object_set_new(
+        req, "appLaunchMode",
+        json_integer(ConsoleAppLaunchModeWireValue()));
     json_object_set_new(req, "secureRTSPSupported", json_false());
     json_object_set_new(req, "partnerCustomData", json_string(""));
     json_object_set_new(req, "accountLinked", json_true());
