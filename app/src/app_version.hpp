@@ -3,6 +3,6 @@
 namespace opennow
 {
 
-inline constexpr const char* kAppVersion = "0.0.5";
+inline constexpr const char* kAppVersion = "0.0.6";
 
 } // namespace opennow

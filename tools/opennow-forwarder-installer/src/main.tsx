@@ -94,7 +94,7 @@ async function generateNsp(request: InstallRequest): Promise<Uint8Array> {
         nacp.id = titleId;
         nacp.title = request.name;
         nacp.author = request.author || 'OpenCloudGaming';
-        nacp.version = request.displayVersion || '0.0.5';
+        nacp.version = request.displayVersion || '0.0.6';
         nacp.startupUserAccount = 0;
         nacp.userAccountSaveDataSize = 0n;
         nacp.userAccountSaveDataJournalSize = 0n;
