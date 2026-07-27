@@ -153,6 +153,10 @@ Tests that exercise implementation files must compile those `.cpp` files and
 link their host dependencies. Host checks do not replace a devkitA64 Nintendo
 Switch build.
 
+## License
+
+OpenNOW Switch is licensed under the [MIT License](LICENSE).
+
 ## Acknowledgements
 
 This port is derived from
