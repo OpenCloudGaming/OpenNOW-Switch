@@ -98,6 +98,7 @@ WebRtcSession::WebRtcSession(
 
     // Initialize libpeer
     peer_init();
+    peer_connection_set_diagnostics_enabled(settings_.debug_diagnostics ? 1 : 0);
     renderer_ = std::make_unique<DKVideoRenderer>();
     audio_ = std::make_unique<AudioPipeline>();
     audio_->configure(settings_.audio_volume, settings_.audio_buffer_ms);
@@ -223,6 +224,10 @@ void WebRtcSession::start() {
     setup_peer_connection();
     if (!pc_) {
         current_state_ = "PeerConnection setup failed";
+        peer_terminal_kind_.store(
+            static_cast<int>(opennow::PeerTerminalKind::Failed),
+            std::memory_order_release);
+        peer_terminal_.store(true, std::memory_order_release);
         AppendStreamLog("SESSION error peer_connection_setup_failed");
         return;
     }
@@ -243,6 +248,10 @@ void WebRtcSession::start() {
 
     if (!signaling_client_->connect()) {
         current_state_ = "WebSocket Connect Failed: " + signaling_client_->get_last_error();
+        peer_terminal_kind_.store(
+            static_cast<int>(opennow::PeerTerminalKind::Failed),
+            std::memory_order_release);
+        peer_terminal_.store(true, std::memory_order_release);
         AppendStreamLog("SESSION error websocket_connect_failed " + signaling_client_->get_last_error());
         signaling_ready_ = false;
         return;
@@ -318,6 +327,18 @@ void WebRtcSession::poll() {
         return;
 
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
+
+    if (!peer_completed_seen_ &&
+        std::chrono::steady_clock::now() - session_started_at_ >= std::chrono::seconds(30)) {
+        current_state_ = "Streaming transport startup timed out";
+        peer_terminal_kind_.store(
+            static_cast<int>(opennow::PeerTerminalKind::Failed),
+            std::memory_order_release);
+        peer_terminal_.store(true, std::memory_order_release);
+        AppendStreamLog("SESSION error transport_startup_timeout");
+        request_stop();
+        return;
+    }
 
     if (signaling_client_) {
         signaling_client_->poll();

@@ -56,7 +56,7 @@ private:
     void StopCloudSessionAsync();
     void DrawDebugOverlay(NVGcontext* vg, float x, float y, float width);
     void DrawPreparingStream(NVGcontext* vg, float x, float y, float width, float height);
-    void UpdatePerformanceCounter(const VideoPerformanceCounters& counters);
+    void UpdatePerformanceCounter();
     void DrawPerformanceOverlay(NVGcontext* vg, float x, float y);
     void SetStreamOverlayVisible(bool visible);
     void DrawStreamOverlay(NVGcontext* vg, float x, float y, float width, float height,

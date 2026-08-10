@@ -128,6 +128,8 @@ void* peer_connection_get_sctp(PeerConnection* pc);
 
 PeerConnection* peer_connection_create(PeerConfiguration* config);
 
+void peer_connection_set_diagnostics_enabled(int enabled);
+
 void peer_connection_destroy(PeerConnection* pc);
 
 void peer_connection_close(PeerConnection* pc);

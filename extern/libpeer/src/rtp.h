@@ -85,6 +85,7 @@ typedef void (*RtpOnVideoPacket)(const PeerVideoPacket* packet, void* user_data)
 // window turns normal UDP burst reordering into artificial packet loss.
 #define RTP_REORDER_WINDOW 128
 #define RTP_REORDER_MAX_HOLD_PACKETS 64
+#define RTP_REORDER_MAX_HOLD_MS 30
 #define RTP_REORDER_PACKET_CAPACITY (CONFIG_MTU + 256)
 
 struct RtpDecoder {
@@ -129,6 +130,8 @@ struct RtpDecoder {
   uint8_t reorder_used[RTP_REORDER_WINDOW];
   uint16_t reorder_expected_sequence;
   uint8_t reorder_has_expected_sequence;
+  uint8_t reorder_gap_active;
+  uint32_t reorder_gap_started_ms;
   uint32_t reorder_buffered_packets;
   uint32_t reordered_packets;
   uint32_t late_packets_dropped;
@@ -161,6 +164,8 @@ void rtp_decoder_set_video_callback(RtpDecoder* rtp_decoder, RtpOnVideoPacket on
 void rtp_decoder_cleanup(RtpDecoder* rtp_decoder);
 
 int rtp_decoder_decode(RtpDecoder* rtp_decoder, const uint8_t* data, size_t size);
+
+void rtp_decoder_poll(RtpDecoder* rtp_decoder);
 
 uint32_t rtp_get_ssrc(uint8_t* packet);
 

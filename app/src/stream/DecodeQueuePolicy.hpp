@@ -6,13 +6,20 @@
 namespace opennow::video
 {
 
-// Retain no more than roughly 67 ms of complete pictures. If decoding falls
-// farther behind, resynchronizing at a fresh IDR is preferable to displaying
-// an increasingly stale reference chain.
+constexpr std::size_t MaximumDecodeUnitBytes()
+{
+    return 2 * 1024 * 1024;
+}
+
 constexpr std::size_t MaximumQueuedAccessUnits(int frames_per_second)
 {
     const int safe_fps = std::max(1, frames_per_second);
-    return static_cast<std::size_t>(std::clamp((safe_fps + 14) / 15, 2, 4));
+    return static_cast<std::size_t>(std::clamp((safe_fps + 7) / 8, 2, 8));
+}
+
+constexpr int MaximumDecodeQueueDelayMs()
+{
+    return 67;
 }
 
 } // namespace opennow::video

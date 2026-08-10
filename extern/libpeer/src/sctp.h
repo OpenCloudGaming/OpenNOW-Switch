@@ -173,6 +173,8 @@ typedef struct Sctp {
 
 int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp);
 
+void sctp_set_diagnostics_enabled(int enabled);
+
 void sctp_destroy_association(Sctp* sctp);
 
 void sctp_usrsctp_init();

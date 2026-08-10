@@ -13,7 +13,15 @@
 #include <usrsctp.h>
 #endif
 
+static int sctp_diagnostics_enabled;
+
+void sctp_set_diagnostics_enabled(int enabled) {
+  sctp_diagnostics_enabled = enabled != 0;
+}
+
 static void sctp_diag_log(const char* fmt, ...) {
+  if (!sctp_diagnostics_enabled)
+    return;
   FILE* file = fopen("sdmc:/switch/OpenNOWSwitch/signaling.log", "a");
   FILE* trace = fopen("sdmc:/switch/OpenNOWSwitch/stream_trace.log", "a");
   FILE* input = fopen("sdmc:/switch/OpenNOWSwitch/input.log", "a");

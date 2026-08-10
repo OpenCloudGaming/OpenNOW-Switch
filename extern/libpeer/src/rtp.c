@@ -5,6 +5,7 @@
 #include "address.h"
 #include "config.h"
 #include "peer_connection.h"
+#include "ports.h"
 #include "rtp.h"
 #include "utils.h"
 
@@ -514,7 +515,7 @@ static int rtp_decode_h264(RtpDecoder* rtp_decoder, uint8_t* buf, size_t size) {
   rtp_decoder->packets_received++;
 
   if (rtp_decoder->packets_received % 600 == 0) {
-    LOGI("RTP H264 stats packets=%u gaps=%u reordered=%u late=%u forced=%u nalus=%u auOk=%u auDrop=%u",
+    LOGD("RTP H264 stats packets=%u gaps=%u reordered=%u late=%u forced=%u nalus=%u auOk=%u auDrop=%u",
          rtp_decoder->packets_received,
          rtp_decoder->sequence_gaps,
          rtp_decoder->reordered_packets,
@@ -691,11 +692,55 @@ static int rtp_decoder_drain_reorder_buffer(RtpDecoder* rtp_decoder) {
   return result;
 }
 
+static int rtp_decoder_expected_packet_buffered(const RtpDecoder* rtp_decoder) {
+  const size_t slot = rtp_decoder->reorder_expected_sequence % RTP_REORDER_WINDOW;
+  return rtp_decoder->reorder_used[slot] &&
+         rtp_decoder->reorder_sequences[slot] == rtp_decoder->reorder_expected_sequence;
+}
+
+static void rtp_decoder_update_gap_timer(RtpDecoder* rtp_decoder, uint32_t now_ms) {
+  if (rtp_decoder->reorder_buffered_packets == 0 ||
+      rtp_decoder_expected_packet_buffered(rtp_decoder)) {
+    rtp_decoder->reorder_gap_active = 0;
+    return;
+  }
+  if (!rtp_decoder->reorder_gap_active) {
+    rtp_decoder->reorder_gap_active = 1;
+    rtp_decoder->reorder_gap_started_ms = now_ms;
+  }
+}
+
+static void rtp_decoder_expire_gap(RtpDecoder* rtp_decoder, uint32_t now_ms) {
+  if (!rtp_decoder->reorder_gap_active ||
+      (uint32_t)(now_ms - rtp_decoder->reorder_gap_started_ms) < RTP_REORDER_MAX_HOLD_MS) {
+    return;
+  }
+
+  while (rtp_decoder->reorder_buffered_packets > 0) {
+    rtp_decoder_drain_reorder_buffer(rtp_decoder);
+    if (rtp_decoder->reorder_buffered_packets == 0)
+      break;
+    if (rtp_decoder_expected_packet_buffered(rtp_decoder))
+      continue;
+    rtp_decoder->reorder_expected_sequence++;
+    rtp_decoder->forced_sequence_skips++;
+  }
+  rtp_decoder_drain_reorder_buffer(rtp_decoder);
+  rtp_decoder->reorder_gap_active = 0;
+  rtp_decoder_update_gap_timer(rtp_decoder, now_ms);
+}
+
+void rtp_decoder_poll(RtpDecoder* rtp_decoder) {
+  if (rtp_decoder && rtp_decoder->type == PT_H264)
+    rtp_decoder_expire_gap(rtp_decoder, ports_get_epoch_time());
+}
+
 static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* buf, size_t size) {
   if (!rtp_decoder->reorder_buf || size < 4 || size > RTP_REORDER_PACKET_CAPACITY)
     return -1;
 
   const uint16_t sequence = read_be16(buf + 2);
+  const uint32_t now_ms = ports_get_epoch_time();
   if (!rtp_decoder->reorder_has_expected_sequence) {
     rtp_decoder->reorder_has_expected_sequence = 1;
     rtp_decoder->reorder_expected_sequence = sequence;
@@ -720,6 +765,7 @@ static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* 
     const int result = rtp_decoder->decode_func(rtp_decoder, (uint8_t*)buf, size);
     rtp_decoder->reorder_expected_sequence++;
     rtp_decoder_drain_reorder_buffer(rtp_decoder);
+    rtp_decoder_update_gap_timer(rtp_decoder, now_ms);
     return result;
   }
 
@@ -737,6 +783,8 @@ static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* 
   rtp_decoder->reorder_used[slot] = 1;
   rtp_decoder->reorder_buffered_packets++;
   rtp_decoder->reordered_packets++;
+  rtp_decoder_update_gap_timer(rtp_decoder, now_ms);
+  rtp_decoder_expire_gap(rtp_decoder, now_ms);
   return 0;
 }
 
