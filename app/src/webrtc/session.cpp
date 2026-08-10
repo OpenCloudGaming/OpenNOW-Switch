@@ -98,6 +98,7 @@ WebRtcSession::WebRtcSession(
 
     // Initialize libpeer
     peer_init();
+    peer_connection_set_diagnostics_enabled(settings_.debug_diagnostics ? 1 : 0);
     renderer_ = std::make_unique<DKVideoRenderer>();
     audio_ = std::make_unique<AudioPipeline>();
     audio_->configure(settings_.audio_volume, settings_.audio_buffer_ms);
@@ -223,6 +224,10 @@ void WebRtcSession::start() {
     setup_peer_connection();
     if (!pc_) {
         current_state_ = "PeerConnection setup failed";
+        peer_terminal_kind_.store(
+            static_cast<int>(opennow::PeerTerminalKind::Failed),
+            std::memory_order_release);
+        peer_terminal_.store(true, std::memory_order_release);
         AppendStreamLog("SESSION error peer_connection_setup_failed");
         return;
     }
@@ -243,6 +248,10 @@ void WebRtcSession::start() {
 
     if (!signaling_client_->connect()) {
         current_state_ = "WebSocket Connect Failed: " + signaling_client_->get_last_error();
+        peer_terminal_kind_.store(
+            static_cast<int>(opennow::PeerTerminalKind::Failed),
+            std::memory_order_release);
+        peer_terminal_.store(true, std::memory_order_release);
         AppendStreamLog("SESSION error websocket_connect_failed " + signaling_client_->get_last_error());
         signaling_ready_ = false;
         return;
@@ -273,7 +282,8 @@ void WebRtcSession::network_loop() {
         int batch_size = 0;
         {
             std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
-            can_run = pc_ && signaling_ready_ && remote_description_set_ &&
+            can_run = !stop_requested_.load(std::memory_order_acquire) &&
+                      pc_ && signaling_ready_ && remote_description_set_ &&
                       (remote_ice_count_ > 0 || manual_candidate_added_);
             if (can_run) {
                 // Motion-heavy frames arrive as short UDP bursts. Drain a
@@ -316,6 +326,25 @@ void WebRtcSession::network_loop() {
 void WebRtcSession::poll() {
     if (stop_requested_.load(std::memory_order_acquire))
         return;
+
+    bool startup_timed_out = false;
+    if (std::chrono::steady_clock::now() - session_started_at_ >= std::chrono::seconds(30)) {
+        std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
+        if (!peer_completed_seen_) {
+            current_state_ = "Streaming transport startup timed out";
+            peer_terminal_kind_.store(
+                static_cast<int>(opennow::PeerTerminalKind::Failed),
+                std::memory_order_release);
+            peer_terminal_.store(true, std::memory_order_release);
+            stop_requested_.store(true, std::memory_order_release);
+            startup_timed_out = true;
+        }
+    }
+    if (startup_timed_out) {
+        AppendStreamLog("SESSION error transport_startup_timeout");
+        request_stop();
+        return;
+    }
 
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
 
@@ -362,13 +391,14 @@ void WebRtcSession::poll() {
 
 
 void WebRtcSession::request_stop() {
-    if (stop_requested_.exchange(true, std::memory_order_acq_rel))
-        return;
+    const bool already_requested =
+        stop_requested_.exchange(true, std::memory_order_acq_rel);
 
     network_running_.store(false, std::memory_order_release);
     decoder_running_.store(false, std::memory_order_release);
     decoder_queue_cv_.notify_all();
-    AppendInputLog("SESSION asynchronous_stop_requested");
+    if (!already_requested)
+        AppendInputLog("SESSION asynchronous_stop_requested");
 }
 
 void WebRtcSession::stop() {

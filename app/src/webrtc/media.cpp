@@ -130,12 +130,13 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
         return;
     }
 
-    // Keep the queue bounded to about 67 ms. Crossing the bound means the
-    // decoder is no longer at the live edge, so clear the dependent chain and
-    // resume at an IDR instead of accumulating visible input latency.
     const size_t kMaxQueuedAccessUnits =
         opennow::video::MaximumQueuedAccessUnits(settings_.fps);
-    if (decoder_queue_.size() >= kMaxQueuedAccessUnits) {
+    const auto now = std::chrono::steady_clock::now();
+    const bool stale_backlog = !decoder_queue_.empty() &&
+        now - decoder_queue_.front().enqueued_at >=
+            std::chrono::milliseconds(opennow::video::MaximumDecodeQueueDelayMs());
+    if (stale_backlog || decoder_queue_.size() >= kMaxQueuedAccessUnits) {
         decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
         clear_decoder_queue_locked();
         decoder_resync_required_.store(true);
@@ -160,7 +161,7 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
     std::memcpy(buffer.data(), data, size);
     decoder_queue_.push_back({
         std::move(buffer), idr, rtp_timestamp,
-        std::chrono::steady_clock::now()
+        now
     });
     AtomicMax(decoder_queue_high_water_, decoder_queue_.size());
     decoder_queue_cv_.notify_one();
@@ -188,7 +189,7 @@ void WebRtcSession::draw(NVGcontext* vg, int width, int height, AVFrame* frame, 
 
 
 void WebRtcSession::maybe_request_startup_keyframe_retry() {
-    if (!pc_ || !peer_completed_seen_ || packets_received_.load() > 0)
+    if (!pc_ || !peer_completed_seen_ || frames_decoded_.load() > 0)
         return;
 
     const PeerConnectionState state = peer_connection_get_state(pc_);
@@ -227,9 +228,6 @@ void WebRtcSession::maybe_recover_decode_stall() {
 
     // A completed connection can still stop producing complete H.264 pictures.
     // Ask for a fresh IDR promptly, but never flood the signaling channel.
-    if (keyframe_request_attempts_ >= 12)
-        return;
-
     last_decode_stall_request_at_ = now;
     AppendStreamLog("DECODE timeoutMs=" + std::to_string(stalled_ms) +
                     " packets=" + std::to_string(packets_received_.load()) +
@@ -327,13 +325,16 @@ void WebRtcSession::on_video_packet(const PeerVideoPacket& packet) {
     last_video_packet_at_us_.store(NowUs(), std::memory_order_release);
     video_access_unit_bytes_.fetch_add(size, std::memory_order_relaxed);
     AtomicMax(video_access_unit_max_bytes_, static_cast<uint64_t>(size));
-    video_ssrc_ = packet.ssrc;
-    for (const auto& report : sender_reports_) {
-        if (report.ssrc == video_ssrc_) {
-            video_sr_ntp_us_ = report.ntp_us;
-            video_sr_rtp_timestamp_ = report.rtp_timestamp;
-            have_video_sender_report_ = true;
-            break;
+    if (video_ssrc_ != packet.ssrc) {
+        video_ssrc_ = packet.ssrc;
+        have_video_sender_report_ = false;
+        for (const auto& report : sender_reports_) {
+            if (report.ssrc == video_ssrc_) {
+                video_sr_ntp_us_ = report.ntp_us;
+                video_sr_rtp_timestamp_ = report.rtp_timestamp;
+                have_video_sender_report_ = true;
+                break;
+            }
         }
     }
     const int packet_count = packets_received_.fetch_add(1) + 1;

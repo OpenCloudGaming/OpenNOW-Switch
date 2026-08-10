@@ -18,6 +18,8 @@ namespace
 
 constexpr size_t kMaximumHandshakeBytes = 64 * 1024;
 constexpr size_t kMaximumSignalingPayloadBytes = 4 * 1024 * 1024;
+constexpr size_t kMaximumPollReadBytes = 64 * 1024;
+constexpr size_t kMaximumFramesPerPoll = 16;
 
 std::vector<uint8_t> random_bytes(size_t length)
 {
@@ -280,27 +282,9 @@ void WebSocketClient::send_message(const std::string& msg) {
 void WebSocketClient::poll() {
     if (!connected_ || !curl_) return;
 
-    // Read all available data into rx_buffer_
-    uint8_t temp[4096];
-    while (true) {
-        size_t rcvd = 0;
-        CURLcode res = curl_easy_recv(curl_, temp, sizeof(temp), &rcvd);
-        if (res == CURLE_OK && rcvd > 0) {
-            rx_buffer_.insert(rx_buffer_.end(), temp, temp + rcvd);
-        } else {
-            if (res == CURLE_OK && rcvd == 0) {
-                last_error_ = "Remote endpoint closed the signaling connection";
-                connected_ = false;
-            } else if (res != CURLE_AGAIN) {
-                last_error_ = "Receive error: " + std::string(curl_easy_strerror(res));
-                connected_ = false;
-            }
-            break;
-        }
-    }
-
     // Process all complete frames in the buffer
-    while (rx_buffer_.size() >= 2) {
+    size_t frames_processed = 0;
+    while (rx_buffer_.size() >= 2 && frames_processed < kMaximumFramesPerPoll) {
         uint8_t opcode = rx_buffer_[0] & 0x0F;
         uint8_t payload_len_7 = rx_buffer_[1] & 0x7F;
         bool masked = (rx_buffer_[1] & 0x80) != 0;
@@ -310,11 +294,11 @@ void WebSocketClient::poll() {
         
         if (payload_len_7 == 126) {
             header_size += 2;
-            if (rx_buffer_.size() < header_size) return; // Need more data
+            if (rx_buffer_.size() < header_size) break;
             payload_len = (static_cast<size_t>(rx_buffer_[2]) << 8) | rx_buffer_[3];
         } else if (payload_len_7 == 127) {
             header_size += 8;
-            if (rx_buffer_.size() < header_size) return; // Need more data
+            if (rx_buffer_.size() < header_size) break;
             uint64_t big_len = 0;
             for (size_t i = 0; i < 8; ++i) {
                 big_len = (big_len << 8) | rx_buffer_[2 + i];
@@ -339,7 +323,7 @@ void WebSocketClient::poll() {
         }
         
         if (rx_buffer_.size() < header_size + payload_len) {
-            return; // Need more data for full frame payload
+            break;
         }
         
         // We have a full frame! Extract it
@@ -360,6 +344,7 @@ void WebSocketClient::poll() {
         
         // Remove parsed frame from buffer
         rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + header_size + payload_len);
+        frames_processed++;
         
         // Handle frame
         if (opcode == 0x01) { // Text frame
@@ -381,6 +366,34 @@ void WebSocketClient::poll() {
             connected_ = false;
         } else if (opcode == 0x09) { // Ping frame
             send_frame(0x8A, payload.data(), payload.size()); // Send Pong
+        }
+    }
+
+    if (!connected_ || frames_processed >= kMaximumFramesPerPoll)
+        return;
+
+    uint8_t temp[4096];
+    size_t read_this_poll = 0;
+    while (read_this_poll < kMaximumPollReadBytes) {
+        size_t rcvd = 0;
+        CURLcode res = curl_easy_recv(curl_, temp, sizeof(temp), &rcvd);
+        if (res == CURLE_OK && rcvd > 0) {
+            if (rx_buffer_.size() > kMaximumSignalingPayloadBytes + 14 - rcvd) {
+                last_error_ = "Incoming WebSocket buffer is too large";
+                connected_ = false;
+                return;
+            }
+            rx_buffer_.insert(rx_buffer_.end(), temp, temp + rcvd);
+            read_this_poll += rcvd;
+        } else {
+            if (res == CURLE_OK && rcvd == 0) {
+                last_error_ = "Remote endpoint closed the signaling connection";
+                connected_ = false;
+            } else if (res != CURLE_AGAIN) {
+                last_error_ = "Receive error: " + std::string(curl_easy_strerror(res));
+                connected_ = false;
+            }
+            break;
         }
     }
 }

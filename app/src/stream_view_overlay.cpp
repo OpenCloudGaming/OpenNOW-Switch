@@ -164,16 +164,20 @@ void StreamView::DrawPreparingStream(
     nvgText(vg, spinner_x, panel_y + 361.0f, detail.c_str(), nullptr);
 }
 
-void StreamView::UpdatePerformanceCounter(const VideoPerformanceCounters& counters) {
+void StreamView::UpdatePerformanceCounter() {
     const auto now = std::chrono::steady_clock::now();
     if (fps_window_started_.time_since_epoch().count() == 0) {
         fps_window_started_ = now;
-        previous_video_counters_ = counters;
+        previous_video_counters_ = session_
+            ? session_->get_video_performance() : VideoPerformanceCounters {};
+        return;
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - fps_window_started_);
     if (elapsed >= std::chrono::milliseconds(750)) {
+        const VideoPerformanceCounters counters = session_
+            ? session_->get_video_performance() : VideoPerformanceCounters {};
         const float scale = elapsed.count() > 0 ? 1000.0f / static_cast<float>(elapsed.count()) : 0.0f;
         const auto delta = [](uint64_t current, uint64_t previous) {
             return current >= previous ? current - previous : uint64_t {0};

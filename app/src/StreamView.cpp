@@ -374,7 +374,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         }
     }, video_target);
     if (session_)
-        UpdatePerformanceCounter(session_->get_video_performance());
+        UpdatePerformanceCounter();
     
     if (!got_frame) {
         if (debug_diagnostics_) {

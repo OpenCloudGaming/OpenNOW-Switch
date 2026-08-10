@@ -51,8 +51,9 @@ struct PeerConnection {
 
   uint32_t remote_assrc;
   uint32_t remote_vssrc;
-  uint16_t video_last_sequence;
-  int video_has_last_sequence;
+  uint16_t video_last_nack_expected;
+  uint32_t video_last_nack_ms;
+  int video_has_last_nack;
   uint32_t video_nack_requests;
   uint32_t video_nack_packets_requested;
 
@@ -72,7 +73,16 @@ struct PeerConnection {
 static int peer_connection_send_rtcp_nack(PeerConnection* pc, uint32_t ssrc,
                                           uint16_t packet_id, uint16_t bitmask);
 
+static int peer_connection_diagnostics_enabled;
+
+void peer_connection_set_diagnostics_enabled(int enabled) {
+  peer_connection_diagnostics_enabled = enabled != 0;
+  sctp_set_diagnostics_enabled(enabled);
+}
+
 static void peer_connection_diag_log(const char* fmt, ...) {
+  if (!peer_connection_diagnostics_enabled)
+    return;
   FILE* file = fopen("sdmc:/switch/OpenNOWSwitch/signaling.log", "a");
   FILE* trace = fopen("sdmc:/switch/OpenNOWSwitch/stream_trace.log", "a");
   const int input_relevant = strstr(fmt, "sctp") != NULL ||
@@ -121,6 +131,70 @@ static void peer_connection_diag_log(const char* fmt, ...) {
     fputc('\n', input);
     fclose(input);
   }
+}
+
+static int peer_connection_video_packet_buffered(const RtpDecoder* decoder,
+                                                 uint16_t sequence) {
+  const size_t slot = sequence % RTP_REORDER_WINDOW;
+  return decoder->reorder_used[slot] && decoder->reorder_sequences[slot] == sequence;
+}
+
+static uint32_t peer_connection_nack_packet_count(uint16_t bitmask) {
+  uint32_t count = 1;
+  while (bitmask != 0) {
+    count += bitmask & 1u;
+    bitmask >>= 1;
+  }
+  return count;
+}
+
+static void peer_connection_maybe_send_video_nacks(PeerConnection* pc,
+                                                   uint16_t newest_sequence) {
+  RtpDecoder* decoder = &pc->vrtp_decoder;
+  if (!decoder->reorder_has_expected_sequence || pc->remote_vssrc == 0)
+    return;
+
+  const uint16_t expected = decoder->reorder_expected_sequence;
+  int16_t distance = (int16_t)(newest_sequence - expected);
+  if (distance <= 0)
+    return;
+  if (distance > RTP_REORDER_MAX_HOLD_PACKETS)
+    distance = RTP_REORDER_MAX_HOLD_PACKETS;
+
+  const uint32_t now_ms = ports_get_epoch_time();
+  if (pc->video_has_last_nack && pc->video_last_nack_expected == expected &&
+      (uint32_t)(now_ms - pc->video_last_nack_ms) < 10) {
+    return;
+  }
+
+  int offset = 0;
+  while (offset < distance) {
+    while (offset < distance && peer_connection_video_packet_buffered(
+             decoder, (uint16_t)(expected + offset))) {
+      offset++;
+    }
+    if (offset >= distance)
+      break;
+
+    const uint16_t packet_id = (uint16_t)(expected + offset);
+    uint16_t bitmask = 0;
+    for (int bit = 0; bit < 16 && offset + bit + 1 < distance; ++bit) {
+      const uint16_t sequence = (uint16_t)(packet_id + bit + 1);
+      if (!peer_connection_video_packet_buffered(decoder, sequence))
+        bitmask |= (uint16_t)(1u << bit);
+    }
+
+    if (peer_connection_send_rtcp_nack(
+          pc, pc->remote_vssrc, packet_id, bitmask) >= 0) {
+      pc->video_nack_requests++;
+      pc->video_nack_packets_requested += peer_connection_nack_packet_count(bitmask);
+    }
+    offset += 17;
+  }
+
+  pc->video_has_last_nack = 1;
+  pc->video_last_nack_expected = expected;
+  pc->video_last_nack_ms = now_ms;
 }
 
 static void peer_connection_hex_preview(const uint8_t* data, int len, char* out, size_t out_len) {
@@ -666,24 +740,7 @@ int peer_connection_loop(PeerConnection* pc) {
             }
             const uint16_t sequence =
                 (uint16_t)(((uint16_t)pc->agent_buf[2] << 8) | pc->agent_buf[3]);
-            if (pc->video_has_last_sequence) {
-              const uint16_t expected = (uint16_t)(pc->video_last_sequence + 1);
-              const int16_t missing = (int16_t)(sequence - expected);
-              if (missing > 0) {
-                const int requested = missing > 17 ? 17 : missing;
-                const uint16_t bitmask = requested > 1
-                    ? (uint16_t)((1u << (requested - 1)) - 1u) : 0;
-                (void)peer_connection_send_rtcp_nack(
-                    pc, pc->remote_vssrc, expected, bitmask);
-                pc->video_nack_requests++;
-                pc->video_nack_packets_requested += (uint32_t)requested;
-              }
-              if (missing >= 0)
-                pc->video_last_sequence = sequence;
-            } else {
-              pc->video_has_last_sequence = 1;
-              pc->video_last_sequence = sequence;
-            }
+            peer_connection_maybe_send_video_nacks(pc, sequence);
             rtp_decoder_decode(&pc->vrtp_decoder, pc->agent_buf, pc->agent_ret);
             if (pc->completed_rtp_packets % 6000 == 0) {
               peer_connection_diag_log(
@@ -723,6 +780,7 @@ int peer_connection_loop(PeerConnection* pc) {
         LOGI("binding request timeout; keeping completed transport alive");
         pc->agent.binding_request_time = ports_get_epoch_time();
       }
+      rtp_decoder_poll(&pc->vrtp_decoder);
 
       break;
     case PEER_CONNECTION_FAILED:
@@ -746,6 +804,8 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
   uint32_t* ssrc = NULL;
   DtlsSrtpRole role = DTLS_SRTP_ROLE_SERVER;
   int is_update = 0;
+  int video_ssrc_seen = 0;
+  int audio_ssrc_seen = 0;
   Agent* agent = &pc->agent;
 
   while ((line = strstr(start, "\r\n"))) {
@@ -777,6 +837,13 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
     }
 
     if ((val_start = strstr(buf, "a=ssrc:")) && ssrc) {
+      int* ssrc_seen = ssrc == &pc->remote_vssrc
+          ? &video_ssrc_seen : &audio_ssrc_seen;
+      if (*ssrc_seen) {
+        start = line + 2;
+        continue;
+      }
+      *ssrc_seen = 1;
       uint32_t parsed_ssrc = strtoul(val_start + 7, NULL, 10);
       if (*ssrc == 0) {
         *ssrc = parsed_ssrc;
@@ -785,10 +852,22 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
                                  ssrc == &pc->remote_vssrc ? "video" : "audio",
                                  *ssrc);
       } else if (*ssrc != parsed_ssrc) {
-        peer_connection_diag_log("remote_ssrc_ignored media=%s selected=%" PRIu32 " ignored=%" PRIu32,
-                                 ssrc == &pc->remote_vssrc ? "video" : "audio",
-                                 *ssrc,
-                                 parsed_ssrc);
+        const int video = ssrc == &pc->remote_vssrc;
+        peer_connection_diag_log("remote_ssrc_changed media=%s previous=%" PRIu32 " current=%" PRIu32,
+                                 video ? "video" : "audio", *ssrc, parsed_ssrc);
+        *ssrc = parsed_ssrc;
+        if (video) {
+          rtp_decoder_cleanup(&pc->vrtp_decoder);
+          rtp_decoder_init(&pc->vrtp_decoder, pc->config.video_codec,
+                           pc->config.onvideotrack, pc->config.user_data);
+          rtp_decoder_set_video_callback(&pc->vrtp_decoder, pc->config.onvideopacket);
+          pc->video_has_last_nack = 0;
+        } else {
+          rtp_decoder_cleanup(&pc->artp_decoder);
+          rtp_decoder_init(&pc->artp_decoder, pc->config.audio_codec,
+                           pc->config.onaudiotrack, pc->config.user_data);
+          rtp_decoder_set_audio_callback(&pc->artp_decoder, pc->config.onaudiopacket);
+        }
       }
     }
 

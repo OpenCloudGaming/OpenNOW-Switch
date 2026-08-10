@@ -3,6 +3,7 @@
 #include "borealis.hpp"
 #include "../../stream_settings.hpp"
 #include "../../video_quality_policy.hpp"
+#include "../DecodeQueuePolicy.hpp"
 #include <cstdio>
 #include <vector>
 #ifdef PLATFORM_APPLE
@@ -15,13 +16,6 @@ extern "C" {
 #define DISABLE_LOOP_FILTER 0x1
 // Uses the low latency decode flag (disables multithreading)
 #define LOW_LATENCY_DECODE 0x2
-
-//#if defined(PLATFORM_TVOS)
-//#define DECODER_BUFFER_SIZE 92 * 1024 * 4
-//#else
-//#define DECODER_BUFFER_SIZE 92 * 1024 * 2
-//#endif
-#define DECODER_BUFFER_SIZE (1024 * 1024)
 
 #if defined(PLATFORM_ANDROID)
 #include <jni.h>
@@ -229,14 +223,6 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
         }
     }
 
-    m_ffmpeg_buffer =
-        (char*)malloc(DECODER_BUFFER_SIZE + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (m_ffmpeg_buffer == nullptr) {
-        brls::Logger::error("FFmpeg: Not enough memory");
-        cleanup();
-        return -1;
-    }
-
     brls::Logger::info("FFmpeg: Setup done with {} frame threads", decoder_threads);
     return 0;
 }
@@ -268,11 +254,6 @@ void FFmpegVideoDecoder::cleanup() {
         av_frame_free(&tmp_frame);
     }
 
-    if (m_ffmpeg_buffer) {
-        free(m_ffmpeg_buffer);
-        m_ffmpeg_buffer = nullptr;
-    }
-
     AVFrameHolder::instance().cleanup();
 
     brls::Logger::info("FFmpeg: Cleanup done!");
@@ -282,19 +263,21 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
     if (!indata || inlen <= 0)
         return 0;
 
-    if (inlen > DECODER_BUFFER_SIZE) {
-        brls::Logger::error("FFmpeg: Big buffer to decode...");
+    if (static_cast<size_t>(inlen) > opennow::video::MaximumDecodeUnitBytes()) {
+        brls::Logger::error("FFmpeg: access unit exceeds 2 MiB limit");
         return -1;
     }
 
     m_frames_in++;
 
     int decoded_frames = 0;
+    bool corrupt_frame_dropped = false;
     auto drain_frames = [&]() {
         while ((m_frame = get_frame(true)) != nullptr) {
             if ((m_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0 ||
                 m_frame->decode_error_flags != 0) {
                 m_corrupt_frames_dropped++;
+                corrupt_frame_dropped = true;
                 if (m_corrupt_frames_dropped <= 5 || m_corrupt_frames_dropped % 60 == 0) {
                     brls::Logger::warning(
                         "FFmpeg: dropping corrupt frame flags={} decodeErrors={} total={}",
@@ -320,6 +303,9 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
         return decode_result;
 
     drain_frames();
+
+    if (decoded_frames == 0 && corrupt_frame_dropped)
+        return AVERROR_INVALIDDATA;
 
     return decoded_frames;
 }
