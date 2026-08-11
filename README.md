@@ -125,6 +125,17 @@ Create a release archive with:
 .\scripts\package-release.ps1 -Version 0.0.6
 ```
 
+On Linux or in CI, use the equivalent shell entry point:
+
+```bash
+bash scripts/package-release.sh 0.0.6
+```
+
+Pushing a version tag such as `v0.0.6` runs the Blacksmith release workflow,
+publishes both files to GitHub Releases, and generates notes from the changes
+since the previous release. The tag must match the version in
+`app/src/app_version.hpp` and `CMakeLists.txt`.
+
 ## Repository layout
 
 ```text

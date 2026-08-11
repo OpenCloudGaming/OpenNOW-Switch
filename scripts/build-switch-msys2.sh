@@ -20,6 +20,7 @@ detect_build_jobs() {
 opennow_build_jobs="${OPENNOW_BUILD_JOBS:-$(detect_build_jobs)}"
 
 cmake -B build/switch -G Ninja
+cmake --build build/switch --target cjson mbedtls srtp2 usrsctp -j"$opennow_build_jobs"
 cmake --build build/switch --target SwitchNOW.nro -j"$opennow_build_jobs"
 
 printf '\nBuilt: %s\n' "$(pwd)/build/switch/SwitchNOW.nro"

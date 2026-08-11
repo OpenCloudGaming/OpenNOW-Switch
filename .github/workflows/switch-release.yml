@@ -1,0 +1,85 @@
+name: Switch build and release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: switch-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: Build Switch NRO
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    container: devkitpro/devkita64:20260219
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install generator dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3-jinja2 python3-jsonschema
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          version="$(bash scripts/read-version.sh)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match application version v$version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build NRO
+        env:
+          OPENNOW_BUILD_JOBS: "4"
+        run: bash scripts/build-switch-msys2.sh
+
+      - name: Package release files
+        run: bash scripts/package-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwitchNOW-${{ steps.version.outputs.version }}-${{ github.sha }}
+          path: |
+            dist/SwitchNOW-${{ steps.version.outputs.version }}.nro
+            dist/SwitchNOW-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SwitchNOW-${{ needs.build.outputs.version }}-${{ github.sha }}
+          path: dist
+
+      - name: Publish release with generated notes
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OpenNOW Switch ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/SwitchNOW-${{ needs.build.outputs.version }}.nro
+            dist/SwitchNOW-${{ needs.build.outputs.version }}.zip

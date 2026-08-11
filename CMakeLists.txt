@@ -33,7 +33,7 @@ pkg_check_modules(JANSSON REQUIRED IMPORTED_TARGET jansson)
 add_subdirectory(extern/borealis/library)
 add_subdirectory(extern/libpeer)
 
-target_include_directories(borealis PUBLIC ${DEVKITPRO}/portlibs/switch/include)
+target_include_directories(borealis SYSTEM AFTER PUBLIC ${DEVKITPRO}/portlibs/switch/include)
 
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     app/src/*.cpp
