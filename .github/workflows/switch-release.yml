@@ -22,7 +22,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Increment latest GitHub release
         id: release
@@ -50,12 +50,12 @@ jobs:
     name: Build Switch NRO
     needs: version
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    container: devkitpro/devkita64:20260219
+    container: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
     outputs:
       version: ${{ needs.version.outputs.version }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Install generator dependencies
         run: |
@@ -72,7 +72,7 @@ jobs:
         run: bash scripts/package-release.sh "${{ needs.version.outputs.version }}"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: SwitchNOW-${{ needs.version.outputs.version }}-${{ github.sha }}
           path: |
@@ -91,13 +91,13 @@ jobs:
       contents: write
     steps:
       - name: Download build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: SwitchNOW-${{ needs.build.outputs.version }}-${{ github.sha }}
           path: dist
 
       - name: Publish release with generated notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: v${{ needs.version.outputs.version }}
           name: OpenNOW Switch v${{ needs.version.outputs.version }}
