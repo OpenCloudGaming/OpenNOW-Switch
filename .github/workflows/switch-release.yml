@@ -1,0 +1,109 @@
+name: Switch build and release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: switch-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Resolve next release version
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Increment latest GitHub release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing_tag="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.draft == false and .prerelease == false and .target_commitish == \"$GITHUB_SHA\") | .tag_name" \
+              | head -n 1
+          )"
+
+          if [[ "$existing_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="${existing_tag#v}"
+          else
+            latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || printf 'v0.0.0')"
+            version="$(bash scripts/next-release-version.sh "$latest_tag")"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building OpenNOW Switch v$version"
+
+  build:
+    name: Build Switch NRO
+    needs: version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    container: devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
+    outputs:
+      version: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install generator dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3-jinja2 python3-jsonschema
+
+      - name: Build NRO
+        env:
+          OPENNOW_BUILD_JOBS: "4"
+          OPENNOW_VERSION: ${{ needs.version.outputs.version }}
+        run: bash scripts/build-switch-msys2.sh
+
+      - name: Package release files
+        run: bash scripts/package-release.sh "${{ needs.version.outputs.version }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: SwitchNOW-${{ needs.version.outputs.version }}-${{ github.sha }}
+          path: |
+            dist/SwitchNOW-${{ needs.version.outputs.version }}.nro
+            dist/SwitchNOW-${{ needs.version.outputs.version }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - version
+      - build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: SwitchNOW-${{ needs.build.outputs.version }}-${{ github.sha }}
+          path: dist
+
+      - name: Publish release with generated notes
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: OpenNOW Switch v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/SwitchNOW-${{ needs.build.outputs.version }}.nro
+            dist/SwitchNOW-${{ needs.build.outputs.version }}.zip
