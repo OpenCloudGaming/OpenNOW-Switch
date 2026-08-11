@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -14,15 +12,47 @@ permissions:
 
 concurrency:
   group: switch-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  cancel-in-progress: true
 
 jobs:
+  version:
+    name: Resolve next release version
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Increment latest GitHub release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing_tag="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.draft == false and .prerelease == false and .target_commitish == \"$GITHUB_SHA\") | .tag_name" \
+              | head -n 1
+          )"
+
+          if [[ "$existing_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="${existing_tag#v}"
+          else
+            latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>/dev/null || printf 'v0.0.0')"
+            version="$(bash scripts/next-release-version.sh "$latest_tag")"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building OpenNOW Switch v$version"
+
   build:
     name: Build Switch NRO
+    needs: version
     runs-on: blacksmith-4vcpu-ubuntu-2404
     container: devkitpro/devkita64:20260219
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ needs.version.outputs.version }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -32,38 +62,30 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends python3-jinja2 python3-jsonschema
 
-      - name: Read and validate version
-        id: version
-        shell: bash
-        run: |
-          version="$(bash scripts/read-version.sh)"
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match application version v$version." >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: Build NRO
         env:
           OPENNOW_BUILD_JOBS: "4"
+          OPENNOW_VERSION: ${{ needs.version.outputs.version }}
         run: bash scripts/build-switch-msys2.sh
 
       - name: Package release files
-        run: bash scripts/package-release.sh "${{ steps.version.outputs.version }}"
+        run: bash scripts/package-release.sh "${{ needs.version.outputs.version }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SwitchNOW-${{ steps.version.outputs.version }}-${{ github.sha }}
+          name: SwitchNOW-${{ needs.version.outputs.version }}-${{ github.sha }}
           path: |
-            dist/SwitchNOW-${{ steps.version.outputs.version }}.nro
-            dist/SwitchNOW-${{ steps.version.outputs.version }}.zip
+            dist/SwitchNOW-${{ needs.version.outputs.version }}.nro
+            dist/SwitchNOW-${{ needs.version.outputs.version }}.zip
           if-no-files-found: error
 
   release:
     name: Publish GitHub release
-    if: github.ref_type == 'tag'
-    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - version
+      - build
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write
@@ -77,7 +99,9 @@ jobs:
       - name: Publish release with generated notes
         uses: softprops/action-gh-release@v2
         with:
-          name: OpenNOW Switch ${{ github.ref_name }}
+          tag_name: v${{ needs.version.outputs.version }}
+          name: OpenNOW Switch v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

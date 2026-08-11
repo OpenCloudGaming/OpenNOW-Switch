@@ -9,6 +9,11 @@ set(CMAKE_TOOLCHAIN_FILE ${DEVKITPRO}/cmake/Switch.cmake CACHE FILEPATH "devkitP
 
 project(SwitchNOW LANGUAGES C CXX)
 
+set(OPENNOW_VERSION "0.0.6" CACHE STRING "OpenNOW application version")
+if (NOT OPENNOW_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "OPENNOW_VERSION must use major.minor.patch format")
+endif ()
+
 set(PLATFORM_SWITCH ON)
 # One Deko3D application supports both NVDEC zero-copy and software-decoded
 # YUV uploads. Decoder selection is a runtime setting rather than a build type.
@@ -67,7 +72,12 @@ target_link_directories(${PROJECT_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/ffmpeg/lib
 )
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE PLATFORM_SWITCH __SWITCH__ HAS_SOCKLEN_T=1)
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    PLATFORM_SWITCH
+    __SWITCH__
+    HAS_SOCKLEN_T=1
+    OPENNOW_APP_VERSION="${OPENNOW_VERSION}"
+)
 if (PLATFORM_SWITCH)
     target_compile_definitions(${PROJECT_NAME} PRIVATE USE_DK_RENDERER BOREALIS_USE_DEKO3D OPENNOW_ENABLE_NVDEC)
     find_program(NX_UAM_EXE NAMES uam HINTS "${DEVKITPRO}/tools/bin")
@@ -122,7 +132,7 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 set(PROJECT_AUTHOR "OpenCloudGaming")
-set(PROJECT_VERSION_STRING "0.0.6")
+set(PROJECT_VERSION_STRING "${OPENNOW_VERSION}")
 set(PROJECT_TITLEID "05004F4E4F575358")
 set(PROJECT_ICON ${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/icon.jpg)
 set(PROJECT_ROMFS_DIR ${CMAKE_BINARY_DIR}/romfs)

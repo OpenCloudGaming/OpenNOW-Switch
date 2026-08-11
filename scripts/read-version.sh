@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-header_version="$(sed -n 's/.*kAppVersion = "\([^"]*\)".*/\1/p' app/src/app_version.hpp)"
-cmake_version="$(sed -n 's/set(PROJECT_VERSION_STRING "\([^"]*\)")/\1/p' CMakeLists.txt)"
+header_version="$(sed -n 's/^#define OPENNOW_APP_VERSION "\([^"]*\)"$/\1/p' app/src/app_version.hpp)"
+cmake_version="$(sed -n 's/set(OPENNOW_VERSION "\([^"]*\)" CACHE.*/\1/p' CMakeLists.txt)"
 
 if [[ -z "$header_version" || -z "$cmake_version" ]]; then
     printf 'Unable to read the application version from app_version.hpp and CMakeLists.txt.\n' >&2

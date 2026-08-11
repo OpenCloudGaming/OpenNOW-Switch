@@ -131,10 +131,10 @@ On Linux or in CI, use the equivalent shell entry point:
 bash scripts/package-release.sh 0.0.6
 ```
 
-Pushing a version tag such as `v0.0.6` runs the Blacksmith release workflow,
-publishes both files to GitHub Releases, and generates notes from the changes
-since the previous release. The tag must match the version in
-`app/src/app_version.hpp` and `CMakeLists.txt`.
+After a change reaches `main`, the Blacksmith release workflow increments the
+patch version from the latest GitHub release, embeds it in the app and NRO
+metadata, publishes both files, and generates notes from the changes since the
+previous release. Pull requests run the same build without publishing.
 
 ## Repository layout
 
