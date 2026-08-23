@@ -1,6 +1,6 @@
 #include "webrtc_session.hpp"
+#include "nvst_sdp.hpp"
 #include "stream/RemoteCandidatePolicy.hpp"
-#include "video_quality_policy.hpp"
 #include "internal.hpp"
 
 #include <jansson.h>
@@ -87,16 +87,9 @@ int ParseIntegerAttribute(const std::string& sdp, const std::string& attribute, 
     return fallback;
 }
 
-struct RiInputCapabilities {
-    int partial_reliable_threshold_ms = 16;
-    uint32_t hid_device_mask = 0xffffffffu;
-    uint32_t partial_reliable_gamepad_mask = 0x0fu;
-    uint32_t partial_reliable_hid_mask = 0xffffffffu;
-};
-
-RiInputCapabilities ParseRiInputCapabilities(const std::string& offer_sdp)
+opennow::webrtc::RiInputCapabilities ParseRiInputCapabilities(const std::string& offer_sdp)
 {
-    RiInputCapabilities caps;
+    opennow::webrtc::RiInputCapabilities caps;
     const int threshold = ParseIntegerAttribute(offer_sdp, "ri.partialReliableThresholdMs", caps.partial_reliable_threshold_ms);
     if (threshold > 0)
         caps.partial_reliable_threshold_ms = std::max(1, std::min(5000, threshold));
@@ -539,108 +532,6 @@ int ExtractNvstIntValue(const std::string& nvst_sdp, const std::string& prefix)
     return 0;
 }
 
-std::string BuildNvstSdp(
-    const std::string& answer_sdp,
-    const opennow::StreamSettings& settings,
-    const RiInputCapabilities& ri_caps)
-{
-    const std::string ice_ufrag = ExtractSdpValue(answer_sdp, "a=ice-ufrag:");
-    const std::string ice_pwd = ExtractSdpValue(answer_sdp, "a=ice-pwd:");
-    const std::string fingerprint = ExtractSdpValue(answer_sdp, "a=fingerprint:sha-256 ");
-    const auto tuning = opennow::video::ResolveQualityTuning(settings.image_quality_mode);
-    const int min_bitrate = std::max(
-        5000, (settings.bitrate_kbps * tuning.minimum_bitrate_percent) / 100);
-    const int initial_bitrate = std::max(
-        min_bitrate, (settings.bitrate_kbps * tuning.initial_bitrate_percent) / 100);
-
-    std::vector<std::string> lines = {
-        "v=0",
-        "o=SdpTest test_id_13 14 IN IPv4 127.0.0.1",
-        "s=-",
-        "t=0 0",
-        "a=general.icePassword:" + ice_pwd,
-        "a=general.iceUserNameFragment:" + ice_ufrag,
-        "a=general.dtlsFingerprint:" + fingerprint,
-        "m=video 0 RTP/AVP",
-        "a=msid:fbc-video-0",
-        "a=vqos.fec.rateDropWindow:10",
-        "a=vqos.fec.minRequiredFecPackets:2",
-        "a=vqos.fec.repairMinPercent:" + std::to_string(tuning.fec_repair_min_percent),
-        "a=vqos.fec.repairPercent:" + std::to_string(tuning.fec_repair_percent),
-        "a=vqos.fec.repairMaxPercent:" + std::to_string(tuning.fec_repair_max_percent),
-        "a=vqos.dynamicStreamingMode:0",
-        "a=vqos.drc.enable:0",
-        "a=vqos.dfc.enable:0",
-        "a=vqos.dfc.adjustResAndFps:0",
-        "a=video.dx9EnableNv12:1",
-        "a=video.dx9EnableHdr:1",
-        "a=vqos.qpg.enable:1",
-        "a=vqos.resControl.qp.qpg.featureSetting:7",
-        "a=bwe.useOwdCongestionControl:1",
-        "a=video.enableRtpNack:1",
-        "a=vqos.bw.txRxLag.minFeedbackTxDeltaMs:200",
-        "a=vqos.drc.bitrateIirFilterFactor:18",
-        "a=video.packetSize:1140",
-        "a=packetPacing.minNumPacketsPerGroup:" +
-            std::to_string(tuning.pacing_min_packets_per_group),
-        "a=vqos.adjustStreamingFpsDuringOutOfFocus:1",
-        "a=vqos.resControl.cpmRtc.ignoreOutOfFocusWindowState:1",
-        "a=vqos.resControl.perfHistory.rtcIgnoreOutOfFocusWindowState:1",
-        "a=vqos.resControl.cpmRtc.featureMask:0",
-        "a=vqos.resControl.cpmRtc.enable:0",
-        "a=vqos.resControl.cpmRtc.minResolutionPercent:100",
-        "a=vqos.resControl.cpmRtc.resolutionChangeHoldonMs:999999",
-        "a=packetPacing.numGroups:" + std::to_string(tuning.pacing_groups),
-        "a=packetPacing.maxDelayUs:" + std::to_string(tuning.pacing_max_delay_us),
-        "a=packetPacing.minNumPacketsFrame:10",
-        "a=video.rtpNackQueueLength:1024",
-        "a=video.rtpNackQueueMaxPackets:512",
-        "a=video.rtpNackMaxPacketCount:25",
-        "a=vqos.drc.qpMaxResThresholdAdj:4",
-        "a=vqos.grc.qpMaxResThresholdAdj:4",
-        "a=vqos.drc.iirFilterFactor:100",
-        "a=video.clientViewportWd:" + std::to_string(settings.width),
-        "a=video.clientViewportHt:" + std::to_string(settings.height),
-        "a=video.maxFPS:" + std::to_string(settings.fps),
-        "a=video.initialBitrateKbps:" + std::to_string(initial_bitrate),
-        "a=video.initialPeakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.maximumBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.minimumBitrateKbps:" + std::to_string(min_bitrate),
-        "a=vqos.bw.peakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.serverPeakBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.bw.enableBandwidthEstimation:1",
-        "a=vqos.bw.disableBitrateLimit:0",
-        "a=vqos.grc.maximumBitrateKbps:" + std::to_string(settings.bitrate_kbps),
-        "a=vqos.grc.enable:0",
-        "a=video.maxNumReferenceFrames:4",
-        "a=video.mapRtpTimestampsToFrames:1",
-        "a=video.encoderCscMode:3",
-        "a=video.dynamicRangeMode:0",
-        "a=video.bitDepth:8",
-        "a=video.scalingFeature1:0",
-        "a=video.prefilterParams.prefilterModel:0",
-        "m=audio 0 RTP/AVP",
-        "a=msid:audio",
-        "m=mic 0 RTP/AVP",
-        "a=msid:mic",
-        "a=rtpmap:0 PCMU/8000",
-        "m=application 0 RTP/AVP",
-        "a=msid:input_1",
-        "a=ri.partialReliableThresholdMs:" + std::to_string(ri_caps.partial_reliable_threshold_ms),
-        "a=ri.hidDeviceMask:" + std::to_string(ri_caps.hid_device_mask),
-        "a=ri.enablePartiallyReliableTransferGamepad:" + std::to_string(ri_caps.partial_reliable_gamepad_mask),
-        "a=ri.enablePartiallyReliableTransferHid:" + std::to_string(ri_caps.partial_reliable_hid_mask),
-        "",
-    };
-
-    std::string result;
-    for (const auto& line : lines) {
-        result += line;
-        result += "\n";
-    }
-    return result;
-}
-
 std::string ExtractSignalingHost(const std::string& url)
 {
     size_t start = url.find("://");
@@ -881,7 +772,8 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
                         if (!nvst_offer_sdp.empty())
                             AppendTraceBlock("OFFER NVST SDP", nvst_offer_sdp);
                         server_ice_ufrag_ = ExtractSdpValue(offer_sdp, "a=ice-ufrag:");
-                        const RiInputCapabilities ri_caps = ParseRiInputCapabilities(offer_sdp);
+                        const opennow::webrtc::RiInputCapabilities ri_caps =
+                            ParseRiInputCapabilities(offer_sdp);
                         partial_reliable_threshold_ms_ = ri_caps.partial_reliable_threshold_ms;
                         const int offer_video_port = ExtractOfferMediaPort(offer_sdp, "video");
                         const int selected_h264_pt = SelectOfferH264PayloadType(offer_sdp);
@@ -905,7 +797,8 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
                         if (answer_sdp) {
                             AppendTraceBlock("LIBPEER RAW ANSWER SDP", answer_sdp);
                             const std::string adapted_answer_sdp = AdaptAnswerSdpToOffer(answer_sdp, offer_sdp, settings_);
-                            const std::string nvst_sdp = BuildNvstSdp(adapted_answer_sdp, settings_, ri_caps);
+                            const std::string nvst_sdp = opennow::webrtc::BuildNvstSdp(
+                                adapted_answer_sdp, settings_, ri_caps);
                             AppendTraceBlock("ADAPTED ANSWER SDP", adapted_answer_sdp);
                             AppendTraceBlock("ANSWER NVST SDP", nvst_sdp);
                             AppendStreamLog("SDP answer created localUfrag=" +
