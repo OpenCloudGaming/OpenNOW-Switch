@@ -1,6 +1,6 @@
 #include "WebSocketClient.hpp"
 #include <iostream>
-#include <borealis.hpp>
+#include <borealis/core/logger.hpp>
 #include <array>
 #include <cstring>
 #include <cstdint>
@@ -78,21 +78,23 @@ bool is_successful_handshake(const std::string& response)
 
 } // namespace
 
-WebSocketClient::WebSocketClient(const std::string& url) : url_(url) {
-    curl_ = curl_easy_init();
-}
+WebSocketClient::WebSocketClient(const std::string& url) : url_(url) {}
 
 WebSocketClient::~WebSocketClient() {
     disconnect();
-    if (curl_) curl_easy_cleanup(curl_);
+    close_transport();
 }
 
 bool WebSocketClient::connect() {
-    if (!curl_) return false;
-    if (connected_) disconnect();
+    disconnect();
+    close_transport();
 
     last_error_.clear();
-    rx_buffer_.clear();
+    curl_ = curl_easy_init();
+    if (!curl_) {
+        last_error_ = "Could not initialize WebSocket transport";
+        return false;
+    }
 
     // Parse URL for host and path (very basic parsing)
     std::string host = url_;
@@ -136,6 +138,7 @@ bool WebSocketClient::connect() {
     if (res != CURLE_OK) {
         last_error_ = "Perform Failed: " + std::string(curl_easy_strerror(res));
         brls::Logger::error("WebSocket connect failed: {}", curl_easy_strerror(res));
+        close_transport();
         return false;
     }
 
@@ -154,8 +157,10 @@ bool WebSocketClient::connect() {
     }
     handshake += "\r\n";
 
-    if (!send_all(reinterpret_cast<const uint8_t*>(handshake.data()), handshake.size()))
+    if (!send_handshake(reinterpret_cast<const uint8_t*>(handshake.data()), handshake.size())) {
+        close_transport();
         return false;
+    }
 
     // Receive handshake response
     char buf[1024];
@@ -198,31 +203,75 @@ bool WebSocketClient::connect() {
         }
     }
     if (last_error_.empty()) last_error_ = "Handshake timeout";
+    close_transport();
     return false;
 }
 
 void WebSocketClient::disconnect() {
     if (connected_) {
         uint8_t close_payload[] = { 0x03, 0xe8 }; // Normal closure
-        send_frame(0x88, close_payload, sizeof(close_payload));
+        if (!send_frame(0x88, close_payload, sizeof(close_payload)))
+            return;
         connected_ = false;
+        closing_ = true;
+    }
+    if (closing_)
+        drain_outgoing();
+}
+
+void WebSocketClient::close_transport() {
+    connected_ = false;
+    closing_ = false;
+    tx_queue_.reset();
+    rx_buffer_.clear();
+    if (curl_) {
+        curl_easy_cleanup(curl_);
+        curl_ = nullptr;
     }
 }
 
-bool WebSocketClient::send_all(const uint8_t* data, size_t length) {
+bool WebSocketClient::drain_outgoing() {
+    using Queue = opennow::websocket::WriteQueue;
+    if (!curl_)
+        return false;
+    CURLcode error = CURLE_OK;
+    const auto result = tx_queue_.drain([&](const uint8_t* data, size_t length) {
+        size_t sent = 0;
+        error = curl_easy_send(curl_, data, length, &sent);
+        if (error == CURLE_AGAIN)
+            return Queue::WriteResult{Queue::WriteStatus::Again, 0};
+        return Queue::WriteResult{
+            error == CURLE_OK ? Queue::WriteStatus::Progress : Queue::WriteStatus::Error, sent};
+    }, [] { return Queue::Clock::now(); });
+
+    if (result == Queue::DrainResult::Complete || result == Queue::DrainResult::Pending) {
+        if (closing_ && result == Queue::DrainResult::Complete)
+            close_transport();
+        return true;
+    }
+    if (result == Queue::DrainResult::TimedOut)
+        last_error_ = "Send timeout";
+    else if (result == Queue::DrainResult::Stalled)
+        last_error_ = "Send stalled";
+    else
+        last_error_ = "Send error: " + std::string(curl_easy_strerror(error));
+    close_transport();
+    return false;
+}
+
+bool WebSocketClient::send_handshake(const uint8_t* data, size_t length) {
     if (!curl_) return false;
 
     size_t total_sent = 0;
-    int retry_budget = 100;
+    const auto deadline = std::chrono::steady_clock::now() + opennow::websocket::WriteQueue::SendTimeout;
     while (total_sent < length) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            last_error_ = "Send timeout";
+            return false;
+        }
         size_t sent = 0;
         CURLcode res = curl_easy_send(curl_, data + total_sent, length - total_sent, &sent);
         if (res == CURLE_AGAIN) {
-            if (--retry_budget <= 0) {
-                last_error_ = "Send timeout";
-                connected_ = false;
-                return false;
-            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -238,7 +287,6 @@ bool WebSocketClient::send_all(const uint8_t* data, size_t length) {
         }
 
         total_sent += sent;
-        retry_budget = 100;
     }
 
     return true;
@@ -247,7 +295,14 @@ bool WebSocketClient::send_all(const uint8_t* data, size_t length) {
 bool WebSocketClient::send_frame(uint8_t opcode, const uint8_t* payload, size_t length) {
     if (!connected_ || !curl_) return false;
 
+    const size_t header_size = length < 126 ? 6 : (length <= 0xFFFF ? 8 : 14);
+    if (length > kMaximumSignalingPayloadBytes || !tx_queue_.can_enqueue(length + header_size)) {
+        last_error_ = "Outgoing WebSocket queue is full";
+        close_transport();
+        return false;
+    }
     std::vector<uint8_t> frame;
+    frame.reserve(length + header_size);
     frame.push_back(opcode | 0x80);
 
     // Client must mask frames
@@ -272,7 +327,7 @@ bool WebSocketClient::send_frame(uint8_t opcode, const uint8_t* payload, size_t 
         frame.push_back(payload[i] ^ mask_key[i % 4]);
     }
 
-    return send_all(frame.data(), frame.size());
+    return tx_queue_.enqueue(std::move(frame), opennow::websocket::WriteQueue::Clock::now());
 }
 
 void WebSocketClient::send_message(const std::string& msg) {
@@ -280,7 +335,11 @@ void WebSocketClient::send_message(const std::string& msg) {
 }
 
 void WebSocketClient::poll() {
-    if (!connected_ || !curl_) return;
+    if ((!connected_ && !closing_) || !curl_) return;
+    if (closing_) {
+        drain_outgoing();
+        return;
+    }
 
     // Process all complete frames in the buffer
     size_t frames_processed = 0;
@@ -305,7 +364,7 @@ void WebSocketClient::poll() {
             }
             if (big_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
                 last_error_ = "Incoming WebSocket frame is too large";
-                connected_ = false;
+                close_transport();
                 return;
             }
             payload_len = static_cast<size_t>(big_len);
@@ -314,7 +373,7 @@ void WebSocketClient::poll() {
         if (payload_len > kMaximumSignalingPayloadBytes ||
             payload_len > std::numeric_limits<size_t>::max() - header_size) {
             last_error_ = "Incoming WebSocket frame is too large";
-            connected_ = false;
+            close_transport();
             return;
         }
         
@@ -362,14 +421,18 @@ void WebSocketClient::poll() {
                 last_error_ += " code=" + std::to_string(close_code);
             if (!close_reason.empty())
                 last_error_ += " reason=" + close_reason;
-            send_frame(0x88, payload.data(), payload.size());
+            if (!send_frame(0x88, payload.data(), payload.size()))
+                return;
             connected_ = false;
+            closing_ = true;
         } else if (opcode == 0x09) { // Ping frame
             send_frame(0x8A, payload.data(), payload.size()); // Send Pong
         }
+        if (!connected_)
+            break;
     }
 
-    if (!connected_ || frames_processed >= kMaximumFramesPerPoll)
+    if (!drain_outgoing() || !connected_ || frames_processed >= kMaximumFramesPerPoll)
         return;
 
     uint8_t temp[4096];
@@ -380,7 +443,7 @@ void WebSocketClient::poll() {
         if (res == CURLE_OK && rcvd > 0) {
             if (rx_buffer_.size() > kMaximumSignalingPayloadBytes + 14 - rcvd) {
                 last_error_ = "Incoming WebSocket buffer is too large";
-                connected_ = false;
+                close_transport();
                 return;
             }
             rx_buffer_.insert(rx_buffer_.end(), temp, temp + rcvd);
@@ -388,10 +451,10 @@ void WebSocketClient::poll() {
         } else {
             if (res == CURLE_OK && rcvd == 0) {
                 last_error_ = "Remote endpoint closed the signaling connection";
-                connected_ = false;
+                close_transport();
             } else if (res != CURLE_AGAIN) {
                 last_error_ = "Receive error: " + std::string(curl_easy_strerror(res));
-                connected_ = false;
+                close_transport();
             }
             break;
         }

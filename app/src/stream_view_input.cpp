@@ -31,17 +31,120 @@ void StreamView::SendKeyboardCharacter(char character) {
         return;
     }
 
-    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, true);
-    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, false);
+    SendKeyboardStroke(stroke);
 }
 
-void StreamView::SendKeyboardShortcut(opennow::input::KeyboardShortcut shortcut) {
+void StreamView::SendKeyboardStroke(opennow::input::KeyboardStroke stroke) {
     if (!session_)
         return;
 
-    const auto stroke = opennow::input::MapKeyboardShortcut(shortcut);
-    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, true);
-    session_->send_keyboard_key(stroke.keycode, stroke.scancode, stroke.modifiers, false);
+    const auto tap = opennow::input::MakeKeyboardTap(stroke);
+    for (std::size_t i = 0; i < tap.size; ++i) {
+        const auto& event = tap.events[i];
+        session_->send_keyboard_key(event.stroke.keycode, event.stroke.scancode,
+                                    event.stroke.modifiers, event.pressed);
+    }
+}
+
+void StreamView::SendKeyboardShortcut(opennow::input::KeyboardShortcut shortcut) {
+    if (!keyboard_visible_ || !session_ ||
+        !session_->get_transport_health().peer_completed)
+        return;
+
+    SendKeyboardStroke(opennow::input::MapKeyboardShortcut(shortcut));
+    keyboard_text_.clear();
+#ifdef __SWITCH__
+    swkbdInlineSetInputText(&inline_keyboard_, "");
+    swkbdInlineSetCursorPos(&inline_keyboard_, 0);
+#endif
+}
+
+void StreamView::HandleInlineKeyboardInput(
+    const brls::ControllerState& state, float x, float y, float width) {
+    const bool b_down = state.buttons[brls::BUTTON_B];
+    const bool plus_down = state.buttons[brls::BUTTON_START];
+    const std::array buttons {
+        brls::BUTTON_LT, brls::BUTTON_LB, brls::BUTTON_RB, brls::BUTTON_RT,
+        brls::BUTTON_LEFT, brls::BUTTON_UP, brls::BUTTON_RIGHT, brls::BUTTON_DOWN,
+    };
+    std::uint16_t shortcut_buttons = 0;
+    if (state.buttons[brls::BUTTON_BACK]) {
+        for (std::size_t i = 0; i < buttons.size(); ++i)
+            if (state.buttons[buttons[i]])
+                shortcut_buttons |= 1u << i;
+    }
+    const int shortcut = opennow::input::PollKeyboardShortcut(
+        shortcut_buttons, keyboard_shortcut_latched_);
+
+    std::vector<brls::RawTouchState> touches;
+    brls::Application::getPlatform()->getInputManager()->updateTouchStates(&touches);
+    const auto touch = std::find_if(touches.begin(), touches.end(),
+        [](const brls::RawTouchState& value) { return value.pressed; });
+    const bool touch_down = touch != touches.end();
+    int touch_shortcut = -1;
+    if (touch_down && !keyboard_touch_was_down_) {
+        for (std::size_t i = 0; i < opennow::input::kKeyboardShortcutControls.size(); ++i) {
+            if (opennow::input::KeyboardShortcutBounds(i, x, y, width).Contains(
+                    touch->position.x, touch->position.y)) {
+                touch_shortcut = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    keyboard_touch_was_down_ = touch_down;
+
+    if (plus_down && !keyboard_plus_was_down_)
+        HideInlineKeyboard(true);
+    else if (b_down && !keyboard_b_was_down_)
+        HideInlineKeyboard(false);
+    else if (shortcut >= 0 || touch_shortcut >= 0)
+        SendKeyboardShortcut(opennow::input::kKeyboardShortcutControls[
+            shortcut >= 0 ? shortcut : touch_shortcut].shortcut);
+    keyboard_b_was_down_ = b_down;
+    keyboard_plus_was_down_ = plus_down;
+}
+
+void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float width) {
+    if (!keyboard_visible_)
+        return;
+
+    nvgSave(vg);
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, x + 8.0f, y + 8.0f, width - 16.0f, 192.0f, 12.0f);
+    nvgFillColor(vg, nvgRGBA(13, 19, 22, 242));
+    nvgFill(vg);
+    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontSize(vg, 16.0f);
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    nvgFillColor(vg, nvgRGB(231, 237, 233));
+    nvgText(vg, x + 20.0f, y + 29.0f, "REMOTE KEYBOARD", nullptr);
+    nvgFontSize(vg, 13.0f);
+    nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
+    nvgText(vg, x + width - 20.0f, y + 29.0f,
+            "Tap a key or use its chord  |  PLUS Enter  |  B Close", nullptr);
+    for (std::size_t i = 0; i < opennow::input::kKeyboardShortcutControls.size(); ++i) {
+        const auto& control = opennow::input::kKeyboardShortcutControls[i];
+        const auto rect = opennow::input::KeyboardShortcutBounds(i, x, y, width);
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, rect.x, rect.y, rect.width, rect.height, 7.0f);
+        nvgFillColor(vg, nvgRGBA(77, 218, 130, 22));
+        nvgFill(vg);
+        nvgStrokeWidth(vg, 1.0f);
+        nvgStrokeColor(vg, nvgRGBA(77, 218, 130, 85));
+        nvgStroke(vg);
+        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        nvgFontSize(vg, 18.0f);
+        nvgFillColor(vg, nvgRGB(231, 237, 233));
+        nvgText(vg, rect.x + rect.width * 0.5f, rect.y + 19.0f, control.label, nullptr);
+        nvgFontSize(vg, 12.0f);
+        nvgFillColor(vg, nvgRGB(122, 235, 164));
+        nvgText(vg, rect.x + rect.width * 0.5f, rect.y + 41.0f, control.chord, nullptr);
+    }
+    nvgFontSize(vg, 12.0f);
+    nvgFillColor(vg, nvgRGB(188, 198, 202));
+    nvgText(vg, x + width * 0.5f, y + 184.0f,
+            "Win+D Desktop  /  Win+E Explorer  /  Win+R Run  /  Win+Tab Task view", nullptr);
+    nvgRestore(vg);
 }
 
 void StreamView::SendNteClick(float normalized_x, float normalized_y) {
@@ -103,10 +206,8 @@ void StreamView::ClearNteFocusedField() {
     // Modifier bit 1 is Ctrl in the NVST keyboard protocol. Clearing the
     // active field makes retries idempotent instead of appending credentials.
     constexpr uint16_t kControl = 0x0002;
-    session_->send_keyboard_key('A', 0x1e, kControl, true);
-    session_->send_keyboard_key('A', 0x1e, kControl, false);
-    session_->send_keyboard_key(0x08, 0x0e, 0, true);
-    session_->send_keyboard_key(0x08, 0x0e, 0, false);
+    SendKeyboardStroke({'A', 0x1e, kControl});
+    SendKeyboardStroke({0x08, 0x0e, 0});
     opennow::AppendNteAutoLoginLog("FIELD clear select_all_backspace content=redacted");
 }
 
@@ -258,6 +359,9 @@ void StreamView::UpdateNteAutoLogin(std::chrono::steady_clock::time_point now) {
 }
 
 void StreamView::HandleKeyboardText(const char* text) {
+    if (!keyboard_visible_ || !session_ ||
+        !session_->get_transport_health().peer_completed)
+        return;
     const std::string updated = text ? text : "";
     size_t prefix = 0;
     while (prefix < keyboard_text_.size() && prefix < updated.size() &&
@@ -274,7 +378,8 @@ void StreamView::HandleKeyboardText(const char* text) {
 
 void StreamView::OpenInlineKeyboard() {
 #ifdef __SWITCH__
-    if (keyboard_visible_)
+    if (keyboard_visible_ || !session_ ||
+        !session_->get_transport_health().peer_completed)
         return;
 
     if (!keyboard_launched_) {
@@ -319,10 +424,8 @@ void StreamView::OpenInlineKeyboard() {
     keyboard_visible_ = true;
     keyboard_b_was_down_ = false;
     keyboard_plus_was_down_ = false;
-    keyboard_escape_chord_was_down_ = false;
-    keyboard_tab_chord_was_down_ = false;
-    keyboard_alt_tab_chord_was_down_ = false;
-    keyboard_windows_chord_was_down_ = false;
+    keyboard_shortcut_latched_ = true;
+    keyboard_touch_was_down_ = true;
     ResetControllerDeliveryState();
     if (touch_was_down_) {
         session_->send_mouse_left_button(false);
@@ -330,8 +433,6 @@ void StreamView::OpenInlineKeyboard() {
     }
     SendNeutralControllerReports();
     session_->record_ui_event("keyboard opened by Minus+Y");
-    brls::Application::notify(
-        "Keyboard shortcuts: MINUS + ZL Esc / L Tab / R Alt+Tab / ZR Windows");
 #endif
 }
 
@@ -344,15 +445,13 @@ void StreamView::HideInlineKeyboard(bool send_enter) {
     swkbdInlineDisappear(&inline_keyboard_);
     keyboard_visible_ = false;
     keyboard_text_.clear();
-    keyboard_escape_chord_was_down_ = false;
-    keyboard_tab_chord_was_down_ = false;
-    keyboard_alt_tab_chord_was_down_ = false;
-    keyboard_windows_chord_was_down_ = false;
+    keyboard_shortcut_latched_ = false;
+    keyboard_touch_was_down_ = false;
     ResetControllerDeliveryState();
     suppress_b_until_release_ = true;
     keyboard_release_guard_ = true;
     if (session_)
-        session_->record_ui_event(send_enter ? "keyboard submitted" : "keyboard hidden by B");
+        session_->record_ui_event(send_enter ? "keyboard submitted" : "keyboard closed");
 #else
     (void)send_enter;
 #endif
@@ -362,6 +461,9 @@ void StreamView::UpdateInlineKeyboard() {
 #ifdef __SWITCH__
     if (!keyboard_launched_)
         return;
+    if (keyboard_visible_ && (!session_ ||
+        !session_->get_transport_health().peer_completed))
+        HideInlineKeyboard(false);
     SwkbdState state = SwkbdState_Inactive;
     const Result rc = swkbdInlineUpdate(&inline_keyboard_, &state);
     if (R_FAILED(rc) && session_)
@@ -376,35 +478,15 @@ void StreamView::KeyboardChangedCallback(const char* text, SwkbdChangedStringArg
 }
 
 void StreamView::KeyboardEnterCallback(const char* text, SwkbdDecidedEnterArg*) {
-    if (!active_keyboard_view_)
+    if (!active_keyboard_view_ || !active_keyboard_view_->keyboard_visible_)
         return;
     active_keyboard_view_->HandleKeyboardText(text);
-    active_keyboard_view_->SendKeyboardCharacter('\n');
-    active_keyboard_view_->keyboard_visible_ = false;
-    active_keyboard_view_->keyboard_text_.clear();
-    active_keyboard_view_->keyboard_escape_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_tab_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_alt_tab_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_windows_chord_was_down_ = false;
-    active_keyboard_view_->ResetControllerDeliveryState();
-    active_keyboard_view_->keyboard_release_guard_ = true;
-    if (active_keyboard_view_->session_)
-        active_keyboard_view_->session_->record_ui_event("keyboard submitted");
+    active_keyboard_view_->HideInlineKeyboard(true);
 }
 
 void StreamView::KeyboardCancelCallback() {
     if (!active_keyboard_view_)
         return;
-    active_keyboard_view_->keyboard_visible_ = false;
-    active_keyboard_view_->keyboard_text_.clear();
-    active_keyboard_view_->keyboard_escape_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_tab_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_alt_tab_chord_was_down_ = false;
-    active_keyboard_view_->keyboard_windows_chord_was_down_ = false;
-    active_keyboard_view_->ResetControllerDeliveryState();
-    active_keyboard_view_->suppress_b_until_release_ = true;
-    active_keyboard_view_->keyboard_release_guard_ = true;
-    if (active_keyboard_view_->session_)
-        active_keyboard_view_->session_->record_ui_event("keyboard cancelled");
+    active_keyboard_view_->HideInlineKeyboard(false);
 }
 #endif

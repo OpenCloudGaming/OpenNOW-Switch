@@ -1,17 +1,14 @@
 #include "webrtc_session.hpp"
+#include "app_paths.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "stream_diagnostics.hpp"
+#include "diagnostic_writer.hpp"
 #include "internal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <fstream>
 #include <mutex>
-#include <sstream>
-
-#ifdef __SWITCH__
-#include <sys/stat.h>
-#endif
 
 using namespace opennow::webrtc::internal;
 
@@ -19,15 +16,36 @@ using namespace opennow::webrtc::internal;
 namespace
 {
 
-std::mutex& StreamLogMutex()
+opennow::webrtc::diagnostics::DiagnosticWriter& StreamLogWriter()
 {
-    static std::mutex mutex;
-    return mutex;
+    static opennow::webrtc::diagnostics::DiagnosticWriter writer(
+        opennow::AppHomePath());
+    static const bool started = writer.start();
+    (void)started;
+    return writer;
 }
 
-std::chrono::steady_clock::time_point& InputLogStartTime()
+int64_t SteadyMilliseconds()
 {
-    static auto start = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::atomic<int64_t>& InputLogStartMilliseconds()
+{
+    static std::atomic<int64_t> start {SteadyMilliseconds()};
+    return start;
+}
+
+const std::chrono::steady_clock::time_point& StreamLogStartTime()
+{
+    static const auto start = std::chrono::steady_clock::now();
+    return start;
+}
+
+const std::chrono::steady_clock::time_point& TraceLogStartTime()
+{
+    static const auto start = std::chrono::steady_clock::now();
     return start;
 }
 
@@ -40,109 +58,56 @@ void AppendInputLog(const std::string& line)
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
-#ifdef __SWITCH__
-    mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/SwitchNOW", 0777);
-#endif
-    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - InputLogStartTime()).count();
-    std::lock_guard<std::mutex> lock(StreamLogMutex());
-    std::ofstream stream("sdmc:/switch/SwitchNOW/input.log", std::ios::app);
-    if (stream.is_open())
-        stream << "[+" << elapsed_ms << "ms] " << line << '\n';
+    const int64_t elapsed_ms = SteadyMilliseconds() -
+                               InputLogStartMilliseconds().load(std::memory_order_relaxed);
+    StreamLogWriter().try_append(
+        diagnostics::DiagnosticFile::Input,
+        "[+" + std::to_string(elapsed_ms) + "ms] " + line + '\n');
 }
 
 void AppendStreamLog(const std::string& line)
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
-#ifdef __SWITCH__
-    mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/SwitchNOW", 0777);
-#endif
-
-    static const auto log_start = std::chrono::steady_clock::now();
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - log_start).count();
-
-    std::lock_guard<std::mutex> lock(StreamLogMutex());
-
-    std::ofstream stream("sdmc:/switch/SwitchNOW/signaling.log", std::ios::app);
-    if (stream.is_open())
-        stream << "[+" << elapsed_ms << "ms] " << line << '\n';
-
-    std::ofstream trace("sdmc:/switch/SwitchNOW/stream_trace.log", std::ios::app);
-    if (trace.is_open())
-        trace << "[+" << elapsed_ms << "ms] APP " << line << '\n';
+        std::chrono::steady_clock::now() - StreamLogStartTime()).count();
+    const std::string prefix = "[+" + std::to_string(elapsed_ms) + "ms] ";
+    StreamLogWriter().try_append_stream(
+        prefix + line + '\n', prefix + "APP " + line + '\n');
 }
 
 void ResetStreamTraceLog()
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
-#ifdef __SWITCH__
-    mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/SwitchNOW", 0777);
-#endif
-    std::lock_guard<std::mutex> lock(StreamLogMutex());
-    {
-        std::ofstream stream("sdmc:/switch/SwitchNOW/signaling.log", std::ios::trunc);
-        if (stream.is_open()) {
-            stream << "SwitchNOW signaling and media log\n";
-            stream << "One file per stream attempt.\n";
-            stream << "======================================\n";
-        }
-    }
-    {
-        std::ofstream stream("sdmc:/switch/SwitchNOW/stream_trace.log", std::ios::trunc);
-        if (stream.is_open()) {
-            stream << "SwitchNOW stream trace\n";
-            stream << "One file per stream attempt. Safe to send for debugging.\n";
-            stream << "=======================================================\n";
-        }
-    }
-    {
-        InputLogStartTime() = std::chrono::steady_clock::now();
-        std::ofstream stream("sdmc:/switch/SwitchNOW/input.log", std::ios::trunc);
-        if (stream.is_open()) {
-            stream << "SwitchNOW input flight recorder\n";
-            stream << "Controller samples -> Xbox encoding -> DataChannel -> SCTP result.\n";
-            stream << "===============================================================\n";
-        }
-    }
+    InputLogStartMilliseconds().store(SteadyMilliseconds(), std::memory_order_relaxed);
+    StreamLogWriter().reset_stream_logs();
 }
 
 void AppendTraceLog(const std::string& line)
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
-#ifdef __SWITCH__
-    mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/SwitchNOW", 0777);
-#endif
-
-    static const auto trace_start = std::chrono::steady_clock::now();
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - trace_start).count();
-
-    std::lock_guard<std::mutex> lock(StreamLogMutex());
-    std::ofstream stream("sdmc:/switch/SwitchNOW/stream_trace.log", std::ios::app);
-    if (stream.is_open())
-        stream << "[+" << elapsed_ms << "ms] " << line << '\n';
+        std::chrono::steady_clock::now() - TraceLogStartTime()).count();
+    StreamLogWriter().try_append(
+        diagnostics::DiagnosticFile::Trace,
+        "[+" + std::to_string(elapsed_ms) + "ms] " + line + '\n');
 }
 
 void AppendTraceBlock(const std::string& title, const std::string& body)
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
-    AppendTraceLog("----- " + title + " BEGIN bytes=" + std::to_string(body.size()) + " -----");
-    {
-        std::lock_guard<std::mutex> lock(StreamLogMutex());
-        std::ofstream stream("sdmc:/switch/SwitchNOW/stream_trace.log", std::ios::app);
-        if (stream.is_open())
-            stream << body << (body.empty() || body.back() == '\n' ? "" : "\n");
-    }
-    AppendTraceLog("----- " + title + " END -----");
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - TraceLogStartTime()).count();
+    const std::string prefix = "[+" + std::to_string(elapsed_ms) + "ms] ";
+    std::string block = prefix + "----- " + title + " BEGIN bytes=" +
+                        std::to_string(body.size()) + " -----\n" + body;
+    if (!body.empty() && body.back() != '\n')
+        block += '\n';
+    block += prefix + "----- " + title + " END -----\n";
+    StreamLogWriter().try_append_trace_block(std::move(block));
 }
 
 std::string PreviewText(const std::string& value, size_t max_chars)
@@ -192,6 +157,8 @@ void WebRtcSession::maybe_log_stream_diagnostics() {
 
 
 void WebRtcSession::log_stream_summary(const char* reason) {
+    if (!opennow::StreamDiagnosticsEnabled())
+        return;
     const auto now = std::chrono::steady_clock::now();
     long long since_start_ms = -1;
     long long since_completed_ms = -1;

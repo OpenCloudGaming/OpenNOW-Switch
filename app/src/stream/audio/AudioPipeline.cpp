@@ -251,7 +251,6 @@ struct AudioPipeline::Impl {
     }
 
     OutputSlot* acquire_output_slot() {
-        reclaim_output_buffers();
         for (auto& slot : output_slots)
             if (slot.free)
                 return &slot;
@@ -506,7 +505,7 @@ struct AudioPipeline::Impl {
     bool take_next(Packet& packet) {
         std::unique_lock<std::mutex> lock(mutex);
         for (;;) {
-            if (!running.load())
+            if (!running.load() || reset_epoch_requested.load())
                 return false;
 
             const uint64_t now_us = monotonic_us();
@@ -516,7 +515,9 @@ struct AudioPipeline::Impl {
                 uint64_t wait_us = 12000;
                 if (!hold_finished)
                     wait_us = std::min(wait_us, jitter_hold_until_us - now_us);
-                cv.wait_for(lock, std::chrono::microseconds(wait_us));
+                if (cv.wait_for(lock, std::chrono::microseconds(wait_us)) ==
+                    std::cv_status::timeout)
+                    return false;
                 continue;
             }
 
@@ -601,7 +602,7 @@ struct AudioPipeline::Impl {
                 reset_media_epoch("transport_gap");
             Packet packet;
             if (!take_next(packet)) {
-                if (output_ready.load())
+                if (output_ready.load() && queued_output_buffers > 0)
                     reclaim_output_buffers();
                 const uint64_t now_us = monotonic_us();
                 if (packets_rx.load() == 0 && now_us - last_wait_log_us >= 5000000) {

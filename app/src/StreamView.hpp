@@ -4,7 +4,7 @@
 #include "gfn_client.hpp"
 #include "controller_delivery_policy.hpp"
 #include "keyboard_input_policy.hpp"
-#include "network_utils.hpp"
+#include "network_monitor.hpp"
 #include "nte_credentials.hpp"
 #include "stream_end_policy.hpp"
 #include "stream_overlay_policy.hpp"
@@ -87,7 +87,11 @@ private:
     void OpenInlineKeyboard();
     void HideInlineKeyboard(bool send_enter);
     void UpdateInlineKeyboard();
+    void HandleInlineKeyboardInput(const brls::ControllerState& state,
+                                   float x, float y, float width);
+    void DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float width);
     void HandleKeyboardText(const char* text);
+    void SendKeyboardStroke(opennow::input::KeyboardStroke stroke);
     void SendKeyboardCharacter(char character);
     void SendKeyboardShortcut(opennow::input::KeyboardShortcut shortcut);
     void StartNteAutoLogin(std::chrono::steady_clock::time_point now);
@@ -181,10 +185,8 @@ private:
     bool keyboard_combo_was_down_ = false;
     bool keyboard_b_was_down_ = false;
     bool keyboard_plus_was_down_ = false;
-    bool keyboard_escape_chord_was_down_ = false;
-    bool keyboard_tab_chord_was_down_ = false;
-    bool keyboard_alt_tab_chord_was_down_ = false;
-    bool keyboard_windows_chord_was_down_ = false;
+    bool keyboard_shortcut_latched_ = false;
+    bool keyboard_touch_was_down_ = false;
     bool suppress_b_until_release_ = false;
     bool keyboard_release_guard_ = false;
     bool keyboard_visible_ = false;
@@ -225,8 +227,7 @@ private:
     opennow::StreamEndReason stream_end_reason_ = opennow::StreamEndReason::None;
     std::chrono::steady_clock::time_point stream_end_started_at_ {};
     std::chrono::steady_clock::time_point stream_auto_exit_at_ {};
-    std::chrono::steady_clock::time_point last_network_check_at_ {};
-    std::chrono::steady_clock::time_point last_network_info_check_at_ {};
+    opennow::NetworkMonitor network_monitor_;
     std::chrono::steady_clock::time_point network_warning_visible_until_ {};
     opennow::NetworkConnectionInfo network_info_ {};
     bool internet_connected_ = true;

@@ -131,10 +131,11 @@ On Linux or in CI, use the equivalent shell entry point:
 bash scripts/package-release.sh 0.0.6
 ```
 
-After a change reaches `main`, the Blacksmith release workflow increments the
-patch version from the latest GitHub release, embeds it in the app and NRO
-metadata, publishes both files, and generates notes from the changes since the
-previous release. Pull requests run the same build without publishing.
+Run **Actions → Switch build and release → Run workflow** to build manually.
+On `main`, the Blacksmith workflow increments the patch version from the latest
+GitHub release, embeds it in the app and NRO metadata, publishes both files, and
+generates release notes. Selecting another branch builds downloadable artifacts
+without publishing a release. Pushes and pull requests do not trigger builds.
 
 ## Repository layout
 
@@ -163,6 +164,13 @@ g++ -std=c++20 -Wall -Wextra -Werror -Iapp/src tests/<name>.cpp
 Tests that exercise implementation files must compile those `.cpp` files and
 link their host dependencies. Host checks do not replace a devkitA64 Nintendo
 Switch build.
+
+Run the streaming, input, and network regression suite on Linux with
+`bash scripts/test-streaming-host.sh`. It requires a C/C++20 compiler and the
+Jansson, libcurl, libsrtp2, libavcodec, and libavutil development packages. The suite includes
+packet-loss and malformed-frame cases, decoded-frame selection, audio service
+mocks, keyboard shortcuts, and bitrate persistence/negotiation; it does not
+measure real Switch frame times or server bitrate adaptation.
 
 ## License
 

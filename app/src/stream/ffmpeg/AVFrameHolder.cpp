@@ -53,29 +53,33 @@ void AVFrameQueue::push(const AVFrame* item) {
 AVFrame* AVFrameQueue::pop(bool& reused, uint64_t& generation, int64_t target_pts) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (target_pts != AV_NOPTS_VALUE) {
-        while (!queue.empty() && queue.front()->pts != AV_NOPTS_VALUE) {
+    while (!queue.empty()) {
+        auto decision = opennow::video::FrameDecision::Present;
+        if (target_pts == AV_NOPTS_VALUE) {
+            if (queue.size() > 1)
+                decision = opennow::video::FrameDecision::DropSuperseded;
+        } else if (queue.front()->pts != AV_NOPTS_VALUE) {
             const bool has_next = queue.size() > 1 && queue[1]->pts != AV_NOPTS_VALUE;
-            const auto decision = opennow::video::DecideFrame(
+            decision = opennow::video::DecideFrame(
                 static_cast<uint32_t>(queue.front()->pts), has_next,
                 has_next ? static_cast<uint32_t>(queue[1]->pts) : 0,
                 bufferFrame != nullptr, static_cast<uint32_t>(target_pts));
-            if (decision == opennow::video::FrameDecision::HoldPrevious) {
-                fakeFrameUsedStat++;
-                timingHoldStat++;
-                reused = true;
-                generation = bufferGeneration;
-                return bufferFrame;
-            }
-            if (decision != opennow::video::FrameDecision::DropSuperseded)
-                break;
-            AVFrame* dropped = queue.front();
-            queue.pop_front();
-            generations.pop_front();
-            av_frame_free(&dropped);
-            framesDroppedStat++;
-            timingDroppedStat++;
         }
+        if (decision == opennow::video::FrameDecision::HoldPrevious) {
+            fakeFrameUsedStat++;
+            timingHoldStat++;
+            reused = true;
+            generation = bufferGeneration;
+            return bufferFrame;
+        }
+        if (decision != opennow::video::FrameDecision::DropSuperseded)
+            break;
+        AVFrame* dropped = queue.front();
+        queue.pop_front();
+        generations.pop_front();
+        av_frame_free(&dropped);
+        framesDroppedStat++;
+        timingDroppedStat++;
     }
 
     if (!queue.empty()) {

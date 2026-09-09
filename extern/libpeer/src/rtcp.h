@@ -78,6 +78,47 @@ typedef struct RtcpFb {
 
 } RtcpFb;
 
+typedef struct RtcpPacketView {
+  const uint8_t* data;
+  size_t size;
+  size_t content_size;
+  uint8_t type;
+  uint8_t count;
+} RtcpPacketView;
+
+typedef struct RtcpReceiverStats {
+  uint32_t ssrc;
+  uint16_t base_sequence;
+  uint16_t max_sequence;
+  uint32_t bad_sequence;
+  uint64_t cycles;
+  uint64_t received;
+  uint64_t expected_prior;
+  uint64_t received_prior;
+  uint64_t jitter_q4;
+  uint32_t last_arrival_ms;
+  uint32_t last_rtp_timestamp;
+  uint32_t last_report_ms;
+  uint32_t last_sr;
+  uint32_t last_sr_received_ms;
+  uint8_t initialized;
+  uint8_t have_sr;
+} RtcpReceiverStats;
+
+#define RTCP_RECEIVER_REPORT_INTERVAL_MS 1000
+
+int rtcp_parse_packet(const uint8_t* packet, size_t size, RtcpPacketView* view);
+int rtcp_validate_compound(const uint8_t* packet, size_t size);
+int rtcp_receiver_record_rtp(RtcpReceiverStats* stats, const uint8_t* packet,
+                             size_t size, uint32_t now_ms);
+void rtcp_receiver_record_sr(RtcpReceiverStats* stats, const RtcpPacketView* view,
+                              uint32_t now_ms);
+int rtcp_receiver_report_due(const RtcpReceiverStats* stats, uint32_t now_ms);
+void rtcp_receiver_report_sent(RtcpReceiverStats* stats, uint32_t now_ms, int success);
+int rtcp_get_receiver_report(uint8_t* packet, size_t capacity, uint32_t sender_ssrc,
+                             const RtcpReceiverStats* stats, uint32_t now_ms,
+                             const char* cname);
+
 int rtcp_probe(uint8_t* packet, size_t size);
 
 int rtcp_get_pli(uint8_t* packet, int len, uint32_t sender_ssrc, uint32_t media_ssrc);

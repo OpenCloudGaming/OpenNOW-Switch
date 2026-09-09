@@ -56,6 +56,7 @@ struct PeerConnection {
   int video_has_last_nack;
   uint32_t video_nack_requests;
   uint32_t video_nack_packets_requested;
+  RtcpReceiverStats video_receiver_stats;
 
   int dtls_handshake_attempts;
   uint32_t dtls_handshake_started_ms;
@@ -322,15 +323,18 @@ static int peer_connection_dtls_srtp_send(void* ctx, const uint8_t* buf, size_t 
 }
 
 static void peer_connection_incoming_rtcp(PeerConnection* pc, uint8_t* buf, size_t len) {
-  RtcpHeader* rtcp_header;
+  if (!rtcp_validate_compound(buf, len))
+    return;
   size_t pos = 0;
 
   while (pos < len) {
-    rtcp_header = (RtcpHeader*)(buf + pos);
+    RtcpPacketView view;
+    if (rtcp_parse_packet(buf + pos, len - pos, &view) != 0)
+      return;
 
-    switch (rtcp_header->type) {
+    switch (view.type) {
       case RTCP_SR:
-        if (pos + 20 <= len && pc->config.onrtpsenderreport) {
+        {
           uint32_t sender_ssrc_net, ntp_seconds_net, ntp_fraction_net, rtp_timestamp_net;
           memcpy(&sender_ssrc_net, buf + pos + 4, 4);
           memcpy(&ntp_seconds_net, buf + pos + 8, 4);
@@ -342,12 +346,15 @@ static void peer_connection_incoming_rtcp(PeerConnection* pc, uint8_t* buf, size
           const uint32_t rtp_timestamp = ntohl(rtp_timestamp_net);
           const uint64_t ntp_us = (uint64_t)ntp_seconds * 1000000ULL +
                                   (((uint64_t)ntp_fraction * 1000000ULL) >> 32);
-          pc->config.onrtpsenderreport(sender_ssrc, ntp_us, rtp_timestamp, pc->config.user_data);
+          if (sender_ssrc == pc->remote_vssrc)
+            rtcp_receiver_record_sr(&pc->video_receiver_stats, &view, ports_get_monotonic_time());
+          if (pc->config.onrtpsenderreport)
+            pc->config.onrtpsenderreport(sender_ssrc, ntp_us, rtp_timestamp, pc->config.user_data);
         }
         break;
       case RTCP_RR:
         LOGD("RTCP_PR");
-        if (rtcp_header->rc > 0) {
+        if (view.count > 0) {
 // TODO: REMB, GCC ...etc
 #if 0
           RtcpRr rtcp_rr = rtcp_parse_rr(buf);
@@ -361,7 +368,7 @@ static void peer_connection_incoming_rtcp(PeerConnection* pc, uint8_t* buf, size
         }
         break;
       case RTCP_PSFB: {
-        int fmt = rtcp_header->rc;
+        int fmt = view.count;
         LOGD("RTCP_PSFB %d", fmt);
         // PLI and FIR
         if ((fmt == 1 || fmt == 4) && pc->config.on_request_keyframe) {
@@ -372,8 +379,22 @@ static void peer_connection_incoming_rtcp(PeerConnection* pc, uint8_t* buf, size
         break;
     }
 
-    pos += 4 * ntohs(rtcp_header->length) + 4;
+    pos += view.size;
   }
+}
+
+static void peer_connection_maybe_send_receiver_report(PeerConnection* pc) {
+  const uint32_t now_ms = ports_get_monotonic_time();
+  if (pc->state != PEER_CONNECTION_COMPLETED || pc->remote_vssrc == 0 ||
+      !rtcp_receiver_report_due(&pc->video_receiver_stats, now_ms))
+    return;
+  uint8_t packet[128];
+  int size = rtcp_get_receiver_report(packet, sizeof(packet) - 32,
+      pc->vrtp_encoder.ssrc, &pc->video_receiver_stats, now_ms, "webrtc-h264");
+  int success = 0;
+  if (size > 0 && dtls_srtp_encrypt_rctp_packet(&pc->dtls_srtp, packet, &size) == 0)
+    success = agent_send(&pc->agent, packet, size) == size;
+  rtcp_receiver_report_sent(&pc->video_receiver_stats, now_ms, success);
 }
 
 const char* peer_connection_state_to_string(PeerConnectionState state) {
@@ -637,16 +658,16 @@ int peer_connection_loop(PeerConnection* pc) {
       }
       break;
     case PEER_CONNECTION_COMPLETED:
-      if ((pc->agent_ret = agent_recv(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf))) > 0) {
+      if ((pc->agent_ret = agent_recv_nonblocking(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf))) > 0) {
         packet_processed = 1;
         LOGD("agent_recv %d", pc->agent_ret);
         pc->completed_udp_packets++;
-        char preview[64];
-        peer_connection_hex_preview(pc->agent_buf, pc->agent_ret, preview, sizeof(preview));
-
         if (dtls_srtp_probe(pc->agent_buf)) {
           pc->completed_dtls_packets++;
-          if (pc->completed_dtls_packets <= 10 || pc->completed_dtls_packets % 600 == 0) {
+          if (peer_connection_diagnostics_enabled &&
+              (pc->completed_dtls_packets <= 10 || pc->completed_dtls_packets % 600 == 0)) {
+            char preview[64];
+            peer_connection_hex_preview(pc->agent_buf, pc->agent_ret, preview, sizeof(preview));
             peer_connection_diag_log("udp_class=dtls count=%d bytes=%d preview=%s",
                                      pc->completed_dtls_packets,
                                      pc->agent_ret,
@@ -657,7 +678,8 @@ int peer_connection_loop(PeerConnection* pc) {
 
           if (ret > 0) {
             pc->sctp_read_events++;
-            if (pc->sctp_read_events <= 10 || pc->sctp_read_events % 600 == 0) {
+            if (peer_connection_diagnostics_enabled &&
+                (pc->sctp_read_events <= 10 || pc->sctp_read_events % 600 == 0)) {
               char sctp_preview[64];
               peer_connection_hex_preview(pc->temp_buf, ret, sctp_preview, sizeof(sctp_preview));
               peer_connection_diag_log("dtls_read_appdata ret=%d sctpEvents=%d preview=%s",
@@ -680,7 +702,10 @@ int peer_connection_loop(PeerConnection* pc) {
         } else if (rtcp_probe(pc->agent_buf, pc->agent_ret)) {
           LOGD("Got RTCP packet");
           pc->completed_rtcp_packets++;
-          if (pc->completed_rtcp_packets <= 5 || pc->completed_rtcp_packets % 600 == 0) {
+          if (peer_connection_diagnostics_enabled &&
+              (pc->completed_rtcp_packets <= 5 || pc->completed_rtcp_packets % 600 == 0)) {
+            char preview[64];
+            peer_connection_hex_preview(pc->agent_buf, pc->agent_ret, preview, sizeof(preview));
             peer_connection_diag_log("udp_class=rtcp count=%d bytes=%d preview=%s",
                                      pc->completed_rtcp_packets,
                                      pc->agent_ret,
@@ -699,7 +724,10 @@ int peer_connection_loop(PeerConnection* pc) {
           LOGD("Got RTP packet");
           pc->completed_rtp_packets++;
 
-          if (pc->completed_rtp_packets <= 10 || pc->completed_rtp_packets % 1200 == 0) {
+          if (peer_connection_diagnostics_enabled &&
+              (pc->completed_rtp_packets <= 10 || pc->completed_rtp_packets % 1200 == 0)) {
+            char preview[64];
+            peer_connection_hex_preview(pc->agent_buf, pc->agent_ret, preview, sizeof(preview));
             peer_connection_diag_log("udp_class=rtp count=%d bytes=%d preview=%s",
                                      pc->completed_rtp_packets,
                                      pc->agent_ret,
@@ -740,6 +768,8 @@ int peer_connection_loop(PeerConnection* pc) {
             }
             const uint16_t sequence =
                 (uint16_t)(((uint16_t)pc->agent_buf[2] << 8) | pc->agent_buf[3]);
+            rtcp_receiver_record_rtp(&pc->video_receiver_stats,
+                                     pc->agent_buf, pc->agent_ret, ports_get_monotonic_time());
             peer_connection_maybe_send_video_nacks(pc, sequence);
             rtp_decoder_decode(&pc->vrtp_decoder, pc->agent_buf, pc->agent_ret);
             if (pc->completed_rtp_packets % 6000 == 0) {
@@ -759,7 +789,10 @@ int peer_connection_loop(PeerConnection* pc) {
 
         } else {
           pc->completed_unknown_packets++;
-          if (pc->completed_unknown_packets <= 10 || pc->completed_unknown_packets % 600 == 0) {
+          if (peer_connection_diagnostics_enabled &&
+              (pc->completed_unknown_packets <= 10 || pc->completed_unknown_packets % 600 == 0)) {
+            char preview[64];
+            peer_connection_hex_preview(pc->agent_buf, pc->agent_ret, preview, sizeof(preview));
             peer_connection_diag_log("udp_class=unknown count=%d bytes=%d preview=%s totals udp/rtcp/dtls/rtp/unknown=%d/%d/%d/%d/%d",
                                      pc->completed_unknown_packets,
                                      pc->agent_ret,
@@ -781,6 +814,7 @@ int peer_connection_loop(PeerConnection* pc) {
         pc->agent.binding_request_time = ports_get_epoch_time();
       }
       rtp_decoder_poll(&pc->vrtp_decoder);
+      peer_connection_maybe_send_receiver_report(pc);
 
       break;
     case PEER_CONNECTION_FAILED:
@@ -862,6 +896,7 @@ void peer_connection_set_remote_description(PeerConnection* pc, const char* sdp,
                            pc->config.onvideotrack, pc->config.user_data);
           rtp_decoder_set_video_callback(&pc->vrtp_decoder, pc->config.onvideopacket);
           pc->video_has_last_nack = 0;
+          memset(&pc->video_receiver_stats, 0, sizeof(pc->video_receiver_stats));
         } else {
           rtp_decoder_cleanup(&pc->artp_decoder);
           rtp_decoder_init(&pc->artp_decoder, pc->config.audio_codec,

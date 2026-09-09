@@ -1,5 +1,4 @@
 #include "StreamView.hpp"
-#include "network_utils.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -292,8 +291,9 @@ void StreamView::RefreshNetworkInfo(std::chrono::steady_clock::time_point now)
 {
     const bool was_2_4_ghz =
         opennow::network::ShouldWarnForStreaming(network_info_.wifi_band);
-    network_info_ = opennow::NetworkUtils::GetConnectionInfo();
-    last_network_info_check_at_ = now;
+    const opennow::NetworkMonitorSnapshot snapshot = network_monitor_.snapshot();
+    network_info_ = snapshot.connection_info;
+    internet_connected_ = snapshot.internet_connected;
 
     const bool is_2_4_ghz =
         opennow::network::ShouldWarnForStreaming(network_info_.wifi_band);
@@ -617,7 +617,7 @@ void StreamView::DrawStreamOverlay(
 
     draw_shortcut(right_y, "MINUS  +  PLUS", "Open or close this menu", true);
     draw_shortcut(right_y, "MINUS  +  Y", "Open the on-screen keyboard");
-    draw_shortcut(right_y, "MINUS + ZL/L/R/ZR", "Keyboard: Esc / Tab / Alt+Tab / Win");
+    draw_shortcut(right_y, "KEYBOARD STRIP", "Tap Esc, Win or Windows shortcuts");
     draw_shortcut(right_y, "B", "Close menu or keyboard");
     draw_shortcut(right_y, "ZL + ZR + MINUS", "Exit the stream");
     draw_shortcut(right_y, "HOLD PLUS", "Press the Xbox Guide button");
@@ -706,6 +706,7 @@ void StreamView::BeginStreamEnd(
         return;
 
     stream_end_reason_ = reason;
+    network_monitor_.request_stop();
     stream_end_started_at_ = now;
     stream_auto_exit_at_ = now + std::chrono::seconds(15);
     if (reason == opennow::StreamEndReason::FreeSessionEnded) {
@@ -749,16 +750,7 @@ void StreamView::UpdateStreamEndState(std::chrono::steady_clock::time_point now)
     if (!session_ || stream_end_reason_ != opennow::StreamEndReason::None)
         return;
 
-    if (last_network_info_check_at_.time_since_epoch().count() == 0 ||
-        now - last_network_info_check_at_ >= std::chrono::seconds(30)) {
-        RefreshNetworkInfo(now);
-    }
-
-    if (last_network_check_at_.time_since_epoch().count() == 0 ||
-        now - last_network_check_at_ >= std::chrono::seconds(1)) {
-        internet_connected_ = opennow::NetworkUtils::HasInternetConnection();
-        last_network_check_at_ = now;
-    }
+    RefreshNetworkInfo(now);
 
     const StreamTransportHealth health = session_->get_transport_health();
     opennow::StreamEndSignals signals;
