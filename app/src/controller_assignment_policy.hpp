@@ -27,16 +27,6 @@ class ControllerAssignments
         if (source_to_controller_[source] != kUnassignedController)
             return source_to_controller_[source];
 
-        // Handheld and Npad No1 both naturally prefer player one. If both are
-        // active, whichever was observed first keeps it and the other takes
-        // the next free position. Assignments remain reserved on disconnect.
-        const std::size_t preferred = source == 0 ? 0 : source - 1;
-        if (preferred < controller_to_source_.size() &&
-            controller_to_source_[preferred] == kUnassignedController)
-        {
-            return Bind(source, preferred);
-        }
-
         for (std::size_t controller = 0;
              controller < controller_to_source_.size(); ++controller)
         {
@@ -44,6 +34,36 @@ class ControllerAssignments
                 return Bind(source, controller);
         }
         return kUnassignedController;
+    }
+
+    void Release(std::size_t source)
+    {
+        const auto controller = ControllerForSource(source);
+        if (controller == kUnassignedController)
+            return;
+        controller_to_source_[static_cast<std::size_t>(controller)] = kUnassignedController;
+        source_to_controller_[source] = kUnassignedController;
+    }
+
+    std::array<bool, kRemoteControllerCount> Update(
+        const std::array<bool, kSwitchControllerSourceCount>& connected)
+    {
+        std::array<bool, kRemoteControllerCount> released {};
+        for (std::size_t source = 0; source < connected.size(); ++source)
+        {
+            const auto controller = ControllerForSource(source);
+            if (!connected[source] && controller != kUnassignedController)
+            {
+                released[static_cast<std::size_t>(controller)] = true;
+                Release(source);
+            }
+        }
+        for (std::size_t source = 0; source < connected.size(); ++source)
+        {
+            if (connected[source])
+                Assign(source);
+        }
+        return released;
     }
 
     std::int8_t ControllerForSource(std::size_t source) const
