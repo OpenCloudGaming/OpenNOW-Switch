@@ -37,19 +37,13 @@ void StreamView::PollControllerStates(std::chrono::steady_clock::time_point now)
 {
     std::array<bool, opennow::input::kRemoteControllerCount> connected {};
     std::array<brls::ControllerState, opennow::input::kRemoteControllerCount> states {};
+    std::array<bool, opennow::input::kSwitchControllerSourceCount> sources_connected {};
+    std::array<brls::ControllerState, opennow::input::kSwitchControllerSourceCount> source_states {};
 
 #ifdef __SWITCH__
     for (std::size_t source = 0; source < switch_controller_sources_.size(); ++source)
     {
-        brls::ControllerState state {};
-        if (!ReadSwitchControllerSource(source, state))
-            continue;
-
-        const std::int8_t controller = controller_assignments_.Assign(source);
-        if (controller < 0)
-            continue;
-        connected[static_cast<std::size_t>(controller)] = true;
-        states[static_cast<std::size_t>(controller)] = state;
+        sources_connected[source] = ReadSwitchControllerSource(source, source_states[source]);
     }
 #else
     auto* input = brls::Application::getPlatform()->getInputManager();
@@ -58,40 +52,41 @@ void StreamView::PollControllerStates(std::chrono::steady_clock::time_point now)
     for (std::size_t index = 0;
          index < std::min(count, opennow::input::kRemoteControllerCount); ++index)
     {
-        const std::int8_t controller = controller_assignments_.Assign(index + 1);
-        if (controller < 0)
-            continue;
-        brls::ControllerState state {};
-        input->updateControllerState(&state, static_cast<int>(index));
-        connected[static_cast<std::size_t>(controller)] = true;
-        states[static_cast<std::size_t>(controller)] = state;
+        sources_connected[index + 1] = true;
+        input->updateControllerState(&source_states[index + 1], static_cast<int>(index));
     }
 #endif
+
+    const auto released = controller_assignments_.Update(sources_connected);
+    for (std::size_t source = 0; source < sources_connected.size(); ++source)
+    {
+        const auto controller = controller_assignments_.ControllerForSource(source);
+        if (controller < 0)
+            continue;
+        connected[static_cast<std::size_t>(controller)] = true;
+        states[static_cast<std::size_t>(controller)] = source_states[source];
+    }
 
     if (controller_connections_initialized_)
     {
         for (std::size_t controller = 0; controller < connected.size(); ++controller)
         {
             auto& delivery = controller_delivery_[controller];
-            if (!controller_connected_[controller] && connected[controller])
+            if (released[controller])
             {
-                delivery.initialized = false;
-                delivery.pending_disconnect = false;
+                delivery.Reset(true);
+                if (session_)
+                    session_->record_ui_event(
+                        "controller disconnected player=" + std::to_string(controller + 1));
+            }
+            if (connected[controller] &&
+                (!controller_connected_[controller] || released[controller]))
+            {
+                delivery.Reset();
                 QueueControllerConnectedNotice(controller, now);
                 if (session_)
                     session_->record_ui_event(
                         "controller connected player=" + std::to_string(controller + 1));
-            }
-            else if (controller_connected_[controller] && !connected[controller])
-            {
-                delivery.initialized = false;
-                delivery.pending_disconnect = true;
-                delivery.plus_was_down = false;
-                delivery.plus_long_press = false;
-                delivery.start_pulse = {};
-                if (session_)
-                    session_->record_ui_event(
-                        "controller disconnected player=" + std::to_string(controller + 1));
             }
         }
     }
@@ -191,12 +186,10 @@ bool StreamView::ReadSwitchControllerSource(
 }
 #endif
 
-void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
+uint16_t StreamView::SendPendingControllerDisconnects()
 {
-    if (!session_)
-        return;
-
-    const uint16_t bitmap = opennow::input::ControllerBitmap(controller_connected_);
+    const uint16_t bitmap = opennow::input::ControllerReportBitmap(
+        controller_connected_, controller_delivery_);
     for (std::size_t controller = 0; controller < controller_delivery_.size(); ++controller)
     {
         auto& delivery = controller_delivery_[controller];
@@ -209,10 +202,18 @@ void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
             delivery.pending_disconnect = false;
         }
     }
+    return opennow::input::ControllerReportBitmap(controller_connected_, controller_delivery_);
+}
 
+void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
+{
+    if (!session_)
+        return;
+
+    const uint16_t bitmap = SendPendingControllerDisconnects();
     for (std::size_t controller = 0; controller < controller_states_.size(); ++controller)
     {
-        if (!controller_connected_[controller])
+        if (!controller_connected_[controller] || controller_delivery_[controller].pending_disconnect)
             continue;
 
         const brls::ControllerState& state = controller_states_[controller];
@@ -306,11 +307,7 @@ void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
 void StreamView::ResetControllerDeliveryState()
 {
     for (auto& delivery : controller_delivery_)
-    {
-        const bool pending_disconnect = delivery.pending_disconnect;
-        delivery = {};
-        delivery.pending_disconnect = pending_disconnect;
-    }
+        delivery.Reset();
 }
 
 void StreamView::SendNeutralControllerReports()
@@ -318,17 +315,15 @@ void StreamView::SendNeutralControllerReports()
     if (!session_)
         return;
 
-    const uint16_t bitmap = opennow::input::ControllerBitmap(controller_connected_);
+    const uint16_t bitmap = SendPendingControllerDisconnects();
     for (std::size_t controller = 0; controller < controller_delivery_.size(); ++controller)
     {
         auto& delivery = controller_delivery_[controller];
-        if (!controller_connected_[controller] && !delivery.pending_disconnect)
+        if (!controller_connected_[controller] || delivery.pending_disconnect)
             continue;
-        const bool delivered = session_->send_gamepad_input(
+        session_->send_gamepad_input(
             static_cast<uint8_t>(controller), bitmap,
             0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
-        if (delivered && delivery.pending_disconnect)
-            delivery.pending_disconnect = false;
         delivery.initialized = false;
     }
 }

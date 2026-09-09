@@ -74,6 +74,7 @@ private:
                              std::chrono::steady_clock::time_point now);
     void PollControllerStates(std::chrono::steady_clock::time_point now);
     void SendControllerInputs(std::chrono::steady_clock::time_point now);
+    uint16_t SendPendingControllerDisconnects();
     void ResetControllerDeliveryState();
     void SendNeutralControllerReports();
     void QueueControllerConnectedNotice(
@@ -131,23 +132,6 @@ private:
         SubmitLogin,
     };
 
-    struct ControllerDeliveryState {
-        bool initialized = false;
-        bool pending_disconnect = false;
-        bool plus_was_down = false;
-        bool plus_long_press = false;
-        uint16_t last_buttons = 0;
-        uint8_t last_left_trigger = 0;
-        uint8_t last_right_trigger = 0;
-        int16_t last_lx = 0;
-        int16_t last_ly = 0;
-        int16_t last_rx = 0;
-        int16_t last_ry = 0;
-        std::chrono::steady_clock::time_point plus_pressed_at {};
-        std::chrono::steady_clock::time_point last_report {};
-        opennow::input::StartDeliveryPulse start_pulse;
-    };
-
     std::unique_ptr<WebRtcSession> session_;
     opennow::GfnClient client_;
     opennow::AuthSession auth_;
@@ -199,7 +183,7 @@ private:
     std::array<brls::ControllerState, opennow::input::kRemoteControllerCount>
         controller_states_ {};
     std::array<bool, opennow::input::kRemoteControllerCount> controller_connected_ {};
-    std::array<ControllerDeliveryState, opennow::input::kRemoteControllerCount>
+    std::array<opennow::input::ControllerDeliveryState, opennow::input::kRemoteControllerCount>
         controller_delivery_ {};
     bool controller_connections_initialized_ = false;
     std::string controller_notice_text_;

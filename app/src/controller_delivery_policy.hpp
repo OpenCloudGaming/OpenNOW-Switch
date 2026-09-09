@@ -1,5 +1,7 @@
 #pragma once
 
+#include "controller_assignment_policy.hpp"
+
 #include <chrono>
 
 namespace opennow::input
@@ -40,5 +42,42 @@ class StartDeliveryPulse
     TimePoint delivery_deadline_ {};
     TimePoint hold_until_ {};
 };
+
+struct ControllerDeliveryState
+{
+    bool initialized = false;
+    bool pending_disconnect = false;
+    bool plus_was_down = false;
+    bool plus_long_press = false;
+    uint16_t last_buttons = 0;
+    uint8_t last_left_trigger = 0;
+    uint8_t last_right_trigger = 0;
+    int16_t last_lx = 0;
+    int16_t last_ly = 0;
+    int16_t last_rx = 0;
+    int16_t last_ry = 0;
+    std::chrono::steady_clock::time_point plus_pressed_at {};
+    std::chrono::steady_clock::time_point last_report {};
+    StartDeliveryPulse start_pulse;
+
+    void Reset(bool disconnected = false)
+    {
+        const bool pending = pending_disconnect || disconnected;
+        *this = {};
+        pending_disconnect = pending;
+    }
+};
+
+inline std::uint16_t ControllerReportBitmap(
+    std::array<bool, kRemoteControllerCount> connected,
+    const std::array<ControllerDeliveryState, kRemoteControllerCount>& delivery)
+{
+    for (std::size_t controller = 0; controller < connected.size(); ++controller)
+    {
+        if (delivery[controller].pending_disconnect)
+            connected[controller] = false;
+    }
+    return ControllerBitmap(connected);
+}
 
 } // namespace opennow::input
