@@ -12,6 +12,8 @@ int ports_get_host_addr(Address* addr, const char* iface_prefix);
 
 uint32_t ports_get_epoch_time();
 
+uint32_t ports_get_monotonic_time(void);
+
 void ports_sleep_ms(int ms);
 
 #endif  // PORTS_H_

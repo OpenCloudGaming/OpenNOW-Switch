@@ -5,6 +5,7 @@
 #include <functional>
 #include <cstdint>
 #include <curl/curl.h>
+#include "websocket_write_queue.hpp"
 
 class WebSocketClient {
 public:
@@ -29,9 +30,13 @@ private:
     CURL* curl_ = nullptr;
     MessageCallback on_message_;
     bool connected_ = false;
+    bool closing_ = false;
     std::string last_error_;
     std::vector<uint8_t> rx_buffer_;
+    opennow::websocket::WriteQueue tx_queue_;
 
-    bool send_all(const uint8_t* data, size_t length);
+    void close_transport();
+    bool drain_outgoing();
+    bool send_handshake(const uint8_t* data, size_t length);
     bool send_frame(uint8_t opcode, const uint8_t* payload, size_t length);
 };

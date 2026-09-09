@@ -395,7 +395,7 @@ static void rtp_decoder_flush_access_unit(RtpDecoder* rtp_decoder) {
     } else if (rtp_decoder->on_packet != NULL)
       rtp_decoder->on_packet(rtp_decoder->au_buf, rtp_decoder->au_offset, rtp_decoder->user_data);
     rtp_decoder->access_units_completed++;
-  } else if (rtp_decoder->au_offset > 0) {
+  } else if (rtp_decoder->au_damaged) {
     rtp_decoder->access_units_dropped++;
   }
 
@@ -403,8 +403,12 @@ static void rtp_decoder_flush_access_unit(RtpDecoder* rtp_decoder) {
 }
 
 static void rtp_decoder_begin_access_unit(RtpDecoder* rtp_decoder, uint32_t timestamp) {
-  if (rtp_decoder->au_started && rtp_decoder->au_timestamp != timestamp)
+  if (rtp_decoder->au_started && rtp_decoder->au_timestamp != timestamp) {
+    if (rtp_decoder->fragment_started)
+      rtp_decoder->au_damaged = 1;
+    rtp_decoder_reset_fragment(rtp_decoder);
     rtp_decoder_flush_access_unit(rtp_decoder);
+  }
 
   if (!rtp_decoder->au_started) {
     rtp_decoder->au_started = 1;
@@ -425,12 +429,16 @@ static int rtp_decode_h264_stap_a(
     offset += 2;
 
     if (nalu_size == 0)
-      continue;
+      return -1;
 
     if (offset + nalu_size > payload_size) {
       LOGW("RTP H264: invalid STAP-A packet");
       return -1;
     }
+
+    const uint8_t nalu_type = payload[offset] & 0x1f;
+    if (nalu_type == 0 || nalu_type >= STAP_A)
+      return -1;
 
     (void)timestamp;
     if (rtp_decoder_append_access_unit_nalu(rtp_decoder, payload + offset, nalu_size) == 0)
@@ -439,7 +447,7 @@ static int rtp_decode_h264_stap_a(
     offset += nalu_size;
   }
 
-  return appended > 0 ? (int)payload_size : -1;
+  return appended > 0 && offset == payload_size ? (int)payload_size : -1;
 }
 
 static int rtp_decode_h264_fu_a(
@@ -460,6 +468,9 @@ static int rtp_decode_h264_fu_a(
   const uint8_t nal_type = fu_header & 0x1f;
   const uint8_t reconstructed_header = (fu_indicator & 0xe0) | nal_type;
 
+  if ((start && end) || nal_type == 0 || nal_type >= STAP_A)
+    return -1;
+
   if (start) {
     if (rtp_decoder->fragment_started)
       rtp_decoder->au_damaged = 1;
@@ -474,8 +485,9 @@ static int rtp_decode_h264_fu_a(
       return -1;
     }
   } else {
-    if (!rtp_decoder->fragment_started)
-      return 0;
+    if (!rtp_decoder->fragment_started ||
+        rtp_decoder->nalu_buf[sizeof(nalu_start_4bytecode)] != reconstructed_header)
+      return -1;
 
     if (rtp_decoder_append(rtp_decoder, payload + 2, payload_size - 2) != 0) {
       rtp_decoder_reset_fragment(rtp_decoder);
@@ -494,8 +506,6 @@ static int rtp_decode_h264_fu_a(
       rtp_decoder->au_damaged = 1;
     }
     rtp_decoder_reset_fragment(rtp_decoder);
-    if (marker)
-      rtp_decoder_flush_access_unit(rtp_decoder);
   }
 
   (void)timestamp;
@@ -508,9 +518,6 @@ static int rtp_decode_h264(RtpDecoder* rtp_decoder, uint8_t* buf, size_t size) {
   RtpPayloadView view;
   if (rtp_parse_payload(buf, size, &view) != 0)
     return -1;
-
-  if (!rtp_decoder->au_started)
-    rtp_decoder->au_ssrc = view.ssrc;
 
   rtp_decoder->packets_received++;
 
@@ -526,8 +533,9 @@ static int rtp_decode_h264(RtpDecoder* rtp_decoder, uint8_t* buf, size_t size) {
          rtp_decoder->access_units_dropped);
   }
 
-  if (rtp_decoder->has_last_seq_number &&
-      (uint16_t)(rtp_decoder->last_seq_number + 1) != view.seq_number) {
+  const int sequence_gap = rtp_decoder->has_last_seq_number &&
+      (uint16_t)(rtp_decoder->last_seq_number + 1) != view.seq_number;
+  if (sequence_gap) {
     rtp_decoder->sequence_gaps++;
     rtp_decoder->au_damaged = 1;
     if (rtp_decoder->fragment_started) {
@@ -540,6 +548,9 @@ static int rtp_decode_h264(RtpDecoder* rtp_decoder, uint8_t* buf, size_t size) {
   rtp_decoder->last_seq_number = view.seq_number;
   rtp_decoder->has_last_seq_number = 1;
   rtp_decoder_begin_access_unit(rtp_decoder, view.timestamp);
+  rtp_decoder->au_ssrc = view.ssrc;
+  if (sequence_gap)
+    rtp_decoder->au_damaged = 1;
 
   const uint8_t nalu_type = view.payload[0] & 0x1f;
 
@@ -558,17 +569,30 @@ static int rtp_decode_h264(RtpDecoder* rtp_decoder, uint8_t* buf, size_t size) {
   switch (nalu_type) {
     case STAP_A:
       rtp_decoder->stap_packets++;
+      if (rtp_decoder->fragment_started)
+        rtp_decoder->au_damaged = 1;
       rtp_decoder_reset_fragment(rtp_decoder);
       if (rtp_decode_h264_stap_a(rtp_decoder, view.payload, view.payload_size, view.timestamp) < 0) {
         rtp_decoder->au_damaged = 1;
+        if (view.marker)
+          rtp_decoder_flush_access_unit(rtp_decoder);
         return -1;
       }
       if (view.marker)
         rtp_decoder_flush_access_unit(rtp_decoder);
       return (int)size;
-    case FU_A:
+    case FU_A: {
       rtp_decoder->fu_packets++;
-      return rtp_decode_h264_fu_a(rtp_decoder, view.payload, view.payload_size, view.timestamp, view.marker);
+      const int result = rtp_decode_h264_fu_a(
+          rtp_decoder, view.payload, view.payload_size, view.timestamp, view.marker);
+      if (result < 0 || (view.marker && rtp_decoder->fragment_started)) {
+        rtp_decoder->au_damaged = 1;
+        rtp_decoder_reset_fragment(rtp_decoder);
+      }
+      if (view.marker)
+        rtp_decoder_flush_access_unit(rtp_decoder);
+      return result;
+    }
     default:
       LOGD("RTP H264: unsupported packetization type %u", nalu_type);
       rtp_decoder->au_damaged = 1;
@@ -736,10 +760,12 @@ void rtp_decoder_poll(RtpDecoder* rtp_decoder) {
 }
 
 static int rtp_decoder_decode_reordered(RtpDecoder* rtp_decoder, const uint8_t* buf, size_t size) {
-  if (!rtp_decoder->reorder_buf || size < 4 || size > RTP_REORDER_PACKET_CAPACITY)
+  RtpPayloadView view;
+  if (!rtp_decoder->reorder_buf || size > RTP_REORDER_PACKET_CAPACITY ||
+      rtp_parse_payload((uint8_t*)buf, size, &view) != 0)
     return -1;
 
-  const uint16_t sequence = read_be16(buf + 2);
+  const uint16_t sequence = view.seq_number;
   const uint32_t now_ms = ports_get_epoch_time();
   if (!rtp_decoder->reorder_has_expected_sequence) {
     rtp_decoder->reorder_has_expected_sequence = 1;

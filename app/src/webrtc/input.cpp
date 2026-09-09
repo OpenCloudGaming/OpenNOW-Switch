@@ -247,7 +247,8 @@ bool WebRtcSession::send_gamepad_input(
     const PeerConnectionState peer_state = pc_ ? peer_connection_get_state(pc_) : PEER_CONNECTION_CLOSED;
     if (!pc_ || peer_state != PEER_CONNECTION_COMPLETED || !input_ready_) {
         gamepad_input_blocked_count_++;
-        if (gamepad_input_blocked_count_ <= 8 || gamepad_input_blocked_count_ % 50 == 0) {
+        if (opennow::StreamDiagnosticsEnabled() &&
+            (gamepad_input_blocked_count_ <= 8 || gamepad_input_blocked_count_ % 50 == 0)) {
             AppendInputLog("PAD blocked attempt=" + std::to_string(gamepad_input_attempt_count_) +
                            " pc=" + std::to_string(pc_ ? 1 : 0) +
                            " peer=" + (pc_ ? std::string(peer_connection_state_to_string(peer_state)) : "none") +
@@ -277,8 +278,9 @@ bool WebRtcSession::send_gamepad_input(
         gamepad_send_failure_count_++;
     else
         gamepad_tx_count_++;
-    if (gamepad_input_attempt_count_ <= 12 || gamepad_tx_count_ <= 8 ||
-        gamepad_input_attempt_count_ % 100 == 0 || sent < 0) {
+    if (opennow::StreamDiagnosticsEnabled() &&
+        (gamepad_input_attempt_count_ <= 12 || gamepad_tx_count_ <= 8 ||
+         gamepad_input_attempt_count_ % 100 == 0 || sent < 0)) {
         AppendInputLog("PAD tx attempt=" + std::to_string(gamepad_input_attempt_count_) +
                        " report=" + std::to_string(gamepad_tx_count_) +
                        " sid=" + std::to_string(sid) +
@@ -356,7 +358,7 @@ void WebRtcSession::send_keyboard_key(uint16_t keycode, uint16_t scancode,
                                       uint16_t modifiers, bool pressed) {
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
     if (!pc_ || !input_ready_ || peer_connection_get_state(pc_) != PEER_CONNECTION_COMPLETED) {
-        if (!opennow::SensitiveInputLoggingSuppressed())
+        if (opennow::StreamDiagnosticsEnabled() && !opennow::SensitiveInputLoggingSuppressed())
             AppendInputLog("KEY blocked vk=" + std::to_string(keycode) +
                            " pressed=" + std::to_string(pressed ? 1 : 0));
         return;
@@ -367,7 +369,7 @@ void WebRtcSession::send_keyboard_key(uint16_t keycode, uint16_t scancode,
     const auto wire_payload = WrapSingleInput(input_protocol_version_, timestamp_us, payload);
     const int sent = send_datachannel_binary(0, pressed ? "key_down" : "key_up",
                                              wire_payload.data(), wire_payload.size());
-    if (!opennow::SensitiveInputLoggingSuppressed())
+    if (opennow::StreamDiagnosticsEnabled() && !opennow::SensitiveInputLoggingSuppressed())
         AppendInputLog("KEY tx vk=" + std::to_string(keycode) +
                        " scan=" + std::to_string(scancode) +
                        " mods=" + std::to_string(modifiers) +
@@ -662,7 +664,8 @@ int WebRtcSession::send_datachannel_binary(uint16_t sid, const std::string& labe
     // Controller reports are sent every frame; logging each one would create
     // input latency and make the useful SCTP diagnostics unreadable.
     const bool high_frequency_input = label == "gamepad" || label == "input_heartbeat";
-    if (!high_frequency_input || gamepad_tx_count_ < 5 || gamepad_tx_count_ % 120 == 0) {
+    if (opennow::StreamDiagnosticsEnabled() && !opennow::SensitiveInputLoggingSuppressed() &&
+        (!high_frequency_input || gamepad_tx_count_ < 5 || gamepad_tx_count_ % 120 == 0)) {
         AppendStreamLog("DATA tx-binary label=" + label +
                         " sid=" + std::to_string(sid) +
                         " sent=" + std::to_string(sent) +

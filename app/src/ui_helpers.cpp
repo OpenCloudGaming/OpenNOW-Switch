@@ -5,6 +5,7 @@
 #include "play_history.hpp"
 #include "session_error_policy.hpp"
 #include "localization.hpp"
+#include "network_utils.hpp"
 #include <borealis.hpp>
 #include <switch.h>
 #include <atomic>
@@ -200,12 +201,15 @@ void ShowError(const std::string& title, const std::string& body)
     dialog->open();
 }
 
-void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
-                         const std::string& launch_app_id, const std::string& title,
-                         const std::string& launch_store,
-                         const std::string& internal_title,
-                         const std::string& history_game_id,
-                         const std::string& image_url)
+namespace
+{
+
+void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
+                              const std::string& launch_app_id, const std::string& title,
+                              const std::string& launch_store,
+                              const std::string& internal_title,
+                              const std::string& history_game_id,
+                              const std::string& image_url)
 {
     auto* box = new brls::Box(brls::Axis::COLUMN);
     box->setWidth(720);
@@ -419,6 +423,36 @@ void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             });
         }
     });
+}
+
+}
+
+void LaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
+                         const std::string& launch_app_id, const std::string& title,
+                         const std::string& launch_store,
+                         const std::string& internal_title,
+                         const std::string& history_game_id,
+                         const std::string& image_url)
+{
+    const auto connection = NetworkUtils::GetConnectionInfo();
+    if (connection.connected && connection.type == NetworkConnectionType::Wifi &&
+        network::ShouldWarnForStreaming(connection.wifi_band))
+    {
+        auto* dialog = new brls::Dialog(
+            Tr("You're using 2.4 GHz. Please use 5 GHz network."));
+        dialog->addButton(Tr("Cancel"), [] {});
+        dialog->addButton(Tr("Continue anyway"), [=] {
+            BeginLaunchSessionDialog(client, auth, launch_app_id, title,
+                                     launch_store, internal_title,
+                                     history_game_id, image_url);
+        });
+        dialog->setCancelable(true);
+        dialog->open();
+        return;
+    }
+
+    BeginLaunchSessionDialog(client, auth, launch_app_id, title, launch_store,
+                             internal_title, history_game_id, image_url);
 }
 
 } // namespace opennow

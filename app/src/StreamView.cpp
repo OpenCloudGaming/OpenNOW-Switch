@@ -68,6 +68,7 @@ StreamView::StreamView(
         media_port,
         ice_servers);
     session_->start();
+    network_monitor_.start();
     RefreshNetworkInfo(stream_started_at_);
     
     // Suggest the view to take all available space
@@ -81,6 +82,7 @@ StreamView::StreamView(
 }
 
 StreamView::~StreamView() {
+    network_monitor_.request_stop();
     opennow::SetSensitiveInputLoggingSuppressed(false);
     std::fill(nte_credentials_.password.begin(), nte_credentials_.password.end(), '\0');
     std::fill(nte_text_buffer_.begin(), nte_text_buffer_.end(), '\0');
@@ -107,6 +109,7 @@ void StreamView::onFocusGained() {
 }
 
 void StreamView::onFocusLost() {
+    HideInlineKeyboard(false);
     brls::Box::onFocusLost();
     brls::Application::getPlatform()->disableScreenDimming(false);
     brls::Application::getPlatform()->getInputManager()->setPointerLock(false);
@@ -116,6 +119,7 @@ void StreamView::ExitStream() {
     if (exit_requested_)
         return;
     exit_requested_ = true;
+    network_monitor_.request_stop();
     if (session_)
         session_->request_stop();
     StopCloudSessionAsync();
@@ -229,44 +233,23 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         keyboard_combo_was_down_ = keyboard_combo;
 
         if (keyboard_visible_) {
-            const bool b_down = state.buttons[brls::BUTTON_B];
-            const bool plus_down = state.buttons[brls::BUTTON_START];
-            const bool escape_chord = minus_down && state.buttons[brls::BUTTON_LT];
-            const bool tab_chord = minus_down && state.buttons[brls::BUTTON_LB];
-            const bool alt_tab_chord = minus_down && state.buttons[brls::BUTTON_RB];
-            const bool windows_chord = minus_down && state.buttons[brls::BUTTON_RT];
-            if (escape_chord && !keyboard_escape_chord_was_down_)
-                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Escape);
-            else if (tab_chord && !keyboard_tab_chord_was_down_)
-                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Tab);
-            else if (alt_tab_chord && !keyboard_alt_tab_chord_was_down_)
-                SendKeyboardShortcut(opennow::input::KeyboardShortcut::AltTab);
-            else if (windows_chord && !keyboard_windows_chord_was_down_)
-                SendKeyboardShortcut(opennow::input::KeyboardShortcut::Windows);
-            keyboard_escape_chord_was_down_ = escape_chord;
-            keyboard_tab_chord_was_down_ = tab_chord;
-            keyboard_alt_tab_chord_was_down_ = alt_tab_chord;
-            keyboard_windows_chord_was_down_ = windows_chord;
-            if (plus_down && !keyboard_plus_was_down_)
-                HideInlineKeyboard(true);
-            else if (b_down && !keyboard_b_was_down_)
-                HideInlineKeyboard(false);
-            keyboard_b_was_down_ = b_down;
-            keyboard_plus_was_down_ = plus_down;
+            HandleInlineKeyboardInput(state, x, y, width);
             keyboard_owned_input = true;
         } else {
             keyboard_b_was_down_ = false;
             keyboard_plus_was_down_ = false;
-            keyboard_escape_chord_was_down_ = false;
-            keyboard_tab_chord_was_down_ = false;
-            keyboard_alt_tab_chord_was_down_ = false;
-            keyboard_windows_chord_was_down_ = false;
+            keyboard_shortcut_latched_ = false;
+            keyboard_touch_was_down_ = false;
         }
 
         if (!state.buttons[brls::BUTTON_B])
             suppress_b_until_release_ = false;
 
         if (keyboard_release_guard_) {
+            std::vector<brls::RawTouchState> touches;
+            brls::Application::getPlatform()->getInputManager()->updateTouchStates(&touches);
+            const bool touch_active = std::any_of(touches.begin(), touches.end(),
+                [](const brls::RawTouchState& touch) { return touch.pressed; });
             const bool controller_active =
                 state.buttons[brls::BUTTON_A] || state.buttons[brls::BUTTON_B] ||
                 state.buttons[brls::BUTTON_X] || state.buttons[brls::BUTTON_Y] ||
@@ -279,7 +262,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
                 std::fabs(state.axes[brls::LEFT_Y]) > 0.15f ||
                 std::fabs(state.axes[brls::RIGHT_X]) > 0.15f ||
                 std::fabs(state.axes[brls::RIGHT_Y]) > 0.15f;
-            if (controller_active)
+            if (controller_active || touch_active)
                 keyboard_owned_input = true;
             else
                 keyboard_release_guard_ = false;
@@ -405,6 +388,8 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         DrawNetworkWarning(vg, x, y, width, height, notice_now);
     if (stream_end_reason_ == opennow::StreamEndReason::None)
         DrawControllerNotice(vg, x, y, width, notice_now);
+    if (stream_end_reason_ == opennow::StreamEndReason::None)
+        DrawKeyboardShortcuts(vg, x, y, width);
 
     brls::Box::draw(vg, x, y, width, height, style, ctx);
 }

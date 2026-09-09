@@ -63,7 +63,7 @@ void agent_destroy(Agent* agent) {
 #endif
 }
 
-static int agent_socket_recv(Agent* agent, Address* addr, uint8_t* buf, int len) {
+static int agent_socket_recv(Agent* agent, Address* addr, uint8_t* buf, int len, int timeout_ms) {
   int ret = -1;
   int i = 0;
   int maxfd = -1;
@@ -76,7 +76,7 @@ static int agent_socket_recv(Agent* agent, Address* addr, uint8_t* buf, int len)
   };
 
   tv.tv_sec = 0;
-  tv.tv_usec = AGENT_POLL_TIMEOUT * 1000;
+  tv.tv_usec = timeout_ms * 1000;
   FD_ZERO(&rfds);
 
   for (i = 0; i < sizeof(addr_type) / sizeof(addr_type[0]); i++) {
@@ -110,7 +110,7 @@ static int agent_socket_recv_attempts(Agent* agent, Address* addr, uint8_t* buf,
   int ret = -1;
   int i = 0;
   for (i = 0; i < maxtimes; i++) {
-    if ((ret = agent_socket_recv(agent, addr, buf, len)) != 0) {
+    if ((ret = agent_socket_recv(agent, addr, buf, len, AGENT_POLL_TIMEOUT)) != 0) {
       break;
     }
   }
@@ -388,11 +388,11 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg) {
   }
 }
 
-int agent_recv(Agent* agent, uint8_t* buf, int len) {
+static int agent_recv_with_timeout(Agent* agent, uint8_t* buf, int len, int timeout_ms) {
   int ret = -1;
   StunMessage stun_msg;
   Address addr;
-  if ((ret = agent_socket_recv(agent, &addr, buf, len)) > 0) {
+  if ((ret = agent_socket_recv(agent, &addr, buf, len, timeout_ms)) > 0) {
     agent->binding_request_time = ports_get_epoch_time();
   }
   if (ret > 0 && stun_probe(buf, len) == 0) {
@@ -414,6 +414,14 @@ int agent_recv(Agent* agent, uint8_t* buf, int len) {
     ret = 0;
   }
   return ret;
+}
+
+int agent_recv(Agent* agent, uint8_t* buf, int len) {
+  return agent_recv_with_timeout(agent, buf, len, AGENT_POLL_TIMEOUT);
+}
+
+int agent_recv_nonblocking(Agent* agent, uint8_t* buf, int len) {
+  return agent_recv_with_timeout(agent, buf, len, 0);
 }
 
 void agent_set_remote_description(Agent* agent, char* description) {
