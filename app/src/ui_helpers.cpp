@@ -292,6 +292,9 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
 
     dialog->addButton(Tr("Cancel session"), [launch_state, bg_client, bg_auth]() {
         launch_state->running = false;
+#ifdef __SWITCH__
+        brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
         std::string session_id;
         {
             std::lock_guard<std::mutex> lock(launch_state->mutex);
@@ -304,6 +307,9 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
         }
     });
     dialog->open();
+#ifdef __SWITCH__
+    brls::Application::getPlatform()->disableScreenDimming(true);
+#endif
 
     brls::async([dialog, animation, stage_label, detail_label,
                  bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title,
@@ -377,10 +383,18 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                           "The rig is ready. Configuring the secure network path.", 0.72f);
             brls::sync([=]() {
                 if (!launch_state->running) return;
+#ifdef __SWITCH__
+                brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
                 SetLaunchProgress(animation, stage_label, detail_label, 3,
                                   "Starting the video stream",
                                   "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
-                dialog->close([launch_state](){ launch_state->running = false; });
+                dialog->close([launch_state](){
+                    launch_state->running = false;
+#ifdef __SWITCH__
+                    brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
+                });
 
                 auto& app_state = AppState::Instance();
                 if (app_state.HasSession() && app_state.session()->user.user_id == bg_auth.user.user_id)
@@ -412,6 +426,9 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             const session_error::Presentation error = session_error::Present(e.what());
             brls::sync([=]() {
                 if (!launch_state->running) return;
+#ifdef __SWITCH__
+                brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
                 animation->SetState(0, 0.04f);
                 stage_label->setText(Tr(error.title));
                 stage_label->setFontSize(24);
