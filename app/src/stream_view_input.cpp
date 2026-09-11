@@ -110,7 +110,7 @@ void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float w
 
     nvgSave(vg);
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x + 8.0f, y + 8.0f, width - 16.0f, 192.0f, 12.0f);
+    nvgRoundedRect(vg, x + 8.0f, y + 8.0f, width - 16.0f, 256.0f, 12.0f);
     nvgFillColor(vg, nvgRGBA(13, 19, 22, 242));
     nvgFill(vg);
     nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
@@ -142,8 +142,8 @@ void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float w
     }
     nvgFontSize(vg, 12.0f);
     nvgFillColor(vg, nvgRGB(188, 198, 202));
-    nvgText(vg, x + width * 0.5f, y + 184.0f,
-            "Win+D Desktop  /  Win+E Explorer  /  Win+R Run  /  Win+Tab Task view", nullptr);
+    nvgText(vg, x + width * 0.5f, y + 248.0f,
+            "Win+D Desktop  /  Win+E Explorer  /  Win+R Run  /  Win+Tab Task view  /  Bksp + Del + Arrows work on existing text", nullptr);
     nvgRestore(vg);
 }
 

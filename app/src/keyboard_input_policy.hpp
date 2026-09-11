@@ -24,6 +24,10 @@ enum class KeyboardShortcut
     WindowsExplorer,
     WindowsRun,
     WindowsTaskView,
+    Backspace,
+    Delete,
+    ArrowLeft,
+    ArrowRight,
 };
 
 struct KeyboardShortcutControl
@@ -33,7 +37,7 @@ struct KeyboardShortcutControl
     const char* chord;
 };
 
-inline constexpr std::array<KeyboardShortcutControl, 8> kKeyboardShortcutControls {{
+inline constexpr std::array<KeyboardShortcutControl, 12> kKeyboardShortcutControls {{
     {KeyboardShortcut::Escape, "Esc", "MINUS + ZL"},
     {KeyboardShortcut::Tab, "Tab", "MINUS + L"},
     {KeyboardShortcut::AltTab, "Alt + Tab", "MINUS + R"},
@@ -42,6 +46,13 @@ inline constexpr std::array<KeyboardShortcutControl, 8> kKeyboardShortcutControl
     {KeyboardShortcut::WindowsExplorer, "Win + E", "MINUS + UP"},
     {KeyboardShortcut::WindowsRun, "Win + R", "MINUS + RIGHT"},
     {KeyboardShortcut::WindowsTaskView, "Win + Tab", "MINUS + DOWN"},
+    // Direct keys: bypass the applet diff so they work on pre-existing
+    // remote text even when nothing was typed locally. Touch-only
+    // (no MINUS chord left); tap them in the shortcut bar.
+    {KeyboardShortcut::Backspace, "Bksp", "TAP"},
+    {KeyboardShortcut::Delete, "Del", "TAP"},
+    {KeyboardShortcut::ArrowLeft, "Left", "TAP"},
+    {KeyboardShortcut::ArrowRight, "Right", "TAP"},
 }};
 
 inline int PollKeyboardShortcut(std::uint16_t buttons, bool& latched)
@@ -71,6 +82,10 @@ inline KeyboardStroke MapKeyboardShortcut(KeyboardShortcut shortcut)
         case KeyboardShortcut::WindowsExplorer: return {'E', 0x12, kMeta};
         case KeyboardShortcut::WindowsRun: return {'R', 0x13, kMeta};
         case KeyboardShortcut::WindowsTaskView: return {0x09, 0x0f, kMeta};
+        case KeyboardShortcut::Backspace: return {0x08, 0x0e, 0};
+        case KeyboardShortcut::Delete: return {0x2e, 0x53, 0};
+        case KeyboardShortcut::ArrowLeft: return {0x25, 0x4b, 0};
+        case KeyboardShortcut::ArrowRight: return {0x27, 0x4d, 0};
     }
 
     return {};
