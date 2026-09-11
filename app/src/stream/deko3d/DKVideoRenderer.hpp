@@ -27,6 +27,9 @@ public:
 
 private:
     void checkAndInitialize(int width, int height, AVFrame* frame);
+    void updateRenderState(int width, int height, AVFrame* frame);
+    void updateFrameLayouts();
+    void recordStaticCommands(AVFrame* frame);
     bool updateFrameMapping(AVFrame* frame, uint64_t generation);
     bool updateSoftwareFrame(AVFrame* frame);
     void bindDescriptors(const dk::ImageDescriptor& luma,

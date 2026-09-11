@@ -181,8 +181,8 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
         return;
     hardware_frames_ = frame->format == AV_PIX_FMT_NVTEGRA;
     const bool software_frame = frame->format == AV_PIX_FMT_YUV420P ||
-                                frame->format == AV_PIX_FMT_YUVJ420P ||
-                                frame->format == AV_PIX_FMT_NV12;
+                                 frame->format == AV_PIX_FMT_YUVJ420P ||
+                                 frame->format == AV_PIX_FMT_NV12;
     if (!hardware_frames_ && !software_frame) {
         brls::Logger::error("Deko3D video renderer unsupported frame format {}", frame->format);
         return;
@@ -216,9 +216,38 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
     std::memcpy(vertex_buffer_.getCpuAddr(), kQuadVertices.data(), vertex_buffer_.getSize());
     transform_buffer_ = code_pool_->allocate(sizeof(Transformation), DK_UNIFORM_BUF_ALIGNMENT);
 
+    luma_texture_id_ = video_context_->allocateImageIndex();
+    chroma_texture_id_ = video_context_->allocateImageIndex();
+    updateFrameLayouts();
+    recordStaticCommands(frame);
+    initialized_ = true;
+    const auto quality_settings = opennow::LoadStreamSettings();
+    brls::Logger::info(
+        "Deko3D {} renderer initialized {}x{} quality={}",
+        hardware_frames_ ? "NVTEGRA zero-copy" : "software NV12 upload",
+        frame_width_, frame_height_, quality_settings.image_quality_mode);
+}
+
+void DKVideoRenderer::updateFrameLayouts()
+{
+    dk::ImageLayoutMaker{device_}
+        .setType(DkImageType_2D).setFormat(DkImageFormat_R8_Unorm)
+        .setDimensions(frame_width_, frame_height_, 1)
+        .setFlags(DkImageFlags_UsageLoadStore | DkImageFlags_Usage2DEngine |
+                  DkImageFlags_UsageVideo)
+        .initialize(luma_layout_);
+    dk::ImageLayoutMaker{device_}
+        .setType(DkImageType_2D).setFormat(DkImageFormat_RG8_Unorm)
+        .setDimensions(frame_width_ / 2, frame_height_ / 2, 1)
+        .setFlags(DkImageFlags_UsageLoadStore | DkImageFlags_Usage2DEngine |
+                  DkImageFlags_UsageVideo)
+        .initialize(chroma_layout_);
+}
+
+void DKVideoRenderer::recordStaticCommands(AVFrame* frame)
+{
     Transformation transform {};
     bool full_range = isFrameFullRange(frame);
-    // CloudMatch negotiates limited range; some NVTEGRA frames incorrectly report JPEG.
     if (frame->color_range == AVCOL_RANGE_JPEG)
         full_range = false;
     set_color_transform(transform, frame->colorspace, full_range);
@@ -247,29 +276,17 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
     transform.quality[2] = tuning.denoise_strength;
     transform.quality[3] = tuning.sharpen_strength;
 
-    luma_texture_id_ = video_context_->allocateImageIndex();
-    chroma_texture_id_ = video_context_->allocateImageIndex();
-    dk::ImageLayoutMaker{device_}
-        .setType(DkImageType_2D).setFormat(DkImageFormat_R8_Unorm)
-        .setDimensions(frame_width_, frame_height_, 1)
-        .setFlags(DkImageFlags_UsageLoadStore | DkImageFlags_Usage2DEngine |
-                  DkImageFlags_UsageVideo)
-        .initialize(luma_layout_);
-    dk::ImageLayoutMaker{device_}
-        .setType(DkImageType_2D).setFormat(DkImageFormat_RG8_Unorm)
-        .setDimensions(frame_width_ / 2, frame_height_ / 2, 1)
-        .setFlags(DkImageFlags_UsageLoadStore | DkImageFlags_Usage2DEngine |
-                  DkImageFlags_UsageVideo)
-        .initialize(chroma_layout_);
-
-    if (!hardware_frames_) {
-        image_pool_.emplace(
-            device_, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached |
-                         DkMemBlockFlags_Image,
-            16 * 1024 * 1024);
-        upload_pool_.emplace(
-            device_, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
-            16 * 1024 * 1024);
+    if (!hardware_frames_ && software_slots_.empty()) {
+        // First-time software allocation or reallocation after resize.
+        if (!image_pool_) {
+            image_pool_.emplace(
+                device_, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached |
+                             DkMemBlockFlags_Image,
+                16 * 1024 * 1024);
+            upload_pool_.emplace(
+                device_, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
+                16 * 1024 * 1024);
+        }
         software_slots_.reserve(kSoftwareFrameSlots);
         for (size_t i = 0; i < kSoftwareFrameSlots; ++i) {
             SoftwareFrameSlot slot;
@@ -301,6 +318,7 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
             slot.chroma_descriptor.initialize(slot.chroma);
             software_slots_.emplace_back(std::move(slot));
         }
+        software_slot_cursor_ = 0;
     }
 
     dk::RasterizerState rasterizer;
@@ -325,11 +343,53 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
     static_cmd_buf_.bindVtxBufferState(kVertexBuffers);
     static_cmd_buf_.draw(DkPrimitive_Quads, kQuadVertices.size(), 1, 0, 0);
     static_cmd_list_ = static_cmd_buf_.finishList();
-    initialized_ = true;
-    brls::Logger::info(
-        "Deko3D {} renderer initialized {}x{} quality={}",
-        hardware_frames_ ? "NVTEGRA zero-copy" : "software NV12 upload",
-        frame_width_, frame_height_, quality_settings.image_quality_mode);
+}
+
+void DKVideoRenderer::updateRenderState(int width, int height, AVFrame* frame)
+{
+    if (!initialized_ || !frame)
+        return;
+
+    const bool is_hardware = frame->format == AV_PIX_FMT_NVTEGRA;
+    const bool is_software = frame->format == AV_PIX_FMT_YUV420P ||
+                              frame->format == AV_PIX_FMT_YUVJ420P ||
+                              frame->format == AV_PIX_FMT_NV12;
+    if (!is_hardware && !is_software)
+        return;
+
+    const bool frame_size_changed = frame_width_ != frame->width || frame_height_ != frame->height;
+    const bool screen_size_changed = screen_width_ != width || screen_height_ != height;
+    const bool format_changed = is_hardware != hardware_frames_;
+
+    if (!frame_size_changed && !screen_size_changed && !format_changed)
+        return;
+
+    // Mirrors Moonlight DKVideoRenderer::updateRenderState and GLVideoRenderer::checkAndUpdateScale.
+    queue_.waitIdle();
+
+    if (frame_size_changed || format_changed) {
+        frame_width_ = frame->width;
+        frame_height_ = frame->height;
+        hardware_frames_ = is_hardware;
+        frame_mappings_.clear();
+        current_mapping_ = -1;
+        // Drop stale software slots so they are rebuilt for the new size.
+        if (!software_slots_.empty()) {
+            releaseSoftwareSlots();
+        }
+        updateFrameLayouts();
+    }
+
+    if (screen_size_changed) {
+        screen_width_ = width;
+        screen_height_ = height;
+    }
+
+    recordStaticCommands(frame);
+
+    if (frame_size_changed || format_changed) {
+        brls::Logger::info("Deko3D renderer resized to {}x{} hw={}", frame_width_, frame_height_, hardware_frames_);
+    }
 }
 
 void DKVideoRenderer::bindDescriptors(
@@ -472,6 +532,7 @@ void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame*
     checkAndInitialize(width, height, frame);
     if (!initialized_)
         return;
+    updateRenderState(width, height, frame);
     if (generation != rendered_generation_) {
         const bool updated = hardware_frames_
             ? updateFrameMapping(frame, generation)
