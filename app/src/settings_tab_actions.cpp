@@ -482,4 +482,17 @@ bool SettingsTab::CycleAudioVolume(brls::View* view)
     return true;
 }
 
+bool SettingsTab::CycleQueueNotifyThreshold(brls::View* view)
+{
+    (void)view;
+    constexpr int thresholds[] = {5, 10, 20, 50};
+    int next = thresholds[0];
+    for (int v : thresholds) {
+        if (v > draft_settings_.queue_notify_threshold) { next = v; break; }
+    }
+    draft_settings_.queue_notify_threshold = next;
+    MarkDirty();
+    return true;
+}
+
 } // namespace opennow

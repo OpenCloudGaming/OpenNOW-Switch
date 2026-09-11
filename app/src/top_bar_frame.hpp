@@ -33,9 +33,11 @@ class TopBarFrame : public brls::Box
     brls::Box* content_container_;
     brls::Box* account_container_;
     brls::Box* subscription_container_;
+    brls::Box* queue_chip_ = nullptr;
     brls::Image* avatar_image_;
     brls::Label* time_remaining_label_;
     brls::Label* storage_remaining_label_;
+    brls::Label* queue_position_label_;
     brls::Label* account_name_label_;
     brls::Label* account_detail_label_;
     std::string displayed_avatar_url_;

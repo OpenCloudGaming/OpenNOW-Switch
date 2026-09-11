@@ -200,6 +200,11 @@ void SettingsTab::BuildAppPage()
                 : std::string("Disabled");
         },
         [this](brls::View* view) { return ToggleStatsOverlay(view); }));
+    interface->addView(MakeOptionRow(
+        "Queue notify at",
+        "When minimized, pop a reminder when queue drops to this position. Choose 5, 10, 20 or 50.",
+        [this] { return std::to_string(draft_settings_.queue_notify_threshold); },
+        [this](brls::View* view) { return CycleQueueNotifyThreshold(view); }));
     content_container_->addView(interface);
 
     auto* shortcuts = MakeSection(

@@ -29,6 +29,212 @@ struct LaunchSessionState
     std::string session_id;
 };
 
+// Forward declarations: LaunchAnimationView is defined below; Restore
+// needs it early, so creation/seeding go through factories defined later.
+class LaunchAnimationView;
+void SetLaunchProgress(LaunchAnimationView* animation, brls::Label* stage_label,
+                       brls::Label* detail_label, int stage, const std::string& title,
+                       const std::string& detail, float progress);
+static LaunchAnimationView* CreateQueueAnimation(brls::Box* box);
+static void SeedQueueProgress(LaunchAnimationView* animation, brls::Label* stage_label,
+                              brls::Label* detail_label);
+
+class MiniQueuePill final : public brls::Box
+{
+  public:
+    MiniQueuePill(const std::string& title, int pos)
+    {
+        setWidth(360);
+        setHeight(42);
+        setCornerRadius(10);
+        setBackgroundColor(nvgRGB(24, 28, 33));
+        setBorderColor(nvgRGB(77, 218, 130));
+        setBorderThickness(1);
+        setPadding(10, 10, 6, 10);
+        label_ = new brls::Label();
+        label_->setFontSize(14);
+        label_->setTextColor(nvgRGB(228, 235, 232));
+        updateText(title, pos);
+        addView(label_);
+    }
+    void updateText(const std::string& title, int pos)
+    {
+        if (!label_) return;
+        if (pos > 0) label_->setText(title + " — Position " + std::to_string(pos));
+        else label_->setText(title + " — Preparing...");
+        const int thresh = LoadStreamSettings().queue_notify_threshold;
+        if (pos > 0 && pos <= thresh) {
+            setBorderColor(nvgRGB(255, 210, 80));
+            setBackgroundColor(nvgRGB(42, 38, 20));
+        } else {
+            setBorderColor(nvgRGB(77, 218, 130));
+            setBackgroundColor(nvgRGB(24, 28, 33));
+        }
+    }
+    void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style, brls::FrameContext* ctx) override;
+  private:
+    brls::Label* label_ = nullptr;
+};
+
+static std::shared_ptr<LaunchSessionState> g_minimizedQueueState;
+static std::string g_minimizedTitle = "Queue";
+static std::string g_minimizedGameTitle = "Queue";
+static int g_minimizedPos = -1;
+static int g_currentQueuePos = -1;
+static std::string g_currentQueueTitle = "Queue";
+
+// Rebindable OG dialog views. The background poll thread writes through
+// this binding: when minimized the views are null (dialog destroyed) and
+// updates go to the pill/globals only; on - + restore we rebuild the full
+// OG dialog and rebind so it resumes live.
+struct QueueDialogBinding {
+    std::mutex mutex;
+    LaunchAnimationView* animation = nullptr;
+    brls::Label* stage_label = nullptr;
+    brls::Label* detail_label = nullptr;
+    brls::Dialog* dialog = nullptr;
+    int stage = 0;
+    std::string title = "Checking your NVIDIA account";
+    std::string detail = "Validating the saved session before requesting a cloud rig.";
+    float progress = 0.08f;
+};
+static std::shared_ptr<QueueDialogBinding> g_queueBinding;
+static std::string g_minimizedStore;
+static std::string g_minimizedInternalTitle;
+static std::string g_minimizedHistoryId;
+static std::string g_minimizedImageUrl;
+static GfnClient g_minimizedClient;
+static AuthSession g_minimizedAuth;
+static MiniQueuePill* g_miniPill = nullptr;
+
+static void HideMiniPill()
+{
+    if (g_miniPill) {
+        g_miniPill->setVisibility(brls::Visibility::GONE);
+        g_miniPill = nullptr;
+    }
+    g_minimizedQueueState.reset();
+}
+
+void MiniQueuePill::draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style, brls::FrameContext* ctx)
+{
+    brls::ControllerState st{};
+    brls::Application::getPlatform()->getInputManager()->updateUnifiedControllerState(&st);
+    static bool was_down = false;
+    const bool chord = st.buttons[brls::BUTTON_BACK] && st.buttons[brls::BUTTON_START];
+    if (chord && !was_down && g_minimizedQueueState && g_minimizedQueueState->running) {
+        was_down = true;
+        brls::Application::notify("Queue: " + g_minimizedTitle + " — Position " + (g_minimizedPos>0?std::to_string(g_minimizedPos):"...") + " — press B to stay");
+    } else if (!chord) {
+        was_down = false;
+    }
+    brls::Box::draw(vg, x, y, width, height, style, ctx);
+}
+
+} // namespace
+
+int GetCurrentQueuePosition()
+{
+    if (g_currentQueuePos >= 0) return g_currentQueuePos;
+    if (g_minimizedQueueState && g_minimizedQueueState->running)
+        return g_minimizedPos;
+    return -1;
+}
+std::string GetCurrentQueueTitle()
+{
+    if (!g_currentQueueTitle.empty() && g_currentQueueTitle != "Queue") return g_currentQueueTitle;
+    return g_minimizedTitle;
+}
+bool IsQueueMinimized()
+{
+    return g_minimizedQueueState && g_minimizedQueueState->running;
+}
+static brls::Label* g_restoreStage = nullptr;
+static brls::Label* g_restoreDetail = nullptr;
+
+static void ClearRestoreLabels()
+{
+    g_restoreStage = nullptr;
+    g_restoreDetail = nullptr;
+}
+
+void RefreshRestoreLabels()
+{
+    if (!g_restoreStage || !g_restoreDetail) return;
+    const int pos = g_minimizedPos;
+    if (pos > 0) {
+        g_restoreStage->setText("Position in queue: " + std::to_string(pos));
+        g_restoreStage->setFontSize(32);
+        g_restoreStage->setTextColor(nvgRGB(77, 218, 130));
+        g_restoreDetail->setText(Tr("Waiting for an available cloud rig"));
+    } else {
+        g_restoreStage->setText(Tr("Waiting in queue..."));
+        g_restoreStage->setFontSize(24);
+        g_restoreStage->setTextColor(nvgRGB(238, 242, 245));
+        g_restoreDetail->setText(Tr("Your cloud rig will start automatically when it is ready."));
+    }
+}
+
+void RestoreMinimizedQueueDialog()
+{
+    if (!g_minimizedQueueState || !g_minimizedQueueState->running) return;
+    if (g_restoreStage) return; // already open — no stacking
+    // Light dialog (no cover fetch, no animation) + live labels updated
+    // by the poll thread every 5s. Tap the Queue chip to open.
+    auto* box = new brls::Box(brls::Axis::COLUMN);
+    box->setWidth(520);
+    box->setPadding(24, 24, 24, 24);
+    box->setBackgroundColor(nvgRGB(24, 28, 33));
+    auto* game = new brls::Label();
+    game->setText(g_minimizedGameTitle);
+    game->setFontSize(20);
+    game->setTextColor(nvgRGB(245, 248, 250));
+    game->setMarginBottom(10);
+    box->addView(game);
+    auto* stage = new brls::Label();
+    stage->setMarginBottom(8);
+    box->addView(stage);
+    auto* detail = new brls::Label();
+    detail->setFontSize(15);
+    detail->setTextColor(nvgRGB(151, 159, 170));
+    detail->setMarginBottom(12);
+    box->addView(detail);
+    g_restoreStage = stage;
+    g_restoreDetail = detail;
+    RefreshRestoreLabels();
+    auto* dialog = new brls::Dialog(box);
+    dialog->addButton("Stay in queue", []() {
+        ClearRestoreLabels();
+        brls::Application::popActivity();
+    });
+    dialog->addButton("Cancel queue", []() {
+        if (g_minimizedQueueState) g_minimizedQueueState->running = false;
+        ClearRestoreLabels();
+        HideMiniPill();
+        g_currentQueuePos = -1;
+        g_currentQueueTitle = "Queue";
+#ifdef __SWITCH__
+        brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
+        std::string sid;
+        if (g_minimizedQueueState) {
+            std::lock_guard<std::mutex> lock(g_minimizedQueueState->mutex);
+            sid = g_minimizedQueueState->session_id;
+        }
+        brls::Application::popActivity();
+        if (!sid.empty()) {
+            GfnClient c = g_minimizedClient;
+            AuthSession a = g_minimizedAuth;
+            brls::async([c, a, sid]() mutable { try { c.StopSession(a, sid); } catch (...) {} });
+        }
+    });
+    dialog->setCancelable(true);
+    dialog->open();
+}
+
+namespace
+{
+
 class LaunchAnimationView final : public brls::View
 {
   public:
@@ -183,6 +389,24 @@ std::string SessionStatusText(const SessionInfo& info)
     return "Waiting... Status: " + std::to_string(info.status);
 }
 
+static LaunchAnimationView* CreateQueueAnimation(brls::Box* box)
+{
+    auto* animation = new LaunchAnimationView();
+    animation->setMarginBottom(0);
+    box->addView(animation);
+    return animation;
+}
+
+static void SeedQueueProgress(LaunchAnimationView* animation, brls::Label* stage_label,
+                              brls::Label* detail_label)
+{
+    if (!g_queueBinding) return;
+    std::lock_guard<std::mutex> lock(g_queueBinding->mutex);
+    SetLaunchProgress(animation, stage_label, detail_label,
+                      g_queueBinding->stage, g_queueBinding->title,
+                      g_queueBinding->detail, g_queueBinding->progress);
+}
+
 } // namespace
 
 void ShowDialog(const std::string& title, const std::string& body)
@@ -289,9 +513,42 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     std::string bg_history_game_id = history_game_id.empty() ? launch_app_id : history_game_id;
 
     auto launch_state = std::make_shared<LaunchSessionState>();
+    g_queueBinding = std::make_shared<QueueDialogBinding>();
+    {
+        std::lock_guard<std::mutex> lock(g_queueBinding->mutex);
+        g_queueBinding->animation = animation;
+        g_queueBinding->stage_label = stage_label;
+        g_queueBinding->detail_label = detail_label;
+        g_queueBinding->dialog = dialog;
+    }
 
+    dialog->addButton(Tr("Minimize — browse"), [launch_state, title, bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title, bg_history_game_id, image_url, dialog]() {
+        g_minimizedQueueState = launch_state;
+        g_minimizedTitle = title;
+        g_minimizedGameTitle = title;
+        g_minimizedStore = bg_store;
+        g_minimizedInternalTitle = bg_internal_title;
+        g_minimizedHistoryId = bg_history_game_id;
+        g_minimizedImageUrl = image_url;
+        g_minimizedClient = bg_client;
+        g_minimizedAuth = bg_auth;
+        g_minimizedPos = g_currentQueuePos;
+        // Unbind views before destroying the dialog — thread keeps polling.
+        if (g_queueBinding) {
+            std::lock_guard<std::mutex> lock(g_queueBinding->mutex);
+            g_queueBinding->animation = nullptr;
+            g_queueBinding->stage_label = nullptr;
+            g_queueBinding->detail_label = nullptr;
+            g_queueBinding->dialog = nullptr;
+        }
+        brls::Application::notify("Queue minimized — tap the Queue chip to check: " + title);
+        dialog->close([](){});
+    });
     dialog->addButton(Tr("Cancel session"), [launch_state, bg_client, bg_auth]() {
         launch_state->running = false;
+        HideMiniPill();
+        g_currentQueuePos = -1;
+        g_currentQueueTitle = "Queue";
 #ifdef __SWITCH__
         brls::Application::getPlatform()->disableScreenDimming(false);
 #endif
@@ -314,14 +571,31 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     brls::async([dialog, animation, stage_label, detail_label,
                  bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title,
                  bg_history_game_id, launch_state]() mutable {
-        auto post_progress = [animation, stage_label, detail_label, launch_state](
+        auto binding = g_queueBinding;
+        auto post_progress = [binding, launch_state](
             int stage, std::string title, std::string detail, float progress) {
-            brls::sync([animation, stage_label, detail_label, launch_state,
+            brls::sync([binding, launch_state,
                         stage, title = std::move(title), detail = std::move(detail), progress]() {
                 if (!launch_state->running)
                     return;
-                SetLaunchProgress(animation, stage_label, detail_label,
-                                  stage, title, detail, progress);
+                // Always store latest state for restore seeding.
+                if (binding) {
+                    std::lock_guard<std::mutex> lock(binding->mutex);
+                    binding->stage = stage;
+                    binding->title = title;
+                    binding->detail = detail;
+                    binding->progress = progress;
+                }
+                g_minimizedTitle = title;
+                if (g_miniPill) g_miniPill->updateText(title, g_minimizedPos);
+                // Update live views only if bound (not minimized).
+                if (binding) {
+                    std::lock_guard<std::mutex> lock(binding->mutex);
+                    if (binding->animation && binding->stage_label && binding->detail_label) {
+                        SetLaunchProgress(binding->animation, binding->stage_label,
+                                          binding->detail_label, stage, title, detail, progress);
+                    }
+                }
             });
         };
         try {
@@ -368,7 +642,19 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                     queue_title = info.app_patching ? "Updating the game" : "Preparing your cloud rig";
                     queue_detail = SessionStatusText(info);
                 }
+                g_minimizedPos = info.queue_position;
+                g_minimizedTitle = queue_title;
+                g_currentQueuePos = info.queue_position;
+                g_currentQueueTitle = queue_title;
                 post_progress(1, queue_title, queue_detail, queue_progress);
+                brls::sync([queue_title, pos = info.queue_position]() {
+                    if (g_miniPill) g_miniPill->updateText(queue_title, pos);
+                    RefreshRestoreLabels();
+                    const int thresh = LoadStreamSettings().queue_notify_threshold;
+                    if (pos > 0 && pos <= thresh && g_minimizedQueueState && g_minimizedQueueState->running) {
+                        brls::Application::notify("Queue almost ready — Position " + std::to_string(pos) + " — tap the Queue chip to return");
+                    }
+                });
 
                 std::this_thread::sleep_for(std::chrono::seconds(5));
                 if (!launch_state->running) return;
@@ -383,18 +669,36 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                           "The rig is ready. Configuring the secure network path.", 0.72f);
             brls::sync([=]() {
                 if (!launch_state->running) return;
+                const bool minimized = g_minimizedQueueState && g_minimizedQueueState->running;
+                // Unbind in both cases — views die with the dialog.
+                if (binding) {
+                    std::lock_guard<std::mutex> lock(binding->mutex);
+                    binding->animation = nullptr;
+                    binding->stage_label = nullptr;
+                    binding->detail_label = nullptr;
+                    binding->dialog = nullptr;
+                }
+                ClearRestoreLabels();
+                HideMiniPill();
+                g_currentQueuePos = -1;
+                g_currentQueueTitle = "Queue";
 #ifdef __SWITCH__
                 brls::Application::getPlatform()->disableScreenDimming(false);
 #endif
-                SetLaunchProgress(animation, stage_label, detail_label, 3,
-                                  "Starting the video stream",
-                                  "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
-                dialog->close([launch_state](){
-                    launch_state->running = false;
+                if (!minimized) {
+                    SetLaunchProgress(animation, stage_label, detail_label, 3,
+                                       "Starting the video stream",
+                                       "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
+                    dialog->close([launch_state](){
+                        launch_state->running = false;
+                        HideMiniPill();
+                        g_currentQueuePos = -1;
+                        g_currentQueueTitle = "Queue";
 #ifdef __SWITCH__
-                    brls::Application::getPlatform()->disableScreenDimming(false);
+                        brls::Application::getPlatform()->disableScreenDimming(false);
 #endif
-                });
+                    });
+                }
 
                 auto& app_state = AppState::Instance();
                 if (app_state.HasSession() && app_state.session()->user.user_id == bg_auth.user.user_id)
@@ -426,6 +730,32 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             const session_error::Presentation error = session_error::Present(e.what());
             brls::sync([=]() {
                 if (!launch_state->running) return;
+                const bool minimized = g_minimizedQueueState && g_minimizedQueueState->running;
+                if (binding) {
+                    std::lock_guard<std::mutex> lock(binding->mutex);
+                    // Keep views bound in the non-minimized case so the
+                    // error renders in the OG dialog; unbind if minimized.
+                    if (minimized) {
+                        binding->animation = nullptr;
+                        binding->stage_label = nullptr;
+                        binding->detail_label = nullptr;
+                        binding->dialog = nullptr;
+                    }
+                }
+                ClearRestoreLabels();
+                if (minimized) {
+                    HideMiniPill();
+                    g_currentQueuePos = -1;
+                    g_currentQueueTitle = "Queue";
+#ifdef __SWITCH__
+                    brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
+                    brls::Application::notify(Tr(error.title) + ": " + Tr(error.body));
+                    return;
+                }
+                HideMiniPill();
+                g_currentQueuePos = -1;
+                g_currentQueueTitle = "Queue";
 #ifdef __SWITCH__
                 brls::Application::getPlatform()->disableScreenDimming(false);
 #endif

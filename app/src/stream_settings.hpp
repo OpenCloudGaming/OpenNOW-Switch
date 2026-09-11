@@ -29,6 +29,7 @@ struct StreamSettings
     std::string interface_language = "en";
     bool community_proxy_enabled = false;
     std::string community_proxy_url;
+    int queue_notify_threshold = 10;
 };
 
 struct GameLanguageOption
