@@ -86,6 +86,13 @@ public:
         const int rendered = rendered_video_height_.load(std::memory_order_relaxed);
         return rendered > 0 ? rendered : settings_.height;
     }
+    // Stable desktop size negotiated at session start. Mouse/touch input
+    // must use this, not the dynamic encode size: GFN keeps the remote
+    // desktop at the negotiated resolution while the video may downscale
+    // (e.g. 1080p -> 720p). Using the dynamic size compresses touches
+    // toward the top-left.
+    int negotiated_stream_width() const { return settings_.width; }
+    int negotiated_stream_height() const { return settings_.height; }
     void draw(NVGcontext* vg, int width, int height, AVFrame* frame, uint64_t generation);
 
     // Callbacks from libpeer

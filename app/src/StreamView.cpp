@@ -299,8 +299,8 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         }
 
         if (touch_down) {
-            const int stream_width = std::max(1, session_->stream_width());
-            const int stream_height = std::max(1, session_->stream_height());
+            const int stream_width = std::max(1, session_->negotiated_stream_width());
+            const int stream_height = std::max(1, session_->negotiated_stream_height());
             const auto target = opennow::input::MapTouchToStream(
                 touch_position.x, touch_position.y, x, y, width, height,
                 stream_width, stream_height);

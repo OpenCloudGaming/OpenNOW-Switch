@@ -153,8 +153,8 @@ void StreamView::SendNteClick(float normalized_x, float normalized_y) {
         return;
     }
 
-    const int stream_width = std::max(1, session_->stream_width());
-    const int stream_height = std::max(1, session_->stream_height());
+    const int stream_width = std::max(1, session_->negotiated_stream_width());
+    const int stream_height = std::max(1, session_->negotiated_stream_height());
     if (!touch_pointer_initialized_ ||
         touch_pointer_stream_width_ != stream_width ||
         touch_pointer_stream_height_ != stream_height) {
@@ -182,8 +182,8 @@ void StreamView::ReanchorRemotePointer(float target_x, float target_y) {
     if (!session_)
         return;
 
-    const int stream_width = std::max(1, session_->stream_width());
-    const int stream_height = std::max(1, session_->stream_height());
+    const int stream_width = std::max(1, session_->negotiated_stream_width());
+    const int stream_height = std::max(1, session_->negotiated_stream_height());
     target_x = std::clamp(target_x, 0.0f, static_cast<float>(stream_width - 1));
     target_y = std::clamp(target_y, 0.0f, static_cast<float>(stream_height - 1));
 
