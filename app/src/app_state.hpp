@@ -2,6 +2,7 @@
 
 #include "models.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -23,6 +24,8 @@ class AppState
     const std::vector<PublicGame>& public_games() const;
     const std::vector<GameInfo>& library_games() const;
     const std::optional<AuthSession>& session() const;
+    std::uint64_t session_generation() const;
+    bool IsCurrentSession(std::uint64_t generation) const;
 
     void SetProviders(std::vector<LoginProvider> providers);
     void SetPublicGames(std::vector<PublicGame> games);
@@ -30,6 +33,7 @@ class AppState
     void MarkGamePlayed(const std::string& game_id, const std::string& title,
                         const std::string& timestamp);
     void SetSession(AuthSession session);
+    void ActivateSession(AuthSession session);
     void ClearSession();
     void MarkSessionLoaded();
 
@@ -39,6 +43,7 @@ class AppState
     std::vector<GameInfo> library_games_;
     std::optional<AuthSession> session_;
     bool session_loaded_ = false;
+    std::uint64_t session_generation_ = 0;
 };
 
 } // namespace opennow

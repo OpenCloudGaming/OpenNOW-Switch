@@ -95,19 +95,16 @@ void AppendTraceLog(const std::string& line)
         "[+" + std::to_string(elapsed_ms) + "ms] " + line + '\n');
 }
 
-void AppendTraceBlock(const std::string& title, const std::string& body)
+void AppendSdpSummary(const std::string& title, const std::string& body)
 {
     if (!opennow::StreamDiagnosticsEnabled())
         return;
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - TraceLogStartTime()).count();
     const std::string prefix = "[+" + std::to_string(elapsed_ms) + "ms] ";
-    std::string block = prefix + "----- " + title + " BEGIN bytes=" +
-                        std::to_string(body.size()) + " -----\n" + body;
-    if (!body.empty() && body.back() != '\n')
-        block += '\n';
-    block += prefix + "----- " + title + " END -----\n";
-    StreamLogWriter().try_append_trace_block(std::move(block));
+    StreamLogWriter().try_append(
+        diagnostics::DiagnosticFile::Trace,
+        prefix + title + " bytes=" + std::to_string(body.size()) + '\n');
 }
 
 std::string PreviewText(const std::string& value, size_t max_chars)

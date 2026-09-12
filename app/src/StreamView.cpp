@@ -104,12 +104,17 @@ StreamView::~StreamView() {
 
 void StreamView::onFocusGained() {
     brls::Box::onFocusGained();
+    if (!input_focused_)
+        keyboard_release_guard_ = true;
+    input_focused_ = true;
     brls::Application::getPlatform()->disableScreenDimming(true);
     brls::Application::getPlatform()->getInputManager()->setPointerLock(true);
 }
 
 void StreamView::onFocusLost() {
     HideInlineKeyboard(false);
+    input_focused_ = false;
+    UpdateGameplayInputCapture(true, std::chrono::steady_clock::now());
     brls::Box::onFocusLost();
     brls::Application::getPlatform()->disableScreenDimming(false);
     brls::Application::getPlatform()->getInputManager()->setPointerLock(false);
@@ -170,7 +175,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         const auto input_now = std::chrono::steady_clock::now();
         PollControllerStates(input_now);
         bool nte_owned_input = false;
-        if (is_nte_session_ && !stream_overlay_visible_ &&
+        if (input_focused_ && is_nte_session_ && !stream_overlay_visible_ &&
             stream_end_reason_ == opennow::StreamEndReason::None) {
             const bool nte_combo = state.buttons[brls::BUTTON_LB] &&
                                    state.buttons[brls::BUTTON_X];
@@ -197,7 +202,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         overlay_chord_state_ = overlay_decision.next_state;
         if (!minus_down && !plus_down_for_overlay)
             overlay_chord_latched_ = false;
-        if (overlay_decision.toggle_overlay && !overlay_chord_latched_ &&
+        if (input_focused_ && overlay_decision.toggle_overlay && !overlay_chord_latched_ &&
             !keyboard_visible_ && !nte_owned_input &&
             stream_end_reason_ == opennow::StreamEndReason::None)
         {
@@ -205,7 +210,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
             SetStreamOverlayVisible(!stream_overlay_visible_);
         }
 
-        if (stream_overlay_visible_)
+        if (input_focused_ && stream_overlay_visible_)
         {
             const bool b_down = state.buttons[brls::BUTTON_B];
             if (b_down && !stream_overlay_b_was_down_)
@@ -221,10 +226,9 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         }
 
         const bool keyboard_combo = minus_down && state.buttons[brls::BUTTON_Y];
-        bool keyboard_owned_input = keyboard_visible_ || stream_overlay_visible_ ||
-            overlay_decision.preempt_input || overlay_chord_latched_ ||
+        bool keyboard_owned_input = !input_focused_ || keyboard_visible_ || stream_overlay_visible_ ||
             nte_owned_input || stream_end_reason_ != opennow::StreamEndReason::None;
-        if (keyboard_combo && !keyboard_combo_was_down_ && !nte_owned_input &&
+        if (input_focused_ && keyboard_combo && !keyboard_combo_was_down_ && !nte_owned_input &&
             !stream_overlay_visible_ &&
             stream_end_reason_ == opennow::StreamEndReason::None) {
             OpenInlineKeyboard();
@@ -257,6 +261,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
                 state.buttons[brls::BUTTON_LEFT] || state.buttons[brls::BUTTON_RIGHT] ||
                 state.buttons[brls::BUTTON_LB] || state.buttons[brls::BUTTON_RB] ||
                 state.buttons[brls::BUTTON_LT] || state.buttons[brls::BUTTON_RT] ||
+                state.buttons[brls::BUTTON_LSB] || state.buttons[brls::BUTTON_RSB] ||
                 state.buttons[brls::BUTTON_START] || state.buttons[brls::BUTTON_BACK] ||
                 std::fabs(state.axes[brls::LEFT_X]) > 0.15f ||
                 std::fabs(state.axes[brls::LEFT_Y]) > 0.15f ||
@@ -267,6 +272,12 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
             else
                 keyboard_release_guard_ = false;
         }
+
+        UpdateGameplayInputCapture(keyboard_owned_input, input_now);
+        if (!keyboard_owned_input && !overlay_chord_latched_)
+            ObserveControllerSystemButtons(input_now);
+        keyboard_owned_input = keyboard_owned_input ||
+            overlay_decision.preempt_input || overlay_chord_latched_;
 
         if (!keyboard_owned_input) {
         

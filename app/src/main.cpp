@@ -14,6 +14,7 @@
 
 #include "main_activity.hpp"
 #include "app_paths.hpp"
+#include "cover_image_cache.hpp"
 #include "gfn_client.hpp"
 #include "home_shortcut.hpp"
 #include "localization.hpp"
@@ -112,6 +113,9 @@ int main(int argc, char* argv[])
         }
 
         AppendBootLog("boot: brls::Application::init ok");
+        brls::Application::getExitEvent()->subscribe([] {
+            opennow::ShutdownCoverImageWorker();
+        });
         AppendBootLog("boot: creating window");
 
         const opennow::StreamSettings startup_settings = opennow::LoadStreamSettings();
@@ -134,6 +138,7 @@ int main(int argc, char* argv[])
         while (brls::Application::mainLoop())
             ;
 
+        opennow::ShutdownCoverImageWorker();
         AppendBootLog("boot: main loop exited");
         curl_global_cleanup();
         return EXIT_SUCCESS;
@@ -147,6 +152,7 @@ int main(int argc, char* argv[])
         ShowStartupFailure("Unhandled non-standard exception");
     }
 
+    opennow::ShutdownCoverImageWorker();
     curl_global_cleanup();
     return EXIT_FAILURE;
 }

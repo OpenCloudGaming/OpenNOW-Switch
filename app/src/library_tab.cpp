@@ -180,13 +180,9 @@ void LibraryTab::willAppear(bool resetState)
     UpdateSessionUi();
 
     auto& state = AppState::Instance();
-    bool displayed_cached_library = false;
-    if (state.HasLibraryGames())
-    {
-        games_ = state.library_games();
-        RebuildGrid();
-        displayed_cached_library = !games_.empty();
-    }
+    games_ = state.library_games();
+    RebuildGrid();
+    const bool displayed_cached_library = !games_.empty();
 
     const auto now = std::chrono::steady_clock::now();
     const bool server_refresh_due =
@@ -245,17 +241,18 @@ void LibraryTab::ReloadLibrary(bool background)
     status_label_->setText("Syncing your GeForce NOW library...");
 
     AuthSession session = *state.session();
+    const auto generation = state.session_generation();
     GfnClient client = client_;
     const auto alive = alive_;
-    brls::async([this, alive, client, session = std::move(session), background]() mutable {
+    brls::async([this, alive, client, session = std::move(session), background, generation]() mutable {
         try
         {
             std::vector<GameInfo> games = client.FetchLibraryGames(session);
-            brls::sync([this, alive, games = std::move(games), session = std::move(session), background]() mutable {
+            brls::sync([this, alive, games = std::move(games), session = std::move(session), background, generation]() mutable {
                 if (!alive->load())
                     return;
                 auto& current = AppState::Instance();
-                if (!current.HasSession() ||
+                if (!current.IsCurrentSession(generation) ||
                     current.session()->user.user_id != session.user.user_id)
                 {
                     loading_ = false;
@@ -275,10 +272,12 @@ void LibraryTab::ReloadLibrary(bool background)
         catch (const std::exception& ex)
         {
             const std::string error = ex.what();
-            brls::sync([this, alive, error, background]() {
+            brls::sync([this, alive, error, background, generation]() {
                 if (!alive->load())
                     return;
                 loading_ = false;
+                if (!AppState::Instance().IsCurrentSession(generation))
+                    return;
                 if (background && !games_.empty())
                 {
                     status_label_->setText(

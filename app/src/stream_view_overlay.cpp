@@ -236,16 +236,10 @@ void StreamView::SetStreamOverlayVisible(bool visible)
 
     stream_overlay_visible_ = visible;
     stream_overlay_b_was_down_ = false;
-    ResetControllerDeliveryState();
-
-    if (touch_was_down_ && session_)
-    {
-        session_->send_mouse_left_button(false);
-        touch_was_down_ = false;
-    }
+    if (visible)
+        UpdateGameplayInputCapture(true, std::chrono::steady_clock::now());
     if (session_)
     {
-        SendNeutralControllerReports();
         session_->record_ui_event(
             visible ? "stream overlay opened by Minus+Plus"
                     : "stream overlay closed");

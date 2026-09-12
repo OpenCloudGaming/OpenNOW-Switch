@@ -8,6 +8,8 @@
 namespace opennow
 {
 
+class CachedImage;
+
 struct GameCardDisplay
 {
     std::string title;
@@ -32,7 +34,7 @@ class GameCardView : public brls::Box
 
     GameCardDisplay display_;
     ClickHandler click_handler_;
-    brls::Image* image_         = nullptr;
+    CachedImage* image_         = nullptr;
     brls::Label* title_label_   = nullptr;
     brls::Label* subtitle_label_ = nullptr;
 };

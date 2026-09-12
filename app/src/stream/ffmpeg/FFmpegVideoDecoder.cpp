@@ -5,7 +5,11 @@
 #include "../../video_quality_policy.hpp"
 #include "../DecodeQueuePolicy.hpp"
 #include <cstdio>
+#include <new>
 #include <vector>
+extern "C" {
+#include <libavutil/hwcontext.h>
+}
 #ifdef PLATFORM_APPLE
 extern "C" {
 #include <libavcodec/videotoolbox.h>
@@ -57,6 +61,7 @@ void ffmpegLog(void* ptr, int level, const char* fmt, va_list vargs) {
 
 int FFmpegVideoDecoder::setup(int video_format, int width, int height,
                               int redraw_rate, void* context, int dr_flags) {
+    (void)context;
     m_stream_fps = redraw_rate;
     m_uses_hardware_frames =
         (dr_flags & VIDEO_DECODER_PREFER_HARDWARE) != 0 &&
@@ -94,6 +99,10 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
 #endif
 
     m_packet = av_packet_alloc();
+    if (!m_packet) {
+        brls::Logger::error("FFmpeg: Couldn't allocate packet");
+        return AVERROR(ENOMEM);
+    }
 
     int perf_lvl = LOW_LATENCY_DECODE;
 #if defined(PLATFORM_SWITCH)
@@ -191,8 +200,10 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
         brls::Logger::info("FFmpeg: using software frames for OpenGL renderer");
     }
 
+#if defined(OPENNOW_ENABLE_NVDEC)
     if (m_uses_hardware_frames)
         m_decoder_context->pix_fmt = AV_PIX_FMT_NVTEGRA;
+#endif
 
     err = avcodec_open2(m_decoder_context, m_decoder, nullptr);
     if (err < 0) {
@@ -206,7 +217,11 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
 
     // One extra frame for decoder output while the frame holder owns deep copies.
     m_frames_size = 5 + 1;
-    m_frames = new AVFrame*[m_frames_size];
+    m_frames = new (std::nothrow) AVFrame*[m_frames_size] {};
+    if (!m_frames) {
+        brls::Logger::error("FFmpeg: Couldn't allocate frame slots");
+        return AVERROR(ENOMEM);
+    }
 
     tmp_frame = av_frame_alloc();
     if (!tmp_frame) {
@@ -273,7 +288,8 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
     int decoded_frames = 0;
     bool corrupt_frame_dropped = false;
     auto drain_frames = [&]() {
-        while ((m_frame = get_frame(true)) != nullptr) {
+        int decode_error = 0;
+        while ((m_frame = get_frame(true, decode_error)) != nullptr) {
             if ((m_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0 ||
                 m_frame->decode_error_flags != 0) {
                 m_corrupt_frames_dropped++;
@@ -291,18 +307,23 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
             decoded_frames++;
             AVFrameHolder::instance().push(m_frame);
         }
+        return decode_error;
     };
 
     int decode_result = decode(reinterpret_cast<char*>(indata), inlen, pts);
     if (decode_result == AVERROR(EAGAIN)) {
-        drain_frames();
+        const int drain_result = drain_frames();
+        if (drain_result < 0)
+            return drain_result;
         decode_result = decode(reinterpret_cast<char*>(indata), inlen, pts);
     }
 
     if (decode_result < 0)
         return decode_result;
 
-    drain_frames();
+    const int drain_result = drain_frames();
+    if (drain_result < 0)
+        return drain_result;
 
     if (decoded_frames == 0 && corrupt_frame_dropped)
         return AVERROR_INVALIDDATA;
@@ -351,7 +372,8 @@ int FFmpegVideoDecoder::decode(char* indata, int inlen, int64_t pts) {
     return 0;
 }
 
-AVFrame* FFmpegVideoDecoder::get_frame(bool native_frame) {
+AVFrame* FFmpegVideoDecoder::get_frame(bool native_frame, int& decode_error) {
+    decode_error = 0;
     if (!m_decoder_context || !m_frames || m_frames_size <= 0)
         return nullptr;
 
@@ -379,6 +401,7 @@ AVFrame* FFmpegVideoDecoder::get_frame(bool native_frame) {
 
         char a[AV_ERROR_MAX_STRING_SIZE] = { 0 };
         brls::Logger::error("FFmpeg: Error receiving frame with error {}",  av_make_error_string(a, AV_ERROR_MAX_STRING_SIZE, err));
+        decode_error = err;
         return nullptr;
     }
 
@@ -402,6 +425,7 @@ AVFrame* FFmpegVideoDecoder::get_frame(bool native_frame) {
         if ((err = av_hwframe_transfer_data(resultFrame, decodeFrame, 0)) < 0) {
             char a[AV_ERROR_MAX_STRING_SIZE] = { 0 };
             brls::Logger::error("FFmpeg: Error transferring the data to system memory with error {}",  av_make_error_string(a, AV_ERROR_MAX_STRING_SIZE, err));
+            decode_error = err;
             return nullptr;
         }
 

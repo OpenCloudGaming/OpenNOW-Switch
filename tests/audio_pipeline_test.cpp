@@ -138,8 +138,108 @@ Result audoutContainsAudioOutBuffer(AudioOutBuffer* buffer, bool* contains)
 }
 void armDCacheFlush(void*, size_t) {}
 
-int main()
+static void check_output_timeline()
 {
+    AudioPipeline pipeline;
+    pipeline.configure(1000, 30);
+    assert(pipeline.start());
+    submit_epoch(pipeline, 1);
+    await([] { return starts == 1; });
+    pipeline.set_sender_report(1, 1000000, 0);
+    auto send = [&](uint16_t sequence) {
+        uint8_t payload[] = {0xf0, static_cast<uint8_t>(sequence)};
+        PeerAudioPacket packet {};
+        packet.data = payload;
+        packet.size = sizeof(payload);
+        packet.timestamp = 480 * sequence;
+        packet.ssrc = 1;
+        packet.sequence = sequence;
+        packet.payload_type = 111;
+        pipeline.submit(packet);
+    };
+    for (uint16_t sequence = 3; sequence < 9; ++sequence)
+        send(sequence);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pipeline.debug_info().find("Audio rx/decoded/errors: 10/9/0") == std::string::npos) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(pipeline.playback_ntp_us() <= 1050000);
+    {
+        std::lock_guard lock(mutex);
+        assert(output.size() == 5);
+        release_output = true;
+    }
+    await([] { return stops == 1; });
+    assert(pipeline.playback_ntp_us() == 1050000);
+    {
+        std::lock_guard lock(mutex);
+        release_output = false;
+    }
+    for (uint16_t sequence = 9; sequence < 12; ++sequence)
+        send(sequence);
+    await([] { return starts == 2; });
+    {
+        std::lock_guard lock(mutex);
+        release_output = true;
+    }
+    await([] { return stops == 2; });
+    assert(pipeline.playback_ntp_us() == 1120000);
+    pipeline.stop();
+    {
+        std::lock_guard lock(mutex);
+        release_output = false;
+    }
+    assert(pipeline.start());
+    submit_epoch(pipeline, 1);
+    await([] { return starts == 3; });
+    pipeline.set_sender_report(1, 2000000, 0);
+    {
+        std::lock_guard lock(mutex);
+        release_output = true;
+    }
+    await([] { return stops == 3; });
+    assert(pipeline.playback_ntp_us() == 2030000);
+    pipeline.stop();
+}
+
+static void check_ssrc_timeline()
+{
+    AudioPipeline pipeline;
+    pipeline.configure(1000, 30);
+    assert(pipeline.start());
+    submit_epoch(pipeline, 1);
+    await([] { return starts == 1; });
+    pipeline.set_sender_report(1, 1000000, 0);
+    submit_epoch(pipeline, 2);
+    pipeline.set_sender_report(2, 3000000, 0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pipeline.debug_info().find("Audio rx/decoded/errors: 8/6/0") == std::string::npos) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(pipeline.playback_ntp_us() == -1);
+    {
+        std::lock_guard lock(mutex);
+        assert(output.size() == 5);
+        release_output = true;
+    }
+    await([] { return stops == 1; });
+    assert(pipeline.playback_ntp_us() == 3020000);
+    pipeline.stop();
+}
+
+int main(int argc, char** argv)
+{
+    if (argc > 1) {
+        if (std::string(argv[1]) == "timeline")
+            check_output_timeline();
+        else {
+            assert(std::string(argv[1]) == "ssrc");
+            check_ssrc_timeline();
+        }
+        return 0;
+    }
     AudioPipeline pipeline;
     pipeline.configure(1000, 30);
     assert(pipeline.start());

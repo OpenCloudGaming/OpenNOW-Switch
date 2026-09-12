@@ -1,4 +1,6 @@
 #include "WebSocketClient.hpp"
+#include "websocket_handshake.hpp"
+#include "http_client.hpp"
 #include <iostream>
 #include <borealis/core/logger.hpp>
 #include <array>
@@ -65,17 +67,6 @@ bool starts_with(const std::string& value, const char* prefix)
     return value.rfind(prefix, 0) == 0;
 }
 
-bool is_successful_handshake(const std::string& response)
-{
-    const size_t line_end = response.find("\r\n");
-    const std::string status_line =
-        line_end == std::string::npos ? response : response.substr(0, line_end);
-
-    return status_line.find(" 101 ") != std::string::npos ||
-           status_line.find(" 101\r") != std::string::npos ||
-           (status_line.size() >= 4 && status_line.compare(status_line.size() - 4, 4, " 101") == 0);
-}
-
 } // namespace
 
 WebSocketClient::WebSocketClient(const std::string& url) : url_(url) {}
@@ -129,8 +120,12 @@ bool WebSocketClient::connect() {
 
     curl_easy_setopt(curl_, CURLOPT_URL, curl_url.c_str());
     curl_easy_setopt(curl_, CURLOPT_CONNECT_ONLY, 1L);
-    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl_, CURLOPT_HTTP_VERSION, static_cast<long>(CURL_HTTP_VERSION_1_1));
+    if (!opennow::ConfigureHttpTls(curl_)) {
+        last_error_ = "Could not configure TLS certificate verification";
+        close_transport();
+        return false;
+    }
     curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
 
@@ -145,6 +140,12 @@ bool WebSocketClient::connect() {
     // Generate random key
     std::vector<uint8_t> key = random_bytes(16);
     std::string key_b64 = base64_encode(key.data(), key.size());
+    const auto expected_accept = opennow::websocket::AcceptForKey(key_b64);
+    if (!expected_accept) {
+        last_error_ = "Could not calculate WebSocket challenge";
+        close_transport();
+        return false;
+    }
 
     std::string handshake = "GET " + path + " HTTP/1.1\r\n"
                             "Host: " + host_header + "\r\n"
@@ -180,7 +181,7 @@ bool WebSocketClient::connect() {
             if (header_end == std::string::npos)
                 continue;
 
-            if (is_successful_handshake(response)) {
+            if (opennow::websocket::ValidateUpgrade(response, *expected_accept)) {
                 const size_t body_start = header_end + 4;
                 if (response.size() > body_start) {
                     rx_buffer_.insert(rx_buffer_.end(), response.begin() + body_start, response.end());
@@ -189,8 +190,8 @@ bool WebSocketClient::connect() {
                 brls::Logger::info("WebSocket connected!");
                 return true;
             } else {
-                last_error_ = "Invalid WS Response:\n" + response;
-                brls::Logger::error("Invalid WS Response:\n{}", response);
+                last_error_ = "Invalid WebSocket upgrade response";
+                brls::Logger::error("Invalid WebSocket upgrade response");
                 break;
             }
         } else if (res == CURLE_AGAIN) {
@@ -224,6 +225,8 @@ void WebSocketClient::close_transport() {
     closing_ = false;
     tx_queue_.reset();
     rx_buffer_.clear();
+    fragmented_message_.clear();
+    fragmented_opcode_ = 0;
     if (curl_) {
         curl_easy_cleanup(curl_);
         curl_ = nullptr;
@@ -345,8 +348,20 @@ void WebSocketClient::poll() {
     size_t frames_processed = 0;
     while (rx_buffer_.size() >= 2 && frames_processed < kMaximumFramesPerPoll) {
         uint8_t opcode = rx_buffer_[0] & 0x0F;
+        const bool final = (rx_buffer_[0] & 0x80) != 0;
+        const bool control = (opcode & 0x08) != 0;
         uint8_t payload_len_7 = rx_buffer_[1] & 0x7F;
         bool masked = (rx_buffer_[1] & 0x80) != 0;
+
+        if ((rx_buffer_[0] & 0x70) != 0 || masked ||
+            (opcode != 0 && opcode != 1 && opcode != 2 &&
+             opcode != 8 && opcode != 9 && opcode != 10) ||
+            (control && (!final || payload_len_7 > 125)) ||
+            (!control && ((opcode == 0) != (fragmented_opcode_ != 0)))) {
+            last_error_ = "Invalid incoming WebSocket frame";
+            close_transport();
+            return;
+        }
         
         size_t header_size = 2;
         size_t payload_len = payload_len_7;
@@ -371,56 +386,45 @@ void WebSocketClient::poll() {
         }
 
         if (payload_len > kMaximumSignalingPayloadBytes ||
-            payload_len > std::numeric_limits<size_t>::max() - header_size) {
+            payload_len > std::numeric_limits<size_t>::max() - header_size ||
+            (!control && payload_len > kMaximumSignalingPayloadBytes - fragmented_message_.size())) {
             last_error_ = "Incoming WebSocket frame is too large";
             close_transport();
             return;
-        }
-        
-        if (masked) {
-            header_size += 4;
         }
         
         if (rx_buffer_.size() < header_size + payload_len) {
             break;
         }
         
-        // We have a full frame! Extract it
-        uint8_t mask_key[4] = {0};
-        if (masked) {
-            memcpy(mask_key, &rx_buffer_[header_size - 4], 4);
-        }
-        
         std::vector<uint8_t> payload(payload_len);
         if (payload_len > 0)
             std::memcpy(payload.data(), rx_buffer_.data() + header_size, payload_len);
-        
-        if (masked) {
-            for (size_t i = 0; i < payload_len; i++) {
-                payload[i] ^= mask_key[i % 4];
-            }
-        }
         
         // Remove parsed frame from buffer
         rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + header_size + payload_len);
         frames_processed++;
         
         // Handle frame
-        if (opcode == 0x01) { // Text frame
-            std::string msg((char*)payload.data(), payload.size());
-            if (on_message_) on_message_(msg);
+        if (!control) {
+            if (opcode != 0)
+                fragmented_opcode_ = opcode;
+            fragmented_message_.append(payload.begin(), payload.end());
+            if (final) {
+                const bool text = fragmented_opcode_ == 1;
+                std::string message = std::move(fragmented_message_);
+                fragmented_message_.clear();
+                fragmented_opcode_ = 0;
+                if (text && on_message_)
+                    on_message_(message);
+            }
         } else if (opcode == 0x08) { // Close frame
             uint16_t close_code = 0;
             if (payload.size() >= 2)
                 close_code = static_cast<uint16_t>((payload[0] << 8) | payload[1]);
-            std::string close_reason;
-            if (payload.size() > 2)
-                close_reason.assign(payload.begin() + 2, payload.end());
             last_error_ = "Signaling closed";
             if (close_code != 0)
                 last_error_ += " code=" + std::to_string(close_code);
-            if (!close_reason.empty())
-                last_error_ += " reason=" + close_reason;
             if (!send_frame(0x88, payload.data(), payload.size()))
                 return;
             connected_ = false;
@@ -450,6 +454,8 @@ void WebSocketClient::poll() {
             read_this_poll += rcvd;
         } else {
             if (res == CURLE_OK && rcvd == 0) {
+                if (read_this_poll > 0)
+                    break;
                 last_error_ = "Remote endpoint closed the signaling connection";
                 close_transport();
             } else if (res != CURLE_AGAIN) {

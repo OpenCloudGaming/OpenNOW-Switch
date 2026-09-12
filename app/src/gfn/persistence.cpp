@@ -401,6 +401,30 @@ void SaveAccountsToDisk(const std::vector<AuthSession>& sessions, const std::str
                   " encrypted=1 roundTrip=ok");
 }
 
+void SaveRefreshedSession(const AuthSession& previous, const AuthSession& session)
+{
+    if (!session.persistence_enabled)
+        return;
+
+    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
+    std::string active_user_id;
+    auto sessions = LoadAccountsFromDisk(&active_user_id);
+    for (AuthSession& saved : sessions)
+    {
+        if (saved.user.user_id != session.user.user_id)
+            continue;
+        if (saved.tokens != previous.tokens ||
+            saved.last_refresh_at_ms != previous.last_refresh_at_ms ||
+            saved.provider.idp_id != previous.provider.idp_id ||
+            saved.provider.code != previous.provider.code ||
+            saved.provider.streaming_service_url != previous.provider.streaming_service_url)
+            return;
+        saved = session;
+        SaveAccountsToDisk(sessions, active_user_id);
+        return;
+    }
+}
+
 } // namespace gfn::detail
 
 bool GfnClient::LoadSavedSession(AuthSession& session) const

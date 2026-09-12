@@ -1,6 +1,4 @@
 #include "signaling_client.hpp"
-#include <iostream>
-#include "borealis.hpp"
 
 SignalingClient::SignalingClient(const std::string& url) : url_(url) {
     ws_ = std::make_unique<WebSocketClient>(url_);
@@ -34,7 +32,6 @@ void SignalingClient::poll() {
 }
 
 void SignalingClient::send_message(const std::string& msg) {
-    brls::Logger::info("Signaling Tx: {}", msg);
     if (ws_) {
         ws_->send_message(msg);
     }

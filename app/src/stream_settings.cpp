@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 
 namespace opennow
@@ -67,7 +68,15 @@ int JsonInt(json_t* object, const char* key, int fallback)
         return fallback;
 
     json_t* value = json_object_get(object, key);
-    return json_is_integer(value) ? static_cast<int>(json_integer_value(value)) : fallback;
+    if (!json_is_integer(value))
+        return fallback;
+
+    const json_int_t integer = json_integer_value(value);
+    if (integer < std::numeric_limits<int>::min() ||
+        integer > std::numeric_limits<int>::max())
+        return fallback;
+
+    return static_cast<int>(integer);
 }
 
 bool JsonBool(json_t* object, const char* key, bool fallback)
@@ -89,8 +98,15 @@ std::string JsonField(json_t* object, const char* key, const std::string& fallba
 
 StreamSettings Sanitize(StreamSettings settings)
 {
-    if (settings.width <= 0 || settings.height <= 0 || settings.fps <= 0 || settings.bitrate_kbps <= 0)
-        return StreamPresets().front();
+    const StreamSettings defaults;
+    if (settings.width <= 0)
+        settings.width = defaults.width;
+    if (settings.height <= 0)
+        settings.height = defaults.height;
+    if (settings.fps <= 0)
+        settings.fps = defaults.fps;
+    if (settings.bitrate_kbps <= 0)
+        settings.bitrate_kbps = defaults.bitrate_kbps;
 
     if (settings.codec != "H264")
         settings.codec = "H264";
@@ -215,12 +231,19 @@ std::string GameLanguageLabel(const std::string& code)
 
 StreamSettings LoadStreamSettings()
 {
-    const std::string body = ReadTextFile(GetSettingsPath());
-    if (body.empty())
-        return StreamPresets()[1];
+    JsonPtr root(nullptr, &json_decref);
+    const std::string path = GetSettingsPath();
+    for (const std::string& candidate : {path, path + ".bak"})
+    {
+        const std::string body = ReadTextFile(candidate);
+        if (body.empty())
+            continue;
 
-    json_error_t error {};
-    JsonPtr root(json_loads(body.c_str(), 0, &error), &json_decref);
+        json_error_t error {};
+        root.reset(json_loads(body.c_str(), 0, &error));
+        if (root && json_is_object(root.get()))
+            break;
+    }
     if (!root || !json_is_object(root.get()))
         return StreamPresets()[1];
 
@@ -242,7 +265,7 @@ StreamSettings LoadStreamSettings()
         settings.audio_volume = std::max(100, std::min(800, settings.audio_volume * 4));
     // Version 4 raises the complete range because NVIDIA's decoded PCM is
     // unusually quiet. The previous 6x default becomes the new 12x default.
-    if (gain_version < 4 && settings.audio_volume <= 800)
+    if (gain_version < 4 && settings.audio_volume > 0 && settings.audio_volume <= 800)
         settings.audio_volume = std::max(800, std::min(1600, settings.audio_volume * 2));
     settings.audio_buffer_ms = JsonInt(root.get(), "audio_buffer_ms", settings.audio_buffer_ms);
     settings.video_backend = JsonField(root.get(), "video_backend", settings.video_backend);

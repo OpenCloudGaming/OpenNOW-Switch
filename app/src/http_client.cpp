@@ -3,7 +3,9 @@
 #include <curl/curl.h>
 
 #include <cmath>
+#include <ctime>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -12,15 +14,81 @@ namespace opennow
 namespace
 {
 
-size_t WriteBody(char* ptr, size_t size, size_t nmemb, void* userdata)
+struct ResponseBody
 {
+    std::string data;
+    std::size_t limit;
+};
+
+size_t WriteBody(char* ptr, size_t size, size_t nmemb, void* userdata) noexcept
+{
+    if (size != 0 && nmemb > std::numeric_limits<size_t>::max() / size)
+        return 0;
     const size_t bytes = size * nmemb;
-    auto* body         = static_cast<std::string*>(userdata);
-    body->append(ptr, bytes);
+    auto* body = static_cast<ResponseBody*>(userdata);
+    if (body->limit != 0 && bytes > body->limit - body->data.size())
+        return 0;
+    try
+    {
+        body->data.append(ptr, bytes);
+    }
+    catch (...)
+    {
+        return 0;
+    }
     return bytes;
 }
 
+int CheckCancelled(void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) noexcept
+{
+    return static_cast<const std::atomic_bool*>(userdata)->load() ? 1 : 0;
+}
+
+std::string RequestOrigin(const std::string& url)
+{
+    const auto scheme = url.find("://");
+    if (scheme == std::string::npos)
+        return "the requested endpoint";
+    const auto authority_start = scheme + 3;
+    const auto authority_end = url.find_first_of("/?#", authority_start);
+    std::string authority = url.substr(authority_start, authority_end - authority_start);
+    const auto credentials = authority.rfind('@');
+    if (credentials != std::string::npos)
+        authority.erase(0, credentials + 1);
+    return url.substr(0, authority_start) + authority;
+}
+
+std::string CertificateFailureContext()
+{
+    const curl_version_info_data* version = curl_version_info(CURLVERSION_NOW);
+    const std::time_t now = std::time(nullptr);
+    std::tm utc {};
+#ifdef _WIN32
+    gmtime_s(&utc, &now);
+#else
+    gmtime_r(&now, &utc);
+#endif
+    char timestamp[32] {};
+    std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S UTC", &utc);
+    return " [TLS backend: " + std::string(version && version->ssl_version
+        ? version->ssl_version : "unknown") + "; system time: " + timestamp +
+        "]. Check the console date/time and system updates. Certificate verification remains enabled.";
+}
+
 } // namespace
+
+bool ConfigureHttpTls(CURL* curl) noexcept
+{
+    if (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L) != CURLE_OK ||
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L) != CURLE_OK)
+        return false;
+#ifdef __SWITCH__
+    if (curl_easy_setopt(curl, CURLOPT_CAINFO,
+            "romfs:/certs/DigiCertGlobalRootG3.pem") != CURLE_OK)
+        return false;
+#endif
+    return true;
+}
 
 HttpResponse HttpClient::Request(
     const std::string& method,
@@ -28,14 +96,17 @@ HttpResponse HttpClient::Request(
     const std::string& user_agent,
     const std::vector<std::string>& headers,
     const std::string& body,
-    const std::string& proxy_url) const
+    const std::string& proxy_url,
+    HttpTransferControl control) const
 {
+    if (control.cancelled && control.cancelled->load())
+        throw std::runtime_error("HTTP request cancelled");
     CURL* raw = curl_easy_init();
     if (!raw)
         throw std::runtime_error("curl_easy_init failed");
 
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(raw, &curl_easy_cleanup);
-    std::string response_body;
+    ResponseBody response_body {{}, control.max_body_bytes};
 
     curl_slist* raw_headers = nullptr;
     for (const auto& header : headers)
@@ -50,11 +121,18 @@ HttpResponse HttpClient::Request(
     curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteBody);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response_body);
     curl_easy_setopt(curl.get(), CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 2L);
+    if (!ConfigureHttpTls(curl.get()))
+        throw std::runtime_error("Could not configure TLS certificate verification");
+    if (control.cancelled)
+    {
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, CheckCancelled);
+        curl_easy_setopt(curl.get(), CURLOPT_XFERINFODATA, control.cancelled);
+    }
 
     if (!proxy_url.empty())
     {
@@ -87,9 +165,11 @@ HttpResponse HttpClient::Request(
     if (result != CURLE_OK)
     {
         throw std::runtime_error(
-            "HTTP " + method + " failed for " + url +
+            "HTTP " + method + " failed for " + RequestOrigin(url) +
             (proxy_url.empty() ? std::string() : " while using the configured proxy") +
-            ": " + curl_easy_strerror(result));
+            ": " + curl_easy_strerror(result) +
+            (result == CURLE_PEER_FAILED_VERIFICATION || result == CURLE_SSL_CERTPROBLEM ||
+                result == CURLE_SSL_CACERT_BADFILE ? CertificateFailureContext() : std::string()));
     }
 
     long status_code = 0;
@@ -97,7 +177,7 @@ HttpResponse HttpClient::Request(
 
     return HttpResponse{
         .status_code = status_code,
-        .body        = std::move(response_body),
+        .body        = std::move(response_body.data),
     };
 }
 
@@ -105,9 +185,10 @@ HttpResponse HttpClient::Get(
     const std::string& url,
     const std::string& user_agent,
     const std::vector<std::string>& headers,
-    const std::string& proxy_url) const
+    const std::string& proxy_url,
+    HttpTransferControl control) const
 {
-    return Request("GET", url, user_agent, headers, {}, proxy_url);
+    return Request("GET", url, user_agent, headers, {}, proxy_url, control);
 }
 
 HttpResponse HttpClient::Post(
@@ -115,9 +196,10 @@ HttpResponse HttpClient::Post(
     const std::string& user_agent,
     const std::vector<std::string>& headers,
     const std::string& body,
-    const std::string& proxy_url) const
+    const std::string& proxy_url,
+    HttpTransferControl control) const
 {
-    return Request("POST", url, user_agent, headers, body, proxy_url);
+    return Request("POST", url, user_agent, headers, body, proxy_url, control);
 }
 
 int HttpClient::MeasureConnectLatencyMs(
@@ -135,8 +217,8 @@ int HttpClient::MeasureConnectLatencyMs(
     curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, timeout_ms);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl.get(), CURLOPT_FRESH_CONNECT, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_SSL_VERIFYHOST, 2L);
+    if (!ConfigureHttpTls(curl.get()))
+        return -1;
 
     if (curl_easy_perform(curl.get()) != CURLE_OK)
         return -1;

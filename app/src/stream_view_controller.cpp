@@ -205,6 +205,18 @@ uint16_t StreamView::SendPendingControllerDisconnects()
     return opennow::input::ControllerReportBitmap(controller_connected_, controller_delivery_);
 }
 
+void StreamView::ObserveControllerSystemButtons(std::chrono::steady_clock::time_point now)
+{
+    for (std::size_t controller = 0; controller < controller_states_.size(); ++controller)
+    {
+        if (!controller_connected_[controller] || controller_delivery_[controller].pending_disconnect)
+            continue;
+        const auto& state = controller_states_[controller];
+        controller_delivery_[controller].ObserveSystemButtons(
+            state.buttons[brls::BUTTON_START], state.buttons[brls::BUTTON_BACK], now);
+    }
+}
+
 void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
 {
     if (!session_)
@@ -218,34 +230,11 @@ void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
 
         const brls::ControllerState& state = controller_states_[controller];
         auto& delivery = controller_delivery_[controller];
-        const bool plus_down = state.buttons[brls::BUTTON_START];
-        if (plus_down && !delivery.plus_was_down)
-        {
-            delivery.plus_pressed_at = now;
-            delivery.plus_long_press = false;
-        }
-        if (plus_down && !delivery.plus_long_press &&
-            now - delivery.plus_pressed_at >= std::chrono::milliseconds(500))
-        {
-            delivery.plus_long_press = true;
-        }
-        if (!plus_down && delivery.plus_was_down && !delivery.plus_long_press)
-        {
-            delivery.start_pulse.Queue(now);
-            delivery.initialized = false;
-            delivery.last_report = {};
-        }
-        delivery.plus_was_down = plus_down;
-
-        const bool start_active = delivery.start_pulse.IsActive(now);
-        uint16_t buttons = 0;
+        uint16_t buttons = delivery.SystemButtons(now);
         if (state.buttons[brls::BUTTON_UP]) buttons |= 0x0001;
         if (state.buttons[brls::BUTTON_DOWN]) buttons |= 0x0002;
         if (state.buttons[brls::BUTTON_LEFT]) buttons |= 0x0004;
         if (state.buttons[brls::BUTTON_RIGHT]) buttons |= 0x0008;
-        if (start_active) buttons |= 0x0010;
-        if (state.buttons[brls::BUTTON_BACK]) buttons |= 0x0020;
-        if (delivery.plus_long_press && plus_down) buttons |= 0x0400;
         if (state.buttons[brls::BUTTON_LSB]) buttons |= 0x0040;
         if (state.buttons[brls::BUTTON_RSB]) buttons |= 0x0080;
         if (state.buttons[brls::BUTTON_LB]) buttons |= 0x0100;
@@ -299,33 +288,28 @@ void StreamView::SendControllerInputs(std::chrono::steady_clock::time_point now)
         delivery.last_rx = qrx;
         delivery.last_ry = qry;
         delivery.last_report = now;
-        if (start_active && delivery.start_pulse.OnReportDelivered(now))
-            delivery.initialized = false;
+        delivery.OnSystemButtonsDelivered(now);
     }
 }
 
-void StreamView::ResetControllerDeliveryState()
+void StreamView::UpdateGameplayInputCapture(
+    bool captured, std::chrono::steady_clock::time_point now)
 {
-    for (auto& delivery : controller_delivery_)
-        delivery.Reset();
-}
-
-void StreamView::SendNeutralControllerReports()
-{
-    if (!session_)
+    if (controller_input_capture_.Update(captured, controller_delivery_) && touch_was_down_)
+    {
+        if (session_)
+            session_->send_mouse_left_button(false);
+        touch_was_down_ = false;
+    }
+    if (!captured || !session_)
         return;
 
-    const uint16_t bitmap = SendPendingControllerDisconnects();
-    for (std::size_t controller = 0; controller < controller_delivery_.size(); ++controller)
-    {
-        auto& delivery = controller_delivery_[controller];
-        if (!controller_connected_[controller] || delivery.pending_disconnect)
-            continue;
-        session_->send_gamepad_input(
-            static_cast<uint8_t>(controller), bitmap,
-            0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
-        delivery.initialized = false;
-    }
+    opennow::input::DeliverNeutralControllerReports(
+        controller_connected_, controller_delivery_, now,
+        [this](uint8_t controller, uint16_t bitmap) {
+            return session_->send_gamepad_input(
+                controller, bitmap, 0, 0, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+        });
 }
 
 void StreamView::QueueControllerConnectedNotice(

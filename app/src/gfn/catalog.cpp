@@ -31,6 +31,8 @@ constexpr const char* kPanelsQueryHash = "f8e26265a5db5c20e1334a6872cf04b6e39705
 constexpr const char* kLibraryWithTimeQueryHash = "039e8c0d553972975485fee56e59f2549d2fdb518e247a42ab5022056a74406f";
 constexpr const char* kPlayOrigin          = "https://play.geforcenow.com";
 constexpr const char* kPlayReferer         = "https://play.geforcenow.com/";
+constexpr std::size_t kCatalogPageSize = 60;
+constexpr std::size_t kCatalogPageBytes = 4 * 1024 * 1024;
 
 std::vector<std::string> BuildGfnLcarsHeaders(
     const std::string& token,
@@ -376,33 +378,43 @@ PublicGame ToPublicGame(const GameInfo& source)
     return game;
 }
 
-std::vector<PublicGame> ParseCatalogPage(
-    JsonPtr& root, bool& has_next_page, std::string& end_cursor)
+CatalogPage ParseCatalogPage(JsonPtr& root, const std::string& cursor)
 {
     ThrowIfGraphQlFailed(root.get());
-    has_next_page = false;
-    end_cursor.clear();
+    CatalogPage page;
 
     json_t* data = json_object_get(root.get(), "data");
     json_t* apps = data ? json_object_get(data, "apps") : nullptr;
     json_t* items = apps ? json_object_get(apps, "items") : nullptr;
     if (!json_is_array(items))
-        return {};
+        throw std::runtime_error("Catalog response is missing the games array");
+    if (json_array_size(items) > kCatalogPageSize)
+        throw std::runtime_error("Catalog response exceeds the requested page size");
 
     json_t* page_info = json_object_get(apps, "pageInfo");
-    has_next_page = GetBool(page_info, "hasNextPage");
-    end_cursor = GetString(page_info, "endCursor");
+    if (!json_is_object(page_info) ||
+        !json_is_boolean(json_object_get(page_info, "hasNextPage")))
+        throw std::runtime_error("Catalog response is missing pagination information");
+    if (GetBool(page_info, "hasNextPage"))
+    {
+        const auto end_cursor = GetString(page_info, "endCursor");
+        if (end_cursor.empty() || end_cursor == cursor)
+            throw std::runtime_error("Catalog pagination did not advance");
+        page.next_cursor = end_cursor;
+    }
+    json_t* total = json_object_get(page_info, "totalCount");
+    if (json_is_integer(total) && json_integer_value(total) >= 0)
+        page.total_count = static_cast<std::size_t>(json_integer_value(total));
 
-    std::vector<PublicGame> games;
     size_t index = 0;
     json_t* app = nullptr;
     json_array_foreach(items, index, app)
     {
         GameInfo parsed = ParseApp(app);
         if (!parsed.id.empty() && !parsed.title.empty())
-            games.push_back(ToPublicGame(parsed));
+            page.games.push_back(ToPublicGame(parsed));
     }
-    return games;
+    return page;
 }
 
 std::string BuildCatalogRequestBody(
@@ -444,7 +456,7 @@ query GetSearchFilterResults($vpcId: String!, $locale: String!, $sortString: Str
     json_object_set_new(
         variables.get(), "sortString",
         json_string("itemMetadata.relevance:DESC,sortName:ASC"));
-    json_object_set_new(variables.get(), "fetchCount", json_integer(120));
+    json_object_set_new(variables.get(), "fetchCount", json_integer(kCatalogPageSize));
     json_object_set_new(variables.get(), "cursor", json_string(cursor.c_str()));
     json_object_set_new(variables.get(), "filters", json_object());
     if (!search_query.empty())
@@ -606,63 +618,41 @@ std::vector<PublicGame> GfnClient::FetchPublicGames() const
     return games;
 }
 
-std::vector<PublicGame> GfnClient::FetchCatalogGames(
-    AuthSession& session, const std::string& search_query) const
+CatalogPage GfnClient::FetchCatalogPage(
+    AuthSession& session, const std::string& search_query, const std::string& cursor) const
 {
     session = RecoverSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     const std::string vpc_id = ResolveVpcId(http_client_, session, proxy_url);
 
-    std::vector<PublicGame> games;
-    std::unordered_set<std::string> seen_ids;
-    std::string cursor;
+    HttpResponse response = http_client_.Post(
+        kGraphQlEndpoint,
+        kUserAgent,
+        BuildGraphQlPostHeaders(jwt_token),
+        BuildCatalogRequestBody(vpc_id, search_query, cursor),
+        proxy_url, {.max_body_bytes = kCatalogPageBytes});
 
-    for (int page = 0; page < 3; ++page)
+    if (response.status_code == 401)
     {
-        HttpResponse response = http_client_.Post(
+        session = RecoverSavedSession(session, true);
+        jwt_token = ResolveSessionJwt(session);
+        response = http_client_.Post(
             kGraphQlEndpoint,
             kUserAgent,
             BuildGraphQlPostHeaders(jwt_token),
             BuildCatalogRequestBody(vpc_id, search_query, cursor),
-            proxy_url);
-
-        if (response.status_code == 401)
-        {
-            session = RecoverSavedSession(session, true);
-            jwt_token = ResolveSessionJwt(session);
-            response = http_client_.Post(
-                kGraphQlEndpoint,
-                kUserAgent,
-                BuildGraphQlPostHeaders(jwt_token),
-                BuildCatalogRequestBody(vpc_id, search_query, cursor),
-                proxy_url);
-        }
-
-        if (response.status_code != 200)
-        {
-            throw std::runtime_error(
-                "Catalog browse failed with HTTP " + std::to_string(response.status_code));
-        }
-
-        JsonPtr root = LoadJson(response.body);
-        bool has_next_page = false;
-        std::string end_cursor;
-        std::vector<PublicGame> page_games =
-            ParseCatalogPage(root, has_next_page, end_cursor);
-        for (PublicGame& game : page_games)
-        {
-            const std::string key = game.id.empty() ? game.title : game.id;
-            if (seen_ids.insert(key).second)
-                games.push_back(std::move(game));
-        }
-
-        if (!has_next_page || end_cursor.empty() || end_cursor == cursor)
-            break;
-        cursor = std::move(end_cursor);
+            proxy_url, {.max_body_bytes = kCatalogPageBytes});
     }
 
-    return games;
+    if (response.status_code != 200)
+    {
+        throw std::runtime_error(
+            "Catalog browse failed with HTTP " + std::to_string(response.status_code));
+    }
+
+    JsonPtr root = LoadJson(response.body);
+    return ParseCatalogPage(root, cursor);
 }
 std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
 {

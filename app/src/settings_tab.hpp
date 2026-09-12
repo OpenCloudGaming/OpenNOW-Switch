@@ -1,11 +1,15 @@
 #pragma once
 
 #include "gfn_client.hpp"
+#include "cover_image_cache.hpp"
 
 #include <borealis.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +23,7 @@ class SettingsTab : public brls::Box
 {
   public:
     SettingsTab();
+    ~SettingsTab() override;
 
     void willAppear(bool resetState) override;
 
@@ -53,7 +58,11 @@ class SettingsTab : public brls::Box
     bool ChooseServerLocation(brls::View* view);
     bool RefreshServerLocations(brls::View* view);
     void BeginServerLocationLoad(bool open_when_ready, bool notify_result);
+    void SyncServerLocationAccount();
     std::string ServerLocationValue() const;
+    enum class CacheAction { Inspect, Clear };
+    void BeginCoverCacheWork(CacheAction action);
+    void UpdateCoverCacheValues();
 
     static brls::Label* MakeParagraph(
         const std::string& text, float bottom_margin = 16.0f);
@@ -107,7 +116,14 @@ class SettingsTab : public brls::Box
     bool settings_loaded_ = false;
     bool dirty_ = false;
     bool community_proxy_provisioning_ = false;
+    std::uint64_t proxy_request_generation_ = 0;
+    std::shared_ptr<std::atomic_bool> alive_ = std::make_shared<std::atomic_bool>(true);
+    brls::Label* cover_cache_files_ = nullptr;
+    brls::Label* cover_cache_bytes_ = nullptr;
+    std::optional<CoverImageCacheStats> cover_cache_stats_;
+    std::optional<CacheAction> cover_cache_action_;
     std::vector<StreamRegion> server_locations_;
+    std::optional<std::uint64_t> server_locations_generation_;
     bool server_locations_loaded_ = false;
     bool server_locations_loading_ = false;
     bool open_server_location_when_ready_ = false;

@@ -658,6 +658,7 @@ int peer_connection_loop(PeerConnection* pc) {
       }
       break;
     case PEER_CONNECTION_COMPLETED:
+      sctp_tick(&pc->sctp);
       if ((pc->agent_ret = agent_recv_nonblocking(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf))) > 0) {
         packet_processed = 1;
         LOGD("agent_recv %d", pc->agent_ret);

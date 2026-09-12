@@ -188,7 +188,7 @@ TopBarFrame::TopBarFrame()
     account_container_->setJustifyContent(brls::JustifyContent::FLEX_END);
     status_container->addView(account_container_);
 
-    avatar_image_ = new brls::Image();
+    avatar_image_ = new CachedImage();
     avatar_image_->setWidth(34);
     avatar_image_->setHeight(34);
     avatar_image_->setShrink(0.0f);

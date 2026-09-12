@@ -1,4 +1,5 @@
 #include "WebSocketClient.hpp"
+#include "websocket_handshake.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -9,6 +10,9 @@
 
 namespace
 {
+
+enum class UpgradeResponse { Valid, Bare, WrongAccept };
+UpgradeResponse next_upgrade = UpgradeResponse::Valid;
 
 struct FakeTransport
 {
@@ -25,6 +29,8 @@ struct FakeTransport
     std::vector<uint8_t> output;
     std::vector<uint8_t> input;
     CURLcode receive_result = CURLE_AGAIN;
+    UpgradeResponse upgrade = std::exchange(next_upgrade, UpgradeResponse::Valid);
+    std::string request;
 };
 
 std::vector<std::unique_ptr<FakeTransport>> transports;
@@ -110,6 +116,7 @@ CURLcode curl_easy_send(CURL* curl, const void* buffer, size_t length, size_t* s
 {
     auto& fake = transport(curl);
     if (fake.handshaking) {
+        fake.request.append(static_cast<const char*>(buffer), length);
         *sent = length;
         return CURLE_OK;
     }
@@ -130,7 +137,17 @@ CURLcode curl_easy_recv(CURL* curl, void* buffer, size_t length, size_t* receive
 {
     auto& fake = transport(curl);
     if (fake.handshaking) {
-        const std::string response = "HTTP/1.1 101 Switching Protocols\r\n\r\n";
+        const std::string key_header = "Sec-WebSocket-Key: ";
+        const size_t start = fake.request.find(key_header);
+        assert(start != std::string::npos);
+        const size_t value = start + key_header.size();
+        const auto accept = opennow::websocket::AcceptForKey(
+            fake.request.substr(value, fake.request.find("\r\n", value) - value));
+        assert(accept);
+        const std::string response = "HTTP/1.1 101 Switching Protocols\r\n" +
+            (fake.upgrade == UpgradeResponse::Bare ? std::string() :
+                "Upgrade: WebSocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: " +
+                (fake.upgrade == UpgradeResponse::WrongAccept ? "synthetic-secret" : *accept) + "\r\n") + "\r\n";
         assert(length >= response.size());
         std::memcpy(buffer, response.data(), response.size());
         *received = response.size();
@@ -150,6 +167,99 @@ CURLcode curl_easy_recv(CURL* curl, void* buffer, size_t length, size_t* receive
 int main()
 {
     using Queue = opennow::websocket::WriteQueue;
+    for (const auto response : {UpgradeResponse::Bare, UpgradeResponse::WrongAccept}) {
+        next_upgrade = response;
+        WebSocketClient client("wss://example.invalid");
+        assert(!client.connect());
+        assert(latest().closed);
+        assert(client.get_last_error() == "Invalid WebSocket upgrade response");
+    }
+    {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        auto& fake = latest();
+        std::vector<std::string> messages;
+        client.set_on_message([&](const std::string& message) { messages.push_back(message); });
+        fake.input = {0x01, 3, '{', '"', 'h', 0x89, 1, 'p'};
+        client.poll();
+        client.poll();
+        assert(messages.empty());
+        assert(frames(fake).size() == 1 && frames(fake)[0].opcode == 0x0a);
+        fake.input = {0x00, 3, 'b', '"', ':', 0x80, 2, '1', '}'};
+        client.poll();
+        client.poll();
+        assert(messages == std::vector<std::string>{"{\"hb\":1}"});
+    }
+
+    for (const std::vector<uint8_t>& input : std::vector<std::vector<uint8_t>>{
+             {0x80, 0}, {0x01, 0, 0x81, 0}, {0x09, 0}, {0x89, 126},
+             {0x81, 0x80}, {0xc1, 0}, {0x83, 0}}) {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        auto& fake = latest();
+        fake.input = input;
+        client.poll();
+        client.poll();
+        assert(!client.is_connected());
+        assert(fake.closed);
+        assert(client.get_last_error() == "Invalid incoming WebSocket frame");
+    }
+
+    {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        auto& fake = latest();
+        std::vector<std::string> messages;
+        client.set_on_message([&](const std::string& message) { messages.push_back(message); });
+        fake.input = {0x02, 1, 'b', 0x80, 1, 'i', 0x01, 0};
+        for (size_t i = 0; i < 20; ++i)
+            fake.input.insert(fake.input.end(), {0x00, 1, 'x'});
+        fake.input.insert(fake.input.end(), {0x80, 0});
+        client.poll();
+        client.poll();
+        assert(messages.empty());
+        client.poll();
+        assert(messages == std::vector<std::string>{std::string(20, 'x')});
+    }
+
+    {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        std::vector<std::string> messages;
+        client.set_on_message([&](const std::string& message) { messages.push_back(message); });
+        auto& old = latest();
+        old.input = {0x01, 1, 'x'};
+        client.poll();
+        client.poll();
+        assert(messages.empty());
+        assert(client.connect());
+        auto& fresh = latest();
+        fresh.input = {0x81, 1, 'y', 0x88, 2, 0x03, 0xe8};
+        fresh.receive_result = CURLE_OK;
+        client.poll();
+        client.poll();
+        assert(messages == std::vector<std::string>{"y"});
+        assert(client.get_last_error() == "Signaling closed code=1000");
+        assert(fresh.closed);
+    }
+
+    {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        auto& fake = latest();
+        fake.input = {0x01, 127, 0, 0, 0, 0, 0, 0x40, 0, 0};
+        fake.input.resize(fake.input.size() + 4 * 1024 * 1024, 'x');
+        for (size_t i = 0; i < 66; ++i)
+            client.poll();
+        assert(client.is_connected());
+        fake.input = {0x80, 1, 'x'};
+        client.poll();
+        client.poll();
+        assert(!client.is_connected());
+        assert(fake.closed);
+        assert(client.get_last_error() == "Incoming WebSocket frame is too large");
+    }
+
     {
         WebSocketClient client("wss://example.invalid/signaling");
         assert(client.connect());

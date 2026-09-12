@@ -237,6 +237,7 @@ void StreamView::StartNteAutoLogin(std::chrono::steady_clock::time_point now) {
     }
 
     nte_stage_ = NteAutoLoginStage::ClickEmailProvider;
+    UpdateGameplayInputCapture(true, now);
     opennow::SetSensitiveInputLoggingSuppressed(true);
     opennow::ResetNteAutoLoginLog("Neverness to Everness");
     opennow::AppendNteAutoLoginLog(
@@ -258,6 +259,7 @@ void StreamView::CancelNteAutoLogin() {
     nte_text_buffer_.clear();
     nte_text_index_ = 0;
     nte_stage_ = NteAutoLoginStage::Idle;
+    keyboard_release_guard_ = true;
     opennow::SetSensitiveInputLoggingSuppressed(false);
     opennow::AppendNteAutoLoginLog("CANCEL source=user_button_b");
     nte_status_ = "NTE Auto-login cancelled";
@@ -346,6 +348,7 @@ void StreamView::UpdateNteAutoLogin(std::chrono::steady_clock::time_point now) {
             opennow::AppendNteAutoLoginLog("STAGE submit_login method=enter");
             SubmitNteFocusedField("password");
             nte_stage_ = NteAutoLoginStage::Idle;
+            keyboard_release_guard_ = true;
             opennow::SetSensitiveInputLoggingSuppressed(false);
             nte_status_ = "NTE Auto-login: sign-in submitted";
             nte_status_until_ = now + std::chrono::seconds(5);
@@ -426,12 +429,7 @@ void StreamView::OpenInlineKeyboard() {
     keyboard_plus_was_down_ = false;
     keyboard_shortcut_latched_ = true;
     keyboard_touch_was_down_ = true;
-    ResetControllerDeliveryState();
-    if (touch_was_down_) {
-        session_->send_mouse_left_button(false);
-        touch_was_down_ = false;
-    }
-    SendNeutralControllerReports();
+    UpdateGameplayInputCapture(true, std::chrono::steady_clock::now());
     session_->record_ui_event("keyboard opened by Minus+Y");
 #endif
 }
@@ -447,7 +445,6 @@ void StreamView::HideInlineKeyboard(bool send_enter) {
     keyboard_text_.clear();
     keyboard_shortcut_latched_ = false;
     keyboard_touch_was_down_ = false;
-    ResetControllerDeliveryState();
     suppress_b_until_release_ = true;
     keyboard_release_guard_ = true;
     if (session_)

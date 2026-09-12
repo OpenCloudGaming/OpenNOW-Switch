@@ -135,7 +135,8 @@ Run **Actions → Switch build and release → Run workflow** to build manually.
 On `main`, the Blacksmith workflow increments the patch version from the latest
 GitHub release, embeds it in the app and NRO metadata, publishes both files, and
 generates release notes. Selecting another branch builds downloadable artifacts
-without publishing a release. Pushes and pull requests do not trigger builds.
+without publishing a release. Pushes and pull requests do not trigger release
+builds; pull requests and pushes to `main` run the host regression tests.
 
 ## Repository layout
 
@@ -171,6 +172,18 @@ Jansson, libcurl, libsrtp2, libavcodec, and libavutil development packages. The 
 packet-loss and malformed-frame cases, decoded-frame selection, audio service
 mocks, keyboard shortcuts, and bitrate persistence/negotiation; it does not
 measure real Switch frame times or server bitrate adaptation.
+
+Run all host tests, including catalog, settings, persistence, and UI policies,
+with `bash scripts/test-host.sh`. On Ubuntu 24.04, install the dependencies with:
+
+```bash
+sudo apt-get install g++ libjansson-dev libcurl4-openssl-dev libsrtp2-dev libusrsctp-dev libavcodec-dev libavutil-dev libmbedtls-dev python3 openssl cmake
+```
+
+Run memory and undefined-behavior checks with
+`OPENNOW_SANITIZERS=address,undefined bash scripts/test-host.sh`.
+The SCTP test builds the pinned library in a temporary host copy, removing only
+its two forced Switch platform defines. It does not modify `extern/`.
 
 ## License
 

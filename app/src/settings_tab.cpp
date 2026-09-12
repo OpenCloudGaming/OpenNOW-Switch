@@ -178,6 +178,11 @@ SettingsTab::SettingsTab()
     SelectCategory(Category::Account);
 }
 
+SettingsTab::~SettingsTab()
+{
+    alive_->store(false);
+}
+
 brls::Box* SettingsTab::MakeSection(const std::string& title, const std::string& subtitle)
 {
     auto* section = new brls::Box(brls::Axis::COLUMN);
@@ -349,6 +354,7 @@ void SettingsTab::RebuildCategory()
     if (!content_container_)
         return;
 
+    SyncServerLocationAccount();
     const size_t selected = static_cast<size_t>(category_);
     brls::View* stable_focus = selected < category_nav_items_.size()
         ? category_nav_items_[selected].row
@@ -356,6 +362,8 @@ void SettingsTab::RebuildCategory()
     MoveFocusBeforeDestroy(content_container_, stable_focus);
 
     option_values_.clear();
+    cover_cache_files_ = nullptr;
+    cover_cache_bytes_ = nullptr;
     content_container_->clearViews();
     switch (category_)
     {
@@ -429,6 +437,8 @@ bool SettingsTab::SaveChanges(brls::View* view)
 bool SettingsTab::RevertChanges(brls::View* view)
 {
     (void)view;
+    ++proxy_request_generation_;
+    community_proxy_provisioning_ = false;
     draft_settings_ = saved_settings_;
     dirty_ = false;
     RefreshSummary();
