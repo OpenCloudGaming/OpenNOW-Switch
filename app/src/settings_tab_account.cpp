@@ -18,14 +18,9 @@ bool SettingsTab::BeginLogin(brls::View* view)
     try
     {
         auto& state = AppState::Instance();
-        std::vector<LoginProvider> providers =
-            state.HasProviders() ? state.providers() : client_.FetchLoginProviders();
-        if (!state.HasProviders())
-            state.SetProviders(providers);
-        if (providers.empty())
-            throw std::runtime_error("No GeForce NOW login providers were returned");
-
-        const auto refresh_account = [this]() {
+        const auto refresh_account = [this, alive = alive_]() {
+            if (!alive->load())
+                return;
             RefreshSummary();
             RebuildCategory();
         };
@@ -60,7 +55,7 @@ bool SettingsTab::ClearSavedLogin(brls::View* view)
     AuthSession next;
     if (client_.LoadSavedSession(next))
     {
-        state.SetSession(std::move(next));
+        state.ActivateSession(std::move(next));
         brls::Application::notify("Active login cleared; switched to another saved account");
     }
     else
@@ -70,7 +65,10 @@ bool SettingsTab::ClearSavedLogin(brls::View* view)
     }
 
     RefreshSummary();
-    brls::sync([this] { RebuildCategory(); });
+    brls::sync([this, alive = alive_] {
+        if (alive->load())
+            RebuildCategory();
+    });
     return true;
 }
 
@@ -93,7 +91,9 @@ bool SettingsTab::SwitchSavedAccount(brls::View* view)
     {
         const bool active = session.user.user_id == active_user_id;
         const std::string label = (active ? "Active: " : "Use: ") + session.user.display_name;
-        dialog->addButton(label, [this, session]() {
+        dialog->addButton(label, [this, alive = alive_, session]() {
+            if (!alive->load())
+                return;
             if (!client_.SetActiveSavedSession(session.user.user_id))
             {
                 ShowError("Account Switch Failed", "Unable to activate the selected saved account.");
@@ -101,23 +101,30 @@ bool SettingsTab::SwitchSavedAccount(brls::View* view)
             }
 
             auto& state = AppState::Instance();
-            state.SetSession(session);
+            state.ActivateSession(session);
             state.SetLibraryGames({});
             RefreshSummary();
-            brls::sync([this] { RebuildCategory(); });
+            brls::sync([this, alive] {
+                if (alive->load())
+                    RebuildCategory();
+            });
             brls::Application::notify("Switched to " + session.user.display_name);
 
             AuthSession refresh_source = session;
             refresh_source.membership_checked_at_ms = 0;
             GfnClient client = client_;
-            brls::async([this, client, refresh_source = std::move(refresh_source)]() mutable {
+            const auto generation = state.session_generation();
+            brls::async([this, alive, generation, client, refresh_source = std::move(refresh_source)]() mutable {
+                if (!alive->load())
+                    return;
                 try
                 {
                     AuthSession refreshed = client.EnsureFreshSavedSession(refresh_source);
-                    brls::sync([this, refreshed = std::move(refreshed)]() mutable {
+                    brls::sync([this, alive, generation, refreshed = std::move(refreshed)]() mutable {
+                        if (!alive->load())
+                            return;
                         auto& current = AppState::Instance();
-                        if (!current.HasSession() ||
-                            current.session()->user.user_id != refreshed.user.user_id)
+                        if (!current.IsCurrentSession(generation))
                             return;
                         current.SetSession(std::move(refreshed));
                         RebuildCategory();

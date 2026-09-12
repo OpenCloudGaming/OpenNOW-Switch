@@ -178,6 +178,9 @@ add_custom_target(${PROJECT_NAME}.nro
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/font
         ${PROJECT_ROMFS_DIR}/font
     COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/certs
+        ${PROJECT_ROMFS_DIR}/certs
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/i18n
         ${PROJECT_ROMFS_DIR}/i18n
     COMMAND ${CMAKE_COMMAND} -E copy_directory

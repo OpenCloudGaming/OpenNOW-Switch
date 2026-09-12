@@ -490,8 +490,7 @@ void WebRtcSession::send_peer_payload(json_t* payload) {
 
     char* dump = json_dumps(root, 0);
     if (dump) {
-        AppendStreamLog("TX " + std::string(dump));
-        AppendTraceLog("TX peer_payload " + PreviewText(std::string(payload_dump), 500));
+        AppendStreamLog("TX peer_payload bytes=" + std::to_string(std::strlen(payload_dump)));
         signaling_client_->send_message(std::string(dump));
         free(dump);
     }
@@ -576,13 +575,11 @@ void WebRtcSession::maybe_open_datachannel() {
             reliable_input_channel_requested_ = true;
     }
 
-    // The Switch fallback SCTP backend intentionally uses one reliable channel.
-    // Partial reliability requires Forward-TSN negotiation and is optional for GFN input.
     datachannel_open_requested_ = reliable_input_channel_requested_;
     if (datachannel_open_requested_ && input_activation_due_.time_since_epoch().count() == 0) {
         // Prefer the server handshake; use v2 only as a compatibility fallback.
         input_activation_due_ = now + std::chrono::milliseconds(1500);
-        AppendStreamLog("DATA fast_channel disabled reason=internal_sctp_no_forward_tsn");
+        AppendStreamLog("DATA fast_channel disabled reason=reliable_input_profile");
         AppendInputLog("DCEP reliableChannelRequested=1 fastChannel=disabled activationDelayMs=1500");
     }
 }

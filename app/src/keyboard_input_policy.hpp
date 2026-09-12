@@ -37,7 +37,7 @@ struct KeyboardShortcutControl
     const char* chord;
 };
 
-inline constexpr std::array<KeyboardShortcutControl, 12> kKeyboardShortcutControls {{
+inline constexpr std::array<KeyboardShortcutControl, 8> kKeyboardShortcutControls {{
     {KeyboardShortcut::Escape, "Esc", "MINUS + ZL"},
     {KeyboardShortcut::Tab, "Tab", "MINUS + L"},
     {KeyboardShortcut::AltTab, "Alt + Tab", "MINUS + R"},
@@ -46,14 +46,19 @@ inline constexpr std::array<KeyboardShortcutControl, 12> kKeyboardShortcutContro
     {KeyboardShortcut::WindowsExplorer, "Win + E", "MINUS + UP"},
     {KeyboardShortcut::WindowsRun, "Win + R", "MINUS + RIGHT"},
     {KeyboardShortcut::WindowsTaskView, "Win + Tab", "MINUS + DOWN"},
-    // Direct keys: bypass the applet diff so they work on pre-existing
-    // remote text even when nothing was typed locally. Touch-only
-    // (no MINUS chord left); tap them in the shortcut bar.
-    {KeyboardShortcut::Backspace, "Bksp", "TAP"},
-    {KeyboardShortcut::Delete, "Del", "TAP"},
-    {KeyboardShortcut::ArrowLeft, "Left", "TAP"},
-    {KeyboardShortcut::ArrowRight, "Right", "TAP"},
 }};
+
+inline constexpr auto kKeyboardTouchControls = [] {
+    std::array<KeyboardShortcutControl, kKeyboardShortcutControls.size() + 4> controls {};
+    std::size_t index = 0;
+    for (const auto& control : kKeyboardShortcutControls)
+        controls[index++] = control;
+    controls[index++] = {KeyboardShortcut::Backspace, "Bksp", "TAP"};
+    controls[index++] = {KeyboardShortcut::Delete, "Del", "TAP"};
+    controls[index++] = {KeyboardShortcut::ArrowLeft, "Left", "TAP"};
+    controls[index] = {KeyboardShortcut::ArrowRight, "Right", "TAP"};
+    return controls;
+}();
 
 inline int PollKeyboardShortcut(std::uint16_t buttons, bool& latched)
 {

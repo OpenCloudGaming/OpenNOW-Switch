@@ -73,10 +73,10 @@ private:
     void DrawStreamEndNotice(NVGcontext* vg, float x, float y, float width,
                              std::chrono::steady_clock::time_point now);
     void PollControllerStates(std::chrono::steady_clock::time_point now);
+    void ObserveControllerSystemButtons(std::chrono::steady_clock::time_point now);
     void SendControllerInputs(std::chrono::steady_clock::time_point now);
     uint16_t SendPendingControllerDisconnects();
-    void ResetControllerDeliveryState();
-    void SendNeutralControllerReports();
+    void UpdateGameplayInputCapture(bool captured, std::chrono::steady_clock::time_point now);
     void QueueControllerConnectedNotice(
         std::size_t controller, std::chrono::steady_clock::time_point now);
     void UpdateControllerNotice(std::chrono::steady_clock::time_point now);
@@ -159,6 +159,8 @@ private:
     std::chrono::steady_clock::time_point nte_next_action_ {};
     std::chrono::steady_clock::time_point nte_status_until_ {};
     bool exit_requested_ = false;
+    bool input_focused_ = true;
+    opennow::input::ControllerInputCapture controller_input_capture_;
     bool exit_combo_was_down_ = false;
     bool touch_was_down_ = false;
     bool touch_pointer_initialized_ = false;

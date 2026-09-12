@@ -1,6 +1,7 @@
 #include "webrtc_session.hpp"
 #include "stream_diagnostics.hpp"
 #include "network_loop_policy.hpp"
+#include "startup_timeout_policy.hpp"
 #include "stream/ffmpeg/AVFrameHolder.hpp"
 #include "borealis/core/logger.hpp"
 #include "internal.hpp"
@@ -96,8 +97,6 @@ WebRtcSession::WebRtcSession(
       peer_name_(MakePeerName()) {
     opennow::SetStreamDiagnosticsEnabled(settings_.debug_diagnostics);
 
-    // Initialize libpeer
-    peer_init();
     peer_connection_set_diagnostics_enabled(settings_.debug_diagnostics ? 1 : 0);
     renderer_ = std::make_unique<DKVideoRenderer>();
     audio_ = std::make_unique<AudioPipeline>();
@@ -139,7 +138,6 @@ WebRtcSession::WebRtcSession(
 
 WebRtcSession::~WebRtcSession() {
     stop();
-    peer_deinit();
 }
 
 void WebRtcSession::setup_peer_connection() {
@@ -185,8 +183,7 @@ void WebRtcSession::start() {
     stop_requested_.store(false, std::memory_order_release);
     session_started_at_ = std::chrono::steady_clock::now();
     ResetStreamTraceLog();
-    AppendStreamLog("SESSION start url=" + signaling_url_ +
-                    " media=" + (media_ip_.empty() ? std::string("(auto)") : media_ip_) +
+    AppendStreamLog("SESSION start media=" + (media_ip_.empty() ? std::string("(auto)") : media_ip_) +
                     ":" + std::to_string(media_port_) +
                     " preset=" + settings_.label +
                     " " + std::to_string(settings_.width) + "x" +
@@ -207,8 +204,6 @@ void WebRtcSession::start() {
     AppendInputLog("SESSION start codecSelfTest=" + std::to_string(input_codec_ok ? 1 : 0) +
                    " expectedController=xbox fixedReliableSid=0");
     AppendTraceLog("SESSION start");
-    AppendTraceLog("url=" + signaling_url_);
-    AppendTraceLog("sessionId=" + session_id_);
     AppendTraceLog("peerName=" + peer_name_);
     AppendTraceLog("mediaHint=" + (media_ip_.empty() ? std::string("(auto)") : media_ip_) +
                    ":" + std::to_string(media_port_));
@@ -328,10 +323,19 @@ void WebRtcSession::poll() {
         return;
 
     bool startup_timed_out = false;
-    if (std::chrono::steady_clock::now() - session_started_at_ >= std::chrono::seconds(30)) {
+    opennow::webrtc::StartupTimeout startup_timeout = opennow::webrtc::StartupTimeout::None;
+    {
         std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
-        if (!peer_completed_seen_) {
-            current_state_ = "Streaming transport startup timed out";
+        const auto now = std::chrono::steady_clock::now();
+        startup_timeout = opennow::webrtc::DetectStartupTimeout(
+            peer_completed_seen_, frames_decoded_.load() > 0,
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - session_started_at_),
+            peer_completed_seen_
+                ? std::chrono::duration_cast<std::chrono::milliseconds>(now - peer_completed_at_)
+                : std::chrono::milliseconds(0));
+        if (startup_timeout != opennow::webrtc::StartupTimeout::None) {
+            current_state_ = startup_timeout == opennow::webrtc::StartupTimeout::Video
+                ? "Streaming video startup timed out" : "Streaming transport startup timed out";
             peer_terminal_kind_.store(
                 static_cast<int>(opennow::PeerTerminalKind::Failed),
                 std::memory_order_release);
@@ -341,7 +345,8 @@ void WebRtcSession::poll() {
         }
     }
     if (startup_timed_out) {
-        AppendStreamLog("SESSION error transport_startup_timeout");
+        AppendStreamLog(startup_timeout == opennow::webrtc::StartupTimeout::Video
+            ? "SESSION error video_startup_timeout" : "SESSION error transport_startup_timeout");
         request_stop();
         return;
     }
@@ -370,7 +375,12 @@ void WebRtcSession::poll() {
         const PeerConnectionState state = peer_connection_get_state(pc_);
         current_state_ = std::string("Peer ") + peer_connection_state_to_string(state);
         if (state == PEER_CONNECTION_COMPLETED) {
-            if (keyframe_needed_.exchange(false) && decoder_resync_required_.load())
+            bool keyframe_needed = false;
+            {
+                std::lock_guard<std::mutex> queue_lock(decoder_queue_mutex_);
+                keyframe_needed = decoder_recovery_.take_keyframe_request();
+            }
+            if (keyframe_needed)
                 request_keyframe("decoder_resync");
             maybe_open_datachannel();
             maybe_activate_input();

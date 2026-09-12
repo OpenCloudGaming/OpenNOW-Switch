@@ -212,7 +212,7 @@ TopBarFrame::TopBarFrame()
     account_container_->setJustifyContent(brls::JustifyContent::FLEX_END);
     status_container->addView(account_container_);
 
-    avatar_image_ = new brls::Image();
+    avatar_image_ = new CachedImage();
     avatar_image_->setWidth(34);
     avatar_image_->setHeight(34);
     avatar_image_->setShrink(0.0f);
@@ -470,7 +470,8 @@ void TopBarFrame::UpdateStatusBar(bool force)
             : Tr("None"))
         : "--";
     const int qpos = GetCurrentQueuePosition();
-    const std::string queue = qpos >= 0 ? std::to_string(qpos) : "";
+    const bool queue_active = IsQueueMinimized() || qpos >= 0;
+    const std::string queue = qpos > 0 ? std::to_string(qpos) : (queue_active ? "..." : "");
     const std::string status = name + "\n" + detail + "\n" + time + "\n" + storage + "\n" + queue;
     if (status != displayed_status_)
     {
@@ -479,9 +480,8 @@ void TopBarFrame::UpdateStatusBar(bool force)
         account_detail_label_->setTextColor(membership::TextColor(tier));
         time_remaining_label_->setText(time);
         storage_remaining_label_->setText(storage);
-        // Queue chip: hidden when idle, number-only in queue (icon says it all).
         if (queue_chip_) {
-            if (qpos >= 0) {
+            if (queue_active) {
                 queue_position_label_->setText(queue);
                 queue_chip_->setVisibility(brls::Visibility::VISIBLE);
             } else {

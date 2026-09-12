@@ -211,7 +211,7 @@ void QrLoginDialog::CompleteLogin(const AuthSession& session)
     AuthSession active_session = session;
     active_session.persistence_enabled = true;
     client_.SaveSession(active_session);
-    AppState::Instance().SetSession(active_session);
+    AppState::Instance().ActivateSession(active_session);
     login_active_.store(false);
     brls::Application::notify("Account connected: " + session.user.display_name);
     brls::Application::popActivity();

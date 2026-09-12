@@ -149,7 +149,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     poster_column->setWidth(310);
     poster_column->setMarginRight(28);
 
-    auto* poster = new brls::Image();
+    auto* poster = new CachedImage();
     poster->setWidth(310);
     poster->setHeight(380);
     poster->setCornerRadius(14);

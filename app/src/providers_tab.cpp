@@ -1,10 +1,12 @@
 #include "providers_tab.hpp"
 
 #include "app_state.hpp"
+#include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
 #include "qr_login_dialog.hpp"
 #include "localization.hpp"
 
+#include <stdexcept>
 #include <utility>
 
 namespace opennow
@@ -20,20 +22,6 @@ brls::Label* MakeParagraph(const std::string& text, float bottom_margin = 16.0f)
     label->setMarginBottom(bottom_margin);
     return label;
 }
-
-class InputBlocker
-{
-  public:
-    InputBlocker()
-    {
-        brls::Application::blockInputs();
-    }
-
-    ~InputBlocker()
-    {
-        brls::Application::unblockInputs();
-    }
-};
 
 } // namespace
 
@@ -53,15 +41,15 @@ ProvidersTab::ProvidersTab(std::function<void()> on_success)
         "The list comes from GeForce NOW and includes supported Alliance partners. "
         "Saved tokens refresh automatically.", 20.0f));
 
-    auto* refresh_button = new brls::Button();
-    refresh_button->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-    refresh_button->setText("Reload providers");
-    refresh_button->setMarginBottom(14);
-    refresh_button->registerClickAction([this](brls::View* view) {
+    refresh_button_ = new brls::Button();
+    refresh_button_->setStyle(&brls::BUTTONSTYLE_PRIMARY);
+    refresh_button_->setText("Reload providers");
+    refresh_button_->setMarginBottom(14);
+    refresh_button_->registerClickAction([this](brls::View*) {
         ReloadProviders();
         return true;
     });
-    addView(refresh_button);
+    addView(refresh_button_);
 
     status_label_ = MakeParagraph("No provider data cached yet.");
     addView(status_label_);
@@ -74,6 +62,11 @@ ProvidersTab::ProvidersTab(std::function<void()> on_success)
     scrolling_frame_->setContentView(list_container_);
 
     addView(scrolling_frame_);
+}
+
+ProvidersTab::~ProvidersTab()
+{
+    alive_->store(false);
 }
 
 void ProvidersTab::willAppear(bool resetState)
@@ -100,27 +93,43 @@ void ProvidersTab::ReloadProviders()
     loading_ = true;
     status_label_->setText("Loading provider endpoints...");
 
-    try
-    {
-        InputBlocker blocker;
-        providers_ = client_.FetchLoginProviders();
-        AppState::Instance().SetProviders(providers_);
-    }
-    catch (const std::exception& ex)
-    {
-        loading_ = false;
-        status_label_->setText("Provider discovery failed.");
-        ShowError("Provider Discovery Failed", ex.what());
-        return;
-    }
-
-    loading_ = false;
-    RebuildList();
-    brls::Application::notify("Provider endpoints refreshed");
+    GfnClient client = client_;
+    const auto alive = alive_;
+    brls::async([this, alive, client]() mutable {
+        if (!alive->load())
+            return;
+        try
+        {
+            auto providers = client.FetchLoginProviders();
+            if (providers.empty())
+                throw std::runtime_error("No GeForce NOW login providers were returned");
+            brls::sync([this, alive, providers = std::move(providers)]() mutable {
+                if (!alive->load())
+                    return;
+                providers_ = std::move(providers);
+                AppState::Instance().SetProviders(providers_);
+                loading_ = false;
+                RebuildList();
+                brls::Application::notify("Provider endpoints refreshed");
+            });
+        }
+        catch (const std::exception& ex)
+        {
+            const std::string error = ex.what();
+            brls::sync([this, alive, error] {
+                if (!alive->load())
+                    return;
+                loading_ = false;
+                status_label_->setText("Provider discovery failed.");
+                ShowError("Provider Discovery Failed", error);
+            });
+        }
+    }, false);
 }
 
 void ProvidersTab::RebuildList()
 {
+    MoveFocusBeforeDestroy(list_container_, refresh_button_);
     list_container_->clearViews();
 
     status_label_->setText(
@@ -142,17 +151,20 @@ void ProvidersTab::RebuildList()
     }
 }
 
-bool ProvidersTab::OpenProviderDialog(brls::View* view, size_t index)
+bool ProvidersTab::OpenProviderDialog(brls::View*, size_t index)
 {
     if (index >= providers_.size())
         return false;
 
     const LoginProvider& provider = providers_[index];
     
-    auto* dialog = new QrLoginDialog(provider, client_, [this]() {
+    const auto alive = alive_;
+    auto* dialog = new QrLoginDialog(provider, client_, [this, alive]() {
         // QrLoginDialog first removes itself. Queue the second pop so the
         // provider picker closes on the following UI turn.
-        brls::sync([this]() {
+        brls::sync([this, alive]() {
+            if (!alive->load())
+                return;
             if (on_success_)
                 on_success_();
             brls::Application::popActivity();

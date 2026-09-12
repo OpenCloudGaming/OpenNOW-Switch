@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,8 @@ struct AuthTokens
     std::string auth_client_id;
     std::int64_t expires_at_ms              = 0;
     std::int64_t client_token_expires_at_ms = 0;
+
+    bool operator==(const AuthTokens&) const = default;
 };
 
 struct AuthUser
@@ -102,6 +106,13 @@ struct PublicGame
     std::string membership_tier_label;
     bool is_in_library = false;
     std::vector<GameVariant> variants;
+};
+
+struct CatalogPage
+{
+    std::vector<PublicGame> games;
+    std::optional<std::string> next_cursor;
+    std::optional<std::size_t> total_count;
 };
 
 struct GameInfo

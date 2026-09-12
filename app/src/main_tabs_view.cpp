@@ -68,15 +68,15 @@ void MainTabsView::MaybeRefreshAuthentication()
     if (auth_refresh_running_->exchange(true))
         return;
     const auto guard = auth_refresh_running_;
-    brls::async([session, guard]() mutable {
+    const auto generation = state.session_generation();
+    brls::async([session, guard, generation]() mutable {
         try
         {
             GfnClient client;
             AuthSession refreshed = client.RecoverSavedSession(session);
-            brls::sync([refreshed = std::move(refreshed), guard]() mutable {
+            brls::sync([refreshed = std::move(refreshed), guard, generation]() mutable {
                 auto& current = AppState::Instance();
-                if (current.HasSession() &&
-                    current.session()->user.user_id == refreshed.user.user_id)
+                if (current.IsCurrentSession(generation))
                 {
                     current.SetSession(std::move(refreshed));
                 }
@@ -85,9 +85,9 @@ void MainTabsView::MaybeRefreshAuthentication()
         }
         catch (const ReauthenticationRequired&)
         {
-            brls::sync([session, guard]() mutable {
+            brls::sync([guard, generation]() mutable {
                 auto& current = AppState::Instance();
-                if (current.HasSession() && current.session()->user.user_id == session.user.user_id)
+                if (current.IsCurrentSession(generation))
                 {
                     AuthSession invalid = *current.session();
                     invalid.reauthentication_required = true;

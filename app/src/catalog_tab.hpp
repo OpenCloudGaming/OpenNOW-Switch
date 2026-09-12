@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gfn_client.hpp"
+#include "catalog_paging_policy.hpp"
 #include "models.hpp"
 
 #include <borealis.hpp>
@@ -21,10 +22,9 @@ class CatalogTab : public brls::Box
     void willAppear(bool resetState) override;
 
   private:
-    void ReloadCatalog(const std::string& server_query = {});
+    void ReloadCatalog(bool append = false);
     void BeginSearch();
     void RebuildList();
-    void LoadMoreOrRefresh();
     void EnsurePagingButton();
     void DetachPagingButton();
     void AttachPagingButton(bool has_more, size_t remaining);
@@ -35,8 +35,9 @@ class CatalogTab : public brls::Box
     bool OpenGameDialog(brls::View* view, size_t index);
 
     GfnClient client_;
-    std::vector<PublicGame> games_;
-    std::vector<PublicGame> base_games_;
+    CatalogListing catalog_;
+    std::string catalog_server_query_;
+    std::uint64_t catalog_session_generation_ = 0;
     std::vector<std::vector<brls::View*>> card_rows_;
     std::vector<brls::View*> toolbar_buttons_;
     brls::Label* status_label_                 = nullptr;

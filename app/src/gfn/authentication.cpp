@@ -48,6 +48,13 @@ constexpr const char* kNvidiaFileReferer   = "https://nvfile/";
 constexpr std::int64_t kRefreshWindowMs    = 10LL * 60LL * 1000LL;
 constexpr std::int64_t kMembershipRefreshIntervalMs = 60LL * 60LL * 1000LL;
 constexpr auto kQrLoginTimeout             = std::chrono::minutes(5);
+
+std::mutex& SessionRefreshMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
 std::string AuthClientId(const AuthTokens& tokens);
 const char* AuthUserAgent(const AuthTokens& tokens);
 std::vector<std::string> BuildAuthHeadersForTokens(
@@ -710,7 +717,8 @@ AuthSession GfnClient::EnsureFreshSession(const AuthSession& session) const
 
     AuthSession refreshed = session;
 
-    if (access_needs_refresh && session.tokens.refresh_token.empty())
+    if (access_needs_refresh && session.tokens.refresh_token.empty() &&
+        session.tokens.client_token.empty())
     {
         if (IsExpired(session.tokens.expires_at_ms))
             throw ReauthenticationRequired("Saved GeForce NOW login has expired. Please sign in again.");
@@ -739,16 +747,18 @@ AuthSession GfnClient::EnsureFreshSavedSession(const AuthSession& session) const
     if (!session.persistence_enabled)
         return EnsureFreshSession(session);
 
-    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
+    std::lock_guard<std::mutex> lock(SessionRefreshMutex());
     AuthSession source = session;
+    std::optional<AuthSession> persisted_source;
     for (const AuthSession& saved : LoadAccountsFromDisk(nullptr))
     {
-        if (saved.user.user_id == session.user.user_id &&
-            (saved.last_refresh_at_ms > source.last_refresh_at_ms ||
-             saved.tokens.expires_at_ms > source.tokens.expires_at_ms))
-        {
+        if (saved.user.user_id != session.user.user_id)
+            continue;
+        persisted_source = saved;
+        if (saved.last_refresh_at_ms > source.last_refresh_at_ms ||
+            saved.tokens.expires_at_ms > source.tokens.expires_at_ms)
             source = saved;
-        }
+        break;
     }
 
     AuthSession refreshed = EnsureFreshSession(source);
@@ -763,8 +773,8 @@ AuthSession GfnClient::EnsureFreshSavedSession(const AuthSession& session) const
         refreshed.user.membership_tier_verified != source.user.membership_tier_verified ||
         refreshed.membership_checked_at_ms != source.membership_checked_at_ms ||
         refreshed.last_refresh_at_ms != source.last_refresh_at_ms;
-    if (changed)
-        SaveSession(refreshed);
+    if (changed && persisted_source)
+        SaveRefreshedSession(*persisted_source, refreshed);
     return refreshed;
 }
 
@@ -784,16 +794,18 @@ AuthSession GfnClient::ForceRefreshSavedSession(const AuthSession& session) cons
         return refreshed;
     }
 
-    std::lock_guard<std::recursive_mutex> lock(AccountsMutex());
+    std::lock_guard<std::mutex> lock(SessionRefreshMutex());
     AuthSession source = session;
+    std::optional<AuthSession> persisted_source;
     for (const AuthSession& saved : LoadAccountsFromDisk(nullptr))
     {
-        if (saved.user.user_id == session.user.user_id &&
-            (saved.last_refresh_at_ms > source.last_refresh_at_ms ||
-             saved.tokens.expires_at_ms > source.tokens.expires_at_ms))
-        {
+        if (saved.user.user_id != session.user.user_id)
+            continue;
+        persisted_source = saved;
+        if (saved.last_refresh_at_ms > source.last_refresh_at_ms ||
+            saved.tokens.expires_at_ms > source.tokens.expires_at_ms)
             source = saved;
-        }
+        break;
     }
 
     AppendAuthLog("auth: forced refresh after authorization failure user_id_present=" +
@@ -807,7 +819,8 @@ AuthSession GfnClient::ForceRefreshSavedSession(const AuthSession& session) cons
     }
     refreshed.last_refresh_at_ms = NowMs();
     RefreshMembershipTier(http_client_, refreshed);
-    SaveSession(refreshed);
+    if (persisted_source)
+        SaveRefreshedSession(*persisted_source, refreshed);
     return refreshed;
 }
 
