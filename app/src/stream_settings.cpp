@@ -143,6 +143,10 @@ StreamSettings Sanitize(StreamSettings settings)
         settings.image_quality_mode != "Clarity")
         settings.image_quality_mode = "Adaptive";
 
+    if (settings.queue_notify_threshold != 5 && settings.queue_notify_threshold != 10 &&
+        settings.queue_notify_threshold != 20 && settings.queue_notify_threshold != 50)
+        settings.queue_notify_threshold = 10;
+
     if (!IsSupportedInterfaceLanguage(settings.interface_language))
         settings.interface_language = "en";
 
@@ -285,6 +289,8 @@ StreamSettings LoadStreamSettings()
         root.get(), "community_proxy_enabled", settings.community_proxy_enabled);
     settings.community_proxy_url = JsonField(
         root.get(), "community_proxy_url", settings.community_proxy_url);
+    settings.queue_notify_threshold = JsonInt(
+        root.get(), "queue_notify_threshold", settings.queue_notify_threshold);
     return Sanitize(settings);
 }
 
@@ -323,6 +329,8 @@ bool SaveStreamSettings(const StreamSettings& settings)
         root.get(), "community_proxy_enabled", json_boolean(clean.community_proxy_enabled));
     json_object_set_new(
         root.get(), "community_proxy_url", json_string(clean.community_proxy_url.c_str()));
+    json_object_set_new(
+        root.get(), "queue_notify_threshold", json_integer(clean.queue_notify_threshold));
 
     char* dump = json_dumps(root.get(), JSON_INDENT(2));
     if (!dump)

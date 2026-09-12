@@ -16,6 +16,7 @@ extern "C" {
 #include <chrono>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -23,6 +24,28 @@ constexpr unsigned kStaticCommandBytes = 0x10000;
 constexpr unsigned kUpdateCommandSliceBytes = 0x1000;
 constexpr unsigned kUpdateCommandSlices = 8;
 constexpr size_t kSoftwareFrameSlots = 4;
+
+bool frame_full_range(const AVFrame* frame)
+{
+    return frame && frame->format != AV_PIX_FMT_NVTEGRA &&
+        (frame->color_range == AVCOL_RANGE_JPEG ||
+         (frame->color_range == AVCOL_RANGE_UNSPECIFIED && frame->format == AV_PIX_FMT_YUVJ420P));
+}
+
+bool supported_frame(const AVFrame* frame)
+{
+    if (!frame || frame->width <= 0 || frame->height <= 0 ||
+        (frame->width & 1) || (frame->height & 1) ||
+        static_cast<uint64_t>(frame->width) * frame->height >
+            static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
+        !frame->data[0] || !frame->data[1])
+        return false;
+    if (frame->format == AV_PIX_FMT_NVTEGRA)
+        return frame->buf[0] != nullptr;
+    return frame->format == AV_PIX_FMT_NV12 ||
+        ((frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P) &&
+         frame->data[2]);
+}
 
 uint64_t monotonic_millis()
 {
@@ -100,8 +123,13 @@ void set_color_transform(Transformation& transform, AVColorSpace color_space, bo
 
 DKVideoRenderer::~DKVideoRenderer()
 {
-    if (video_context_)
-        queue_.waitIdle();
+    if (auto* active = configurations_.active())
+        active->queue_.waitIdle();
+    configurations_.clear();
+}
+
+DKVideoRenderer::Configuration::~Configuration()
+{
     submitted_frames_.clear();
     frame_mappings_.clear();
     releaseSoftwareSlots();
@@ -109,14 +137,14 @@ DKVideoRenderer::~DKVideoRenderer()
     vertex_buffer_.destroy();
     transform_buffer_.destroy();
     if (video_context_) {
-        if (luma_texture_id_ > 0)
+        if (luma_texture_id_ >= 0)
             video_context_->freeImageIndex(luma_texture_id_);
-        if (chroma_texture_id_ > 0)
+        if (chroma_texture_id_ >= 0)
             video_context_->freeImageIndex(chroma_texture_id_);
     }
 }
 
-void DKVideoRenderer::releaseSoftwareSlots()
+void DKVideoRenderer::Configuration::releaseSoftwareSlots()
 {
     for (auto& slot : software_slots_) {
         slot.luma_memory.destroy();
@@ -144,21 +172,13 @@ int DKVideoRenderer::getFrameColorspace(const AVFrame* frame)
 
 bool DKVideoRenderer::isFrameFullRange(const AVFrame* frame)
 {
-    return frame && frame->color_range == AVCOL_RANGE_JPEG;
+    return frame_full_range(frame);
 }
 
-void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
+bool DKVideoRenderer::Configuration::initialize(
+    int width, int height, AVFrame* frame, uint64_t generation)
 {
-    if (initialized_ || !frame)
-        return;
     hardware_frames_ = frame->format == AV_PIX_FMT_NVTEGRA;
-    const bool software_frame = frame->format == AV_PIX_FMT_YUV420P ||
-                                frame->format == AV_PIX_FMT_YUVJ420P ||
-                                frame->format == AV_PIX_FMT_NV12;
-    if (!hardware_frames_ && !software_frame) {
-        brls::Logger::error("Deko3D video renderer unsupported frame format {}", frame->format);
-        return;
-    }
 
     frame_width_ = frame->width;
     frame_height_ = frame->height;
@@ -177,23 +197,28 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
 
     static_cmd_buf_ = dk::CmdBufMaker{device_}.create();
     CMemPool::Handle command_memory = data_pool_->allocate(kStaticCommandBytes);
+    if (!static_cmd_buf_ || !command_memory)
+        return false;
     static_cmd_buf_.addMemory(command_memory.getMemBlock(), command_memory.getOffset(),
                               command_memory.getSize());
     update_cmd_buf_ = dk::CmdBufMaker{device_}.create();
     update_cmd_memory_ = data_pool_->allocate(
         kUpdateCommandSliceBytes * kUpdateCommandSlices, DK_CMDMEM_ALIGNMENT);
-    vertex_shader_.load(*code_pool_, "romfs:/shaders/opennow_video_vsh.dksh");
-    fragment_shader_.load(*code_pool_, "romfs:/shaders/opennow_video_fsh.dksh");
+    if (!update_cmd_buf_ || !update_cmd_memory_ ||
+        !vertex_shader_.load(*code_pool_, "romfs:/shaders/opennow_video_vsh.dksh") ||
+        !fragment_shader_.load(*code_pool_, "romfs:/shaders/opennow_video_fsh.dksh"))
+        return false;
     vertex_buffer_ = data_pool_->allocate(sizeof(kQuadVertices), alignof(Vertex));
+    if (!vertex_buffer_)
+        return false;
     std::memcpy(vertex_buffer_.getCpuAddr(), kQuadVertices.data(), vertex_buffer_.getSize());
     transform_buffer_ = code_pool_->allocate(sizeof(Transformation), DK_UNIFORM_BUF_ALIGNMENT);
+    if (!transform_buffer_)
+        return false;
 
     Transformation transform {};
-    bool full_range = isFrameFullRange(frame);
-    // CloudMatch negotiates limited range; some NVTEGRA frames incorrectly report JPEG.
-    if (frame->color_range == AVCOL_RANGE_JPEG)
-        full_range = false;
-    set_color_transform(transform, frame->colorspace, full_range);
+    full_range_ = frame_full_range(frame);
+    set_color_transform(transform, frame->colorspace, full_range_);
 
     const float frame_aspect = static_cast<float>(frame_height_) / frame_width_;
     const float screen_aspect = static_cast<float>(screen_height_) / screen_width_;
@@ -221,6 +246,8 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
 
     luma_texture_id_ = video_context_->allocateImageIndex();
     chroma_texture_id_ = video_context_->allocateImageIndex();
+    if (luma_texture_id_ < 0 || chroma_texture_id_ < 0)
+        return false;
     dk::ImageLayoutMaker{device_}
         .setType(DkImageType_2D).setFormat(DkImageFormat_R8_Unorm)
         .setDimensions(frame_width_, frame_height_, 1)
@@ -263,7 +290,7 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
                 slot.luma_upload.destroy();
                 slot.chroma_upload.destroy();
                 releaseSoftwareSlots();
-                return;
+                return false;
             }
             slot.luma.initialize(
                 luma_layout_, slot.luma_memory.getMemBlock(), slot.luma_memory.getOffset());
@@ -297,14 +324,25 @@ void DKVideoRenderer::checkAndInitialize(int width, int height, AVFrame* frame)
     static_cmd_buf_.bindVtxBufferState(kVertexBuffers);
     static_cmd_buf_.draw(DkPrimitive_Quads, kQuadVertices.size(), 1, 0, 0);
     static_cmd_list_ = static_cmd_buf_.finishList();
-    initialized_ = true;
+    if (!static_cmd_list_ || !prepareFrame(frame, generation))
+        return false;
     brls::Logger::info(
         "Deko3D {} renderer initialized {}x{} quality={}",
         hardware_frames_ ? "NVTEGRA zero-copy" : "software NV12 upload",
         frame_width_, frame_height_, quality_settings.image_quality_mode);
+    return true;
 }
 
-void DKVideoRenderer::bindDescriptors(
+bool DKVideoRenderer::Configuration::matches(
+    int width, int height, const AVFrame* frame) const
+{
+    return screen_width_ == width && screen_height_ == height &&
+        frame_width_ == frame->width && frame_height_ == frame->height &&
+        hardware_frames_ == (frame->format == AV_PIX_FMT_NVTEGRA) &&
+        full_range_ == frame_full_range(frame);
+}
+
+void DKVideoRenderer::Configuration::bindDescriptors(
     const dk::ImageDescriptor& luma, const dk::ImageDescriptor& chroma)
 {
     update_cmd_buf_.clear();
@@ -317,7 +355,7 @@ void DKVideoRenderer::bindDescriptors(
     video_context_->updateImageDescriptor(update_cmd_buf_, chroma_texture_id_, chroma);
 }
 
-bool DKVideoRenderer::updateSoftwareFrame(AVFrame* frame)
+bool DKVideoRenderer::Configuration::updateSoftwareFrame(AVFrame* frame)
 {
     if (!frame || hardware_frames_ || software_slots_.empty() ||
         !frame->data[0] || !frame->data[1] ||
@@ -332,7 +370,6 @@ bool DKVideoRenderer::updateSoftwareFrame(AVFrame* frame)
     auto* luma = static_cast<uint8_t*>(slot.luma_upload.getCpuAddr());
     auto* chroma = static_cast<uint8_t*>(slot.chroma_upload.getCpuAddr());
 
-    const int chroma_height = frame_height_ / 2;
     if (!opennow::video::CopyYuv420ToNv12(
             frame_width_, frame_height_,
             frame->data[0], frame->linesize[0],
@@ -342,24 +379,13 @@ bool DKVideoRenderer::updateSoftwareFrame(AVFrame* frame)
             luma, chroma))
         return false;
 
-    bindDescriptors(slot.luma_descriptor, slot.chroma_descriptor);
-    dk::ImageView luma_view{slot.luma};
-    dk::ImageView chroma_view{slot.chroma};
-    update_cmd_buf_.copyBufferToImage(
-        {slot.luma_upload.getGpuAddr(), 0, 0}, luma_view,
-        {0, 0, 0, static_cast<uint32_t>(frame_width_),
-         static_cast<uint32_t>(frame_height_), 1});
-    update_cmd_buf_.copyBufferToImage(
-        {slot.chroma_upload.getGpuAddr(), 0, 0}, chroma_view,
-        {0, 0, 0, static_cast<uint32_t>(frame_width_ / 2),
-         static_cast<uint32_t>(chroma_height), 1});
-    queue_.submitCommands(update_cmd_buf_.finishList());
     current_software_slot_ = static_cast<int>(software_slot_cursor_);
     software_slot_cursor_ = (software_slot_cursor_ + 1) % software_slots_.size();
+    frame_update_pending_ = true;
     return true;
 }
 
-bool DKVideoRenderer::updateFrameMapping(AVFrame* frame)
+bool DKVideoRenderer::Configuration::updateFrameMapping(AVFrame* frame)
 {
     if (!frame || frame->format != AV_PIX_FMT_NVTEGRA || !frame->buf[0] ||
         frame->width != frame_width_ || frame->height != frame_height_)
@@ -432,16 +458,16 @@ bool DKVideoRenderer::updateFrameMapping(AVFrame* frame)
 
     if (index == current_mapping_)
         return true;
-    auto& active = *frame_mappings_[index];
-    bindDescriptors(active.luma_descriptor, active.chroma_descriptor);
-    queue_.submitCommands(update_cmd_buf_.finishList());
     current_mapping_ = index;
+    frame_update_pending_ = true;
     return true;
 }
 
 void DKVideoRenderer::draw(NVGcontext* vg, int width, int height, AVFrame* frame, int image_format)
 {
-    drawLatest(vg, width, height, frame, image_format, rendered_generation_ + 1);
+    const auto* active = configurations_.active();
+    drawLatest(vg, width, height, frame, image_format,
+               active ? active->rendered_generation_ + 1 : 1);
 }
 
 void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame* frame,
@@ -450,34 +476,89 @@ void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame*
     (void)vg;
     (void)image_format;
     const uint64_t started = monotonic_millis();
-    checkAndInitialize(width, height, frame);
-    if (!initialized_)
+    configurations_.releaseCompleted([](Configuration& configuration) {
+        return configuration.last_use_fence_.wait(0) == DkResult_Success;
+    });
+    auto* active = configurations_.active();
+    if (width > 0 && height > 0 && supported_frame(frame) &&
+        (!active || !active->matches(width, height, frame))) {
+        configurations_.replace(started, [&]() -> std::unique_ptr<Configuration> {
+            auto candidate = std::make_unique<Configuration>();
+            if (!candidate->initialize(width, height, frame, generation))
+                return nullptr;
+            return candidate;
+        });
+        active = configurations_.active();
+    }
+    if (!active || !active->drawLatest(frame, generation))
         return;
+    if (render_stats_.rendered_frames == 0)
+        render_stats_.measurement_start_timestamp = started;
+    render_stats_.total_render_time += monotonic_millis() - started;
+    render_stats_.rendered_frames++;
+}
+
+bool DKVideoRenderer::Configuration::prepareFrame(AVFrame* frame, uint64_t generation)
+{
+    if (!supported_frame(frame) || frame->width != frame_width_ ||
+        frame->height != frame_height_ ||
+        hardware_frames_ != (frame->format == AV_PIX_FMT_NVTEGRA))
+        return false;
+    bool updated = false;
+    if (hardware_frames_) {
+        if (submitted_frames_.retain(frame)) {
+            try {
+                updated = updateFrameMapping(frame);
+            } catch (const std::bad_alloc&) {
+            }
+            if (!updated)
+                submitted_frames_.discardLast();
+        }
+    } else {
+        updated = updateSoftwareFrame(frame);
+    }
+    if (updated)
+        rendered_generation_ = generation;
+    return updated;
+}
+
+bool DKVideoRenderer::Configuration::drawLatest(AVFrame* frame, uint64_t generation)
+{
     submitted_frames_.releaseCompleted([](dk::Fence& fence) {
         return fence.wait(0) == DkResult_Success;
     });
     const uint32_t command_slice = update_cmd_slice_;
-    bool updated = false;
     if (generation != rendered_generation_ &&
-        update_cmd_fences_[command_slice].wait(0) == DkResult_Success) {
+        update_cmd_fences_[command_slice].wait(0) == DkResult_Success)
+        prepareFrame(frame, generation);
+    if (frame_update_pending_) {
         if (hardware_frames_) {
-            if (submitted_frames_.retain(frame)) {
-                updated = updateFrameMapping(frame);
-                if (!updated)
-                    submitted_frames_.discardLast();
-            }
+            const auto& mapping = *frame_mappings_[current_mapping_];
+            bindDescriptors(mapping.luma_descriptor, mapping.chroma_descriptor);
         } else {
-            updated = updateSoftwareFrame(frame);
+            const auto& slot = software_slots_[current_software_slot_];
+            bindDescriptors(slot.luma_descriptor, slot.chroma_descriptor);
+            dk::ImageView luma_view{slot.luma};
+            dk::ImageView chroma_view{slot.chroma};
+            update_cmd_buf_.copyBufferToImage(
+                {slot.luma_upload.getGpuAddr(), 0, 0}, luma_view,
+                {0, 0, 0, static_cast<uint32_t>(frame_width_),
+                 static_cast<uint32_t>(frame_height_), 1});
+            update_cmd_buf_.copyBufferToImage(
+                {slot.chroma_upload.getGpuAddr(), 0, 0}, chroma_view,
+                {0, 0, 0, static_cast<uint32_t>(frame_width_ / 2),
+                 static_cast<uint32_t>(frame_height_ / 2), 1});
         }
-        if (updated)
-            rendered_generation_ = generation;
+        queue_.submitCommands(update_cmd_buf_.finishList());
+        frame_update_pending_ = false;
     }
     if (!static_cmd_list_ || (hardware_frames_ ? current_mapping_ < 0 : current_software_slot_ < 0))
-        return;
+        return false;
     queue_.submitCommands(static_cmd_list_);
     dk::Fence completed {};
     queue_.signalFence(completed, true);
-    if (updated && update_cmd_slice_ != command_slice)
+    last_use_fence_ = completed;
+    if (update_cmd_slice_ != command_slice)
         update_cmd_fences_[command_slice] = completed;
     if (hardware_frames_) {
         frame_mappings_[current_mapping_]->last_use_fence = completed;
@@ -485,18 +566,21 @@ void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame*
     } else {
         software_slots_[current_software_slot_].last_use_fence = completed;
     }
-    if (render_stats_.rendered_frames == 0)
-        render_stats_.measurement_start_timestamp = started;
-    render_stats_.total_render_time += monotonic_millis() - started;
-    render_stats_.rendered_frames++;
+    return true;
 }
 
 VideoRenderStats* DKVideoRenderer::video_render_stats()
 {
-    render_stats_.retained_surfaces = static_cast<uint32_t>(submitted_frames_.size());
-    render_stats_.surface_mappings = hardware_frames_
-        ? static_cast<uint32_t>(frame_mappings_.size())
-        : static_cast<uint32_t>(software_slots_.size());
+    render_stats_.retained_surfaces = 0;
+    render_stats_.surface_mappings = 0;
+    for (const auto* configuration : {configurations_.active(), configurations_.retiring()}) {
+        if (!configuration)
+            continue;
+        render_stats_.retained_surfaces += static_cast<uint32_t>(configuration->submitted_frames_.size());
+        render_stats_.surface_mappings += configuration->hardware_frames_
+            ? static_cast<uint32_t>(configuration->frame_mappings_.size())
+            : static_cast<uint32_t>(configuration->software_slots_.size());
+    }
     const uint64_t elapsed = monotonic_millis() - render_stats_.measurement_start_timestamp;
     render_stats_.rendered_fps = elapsed > 0
         ? static_cast<float>(render_stats_.rendered_frames) * 1000.0f / elapsed : 0.0f;

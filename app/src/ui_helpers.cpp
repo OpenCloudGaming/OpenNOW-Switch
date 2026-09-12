@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <thread>
 #include "StreamView.hpp"
@@ -20,6 +21,98 @@ namespace opennow
 {
 namespace
 {
+
+class LaunchAnimationView;
+
+struct QueueSessionState
+{
+    CloudLaunchState launch;
+    GfnClient client;
+    AuthSession auth;
+    std::string game_title;
+    std::string title = "Checking your NVIDIA account";
+    std::string detail = "Validating the saved session before requesting a cloud rig.";
+    int stage = 0;
+    int position = -1;
+    float progress = 0.08f;
+    bool minimized = false;
+    bool notified = false;
+    brls::Dialog* dialog = nullptr;
+    LaunchAnimationView* animation = nullptr;
+    brls::Label* stage_label = nullptr;
+    brls::Label* detail_label = nullptr;
+};
+
+std::shared_ptr<QueueSessionState> active_queue;
+
+void CancelQueue(const std::shared_ptr<QueueSessionState>& state);
+
+class QueueDialog final : public brls::Dialog
+{
+  public:
+    QueueDialog(brls::Box* content, std::shared_ptr<QueueSessionState> state)
+        : brls::Dialog(content), state_(std::move(state))
+    {
+        state_->dialog = this;
+    }
+
+    ~QueueDialog() override
+    {
+        Detach();
+    }
+
+    void dismiss(std::function<void(void)> callback = [] {}) override
+    {
+        Detach();
+        brls::Dialog::dismiss(std::move(callback));
+    }
+
+    void AddCancelButton(const std::string& label)
+    {
+        addButton(label, [] {});
+        button2->registerClickAction([this](brls::View*) {
+            CancelQueue(state_);
+            dismiss();
+            return true;
+        });
+    }
+
+  private:
+    void Detach()
+    {
+        if (state_->dialog != this)
+            return;
+        state_->dialog = nullptr;
+        state_->animation = nullptr;
+        state_->stage_label = nullptr;
+        state_->detail_label = nullptr;
+        state_->minimized = state_->launch.running();
+    }
+
+    std::shared_ptr<QueueSessionState> state_;
+};
+
+void FinishQueue(const std::shared_ptr<QueueSessionState>& state)
+{
+    if (active_queue != state)
+        return;
+    active_queue.reset();
+#ifdef __SWITCH__
+    brls::Application::getPlatform()->disableScreenDimming(false);
+#endif
+}
+
+void CancelQueue(const std::shared_ptr<QueueSessionState>& state)
+{
+    std::string session_id = state->launch.Cancel();
+    FinishQueue(state);
+    if (!session_id.empty()) {
+        brls::async([client = state->client, auth = state->auth,
+                     session_id = std::move(session_id)]() mutable {
+            try { client.StopSession(auth, session_id); } catch (...) {}
+        });
+    }
+}
 
 class LaunchAnimationView final : public brls::View
 {
@@ -177,6 +270,53 @@ std::string SessionStatusText(const SessionInfo& info)
 
 } // namespace
 
+int GetCurrentQueuePosition()
+{
+    return active_queue && active_queue->launch.running() ? active_queue->position : -1;
+}
+
+std::string GetCurrentQueueTitle()
+{
+    return active_queue ? active_queue->title : "Queue";
+}
+
+bool IsQueueMinimized()
+{
+    return active_queue && active_queue->launch.running() && active_queue->minimized;
+}
+
+void RestoreMinimizedQueueDialog()
+{
+    auto state = active_queue;
+    if (!state || !state->launch.running() || !state->minimized || state->dialog)
+        return;
+
+    auto* box = new brls::Box(brls::Axis::COLUMN);
+    box->setWidth(520);
+    box->setPadding(24, 24, 24, 24);
+    box->setBackgroundColor(nvgRGB(24, 28, 33));
+    auto* game = new brls::Label();
+    game->setText(state->game_title);
+    game->setFontSize(20);
+    game->setTextColor(nvgRGB(245, 248, 250));
+    game->setMarginBottom(10);
+    box->addView(game);
+    state->stage_label = new brls::Label();
+    state->stage_label->setMarginBottom(8);
+    box->addView(state->stage_label);
+    state->detail_label = new brls::Label();
+    state->detail_label->setTextColor(nvgRGB(151, 159, 170));
+    state->detail_label->setMarginBottom(12);
+    box->addView(state->detail_label);
+    SetLaunchProgress(nullptr, state->stage_label, state->detail_label,
+                      state->stage, state->title, state->detail, state->progress);
+    auto* dialog = new QueueDialog(box, state);
+    dialog->addButton(Tr("Stay in queue"), [] {});
+    dialog->AddCancelButton(Tr("Cancel queue"));
+    dialog->setCancelable(true);
+    dialog->open();
+}
+
 void ShowDialog(const std::string& title, const std::string& body)
 {
     auto* dialog = new brls::Dialog(Tr(title) + "\n\n" + Tr(body));
@@ -203,6 +343,12 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                               const std::string& history_game_id,
                               const std::string& image_url)
 {
+    if (active_queue && active_queue->launch.running()) {
+        RestoreMinimizedQueueDialog();
+        brls::Application::notify(Tr("Cancel the current queue before starting another game."));
+        return;
+    }
+
     auto* box = new brls::Box(brls::Axis::COLUMN);
     box->setWidth(720);
     box->setPadding(24, 36, 18, 36);
@@ -270,9 +416,6 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                       "Checking your NVIDIA account",
                       "Validating the saved session before requesting a cloud rig.", 0.08f);
 
-    auto* dialog = new brls::Dialog(box);
-    dialog->setCancelable(false);
-
     GfnClient bg_client = client;
     AuthSession bg_auth = auth;
     std::string bg_app_id = launch_app_id;
@@ -280,45 +423,69 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     std::string bg_internal_title = internal_title.empty() ? title : internal_title;
     std::string bg_history_game_id = history_game_id.empty() ? launch_app_id : history_game_id;
 
-    auto launch_state = std::make_shared<CloudLaunchState>();
+    auto launch_state = std::make_shared<QueueSessionState>();
+    launch_state->client = client;
+    launch_state->auth = auth;
+    launch_state->game_title = title;
+    launch_state->animation = animation;
+    launch_state->stage_label = stage_label;
+    launch_state->detail_label = detail_label;
+    auto* dialog = new QueueDialog(box, launch_state);
+    dialog->setCancelable(false);
+    active_queue = launch_state;
     const auto account_generation = AppState::Instance().session_generation();
 
-    dialog->addButton(Tr("Cancel session"), [launch_state, bg_client, bg_auth]() {
-        std::string session_id = launch_state->Cancel();
-        if (!session_id.empty()) {
-            brls::async([bg_client, bg_auth, sid = std::move(session_id)]() mutable {
-                try { bg_client.StopSession(bg_auth, sid); } catch (...) {}
-            });
-        }
+    dialog->addButton(Tr("Minimize - browse"), [launch_state]() {
+        if (launch_state->launch.running())
+            brls::Application::notify(Tr("Queue minimized. Tap the Queue chip to return."));
     });
+    dialog->AddCancelButton(Tr("Cancel session"));
     dialog->open();
+#ifdef __SWITCH__
+    brls::Application::getPlatform()->disableScreenDimming(true);
+#endif
 
-    brls::async([dialog, animation, stage_label, detail_label,
-                 bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title,
+    brls::async([bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title,
                  bg_history_game_id, launch_state, account_generation]() mutable {
-        auto post_progress = [animation, stage_label, detail_label, launch_state](
-            int stage, std::string title, std::string detail, float progress) {
-            brls::sync([animation, stage_label, detail_label, launch_state,
-                        stage, title = std::move(title), detail = std::move(detail), progress]() {
-                if (!launch_state->running())
+        auto post_progress = [launch_state, account_generation](
+            int stage, std::string title, std::string detail, float progress, int position = -1) {
+            brls::sync([launch_state, account_generation, stage,
+                        title = std::move(title), detail = std::move(detail), progress, position]() {
+                if (!launch_state->launch.running())
                     return;
-                SetLaunchProgress(animation, stage_label, detail_label,
+                if (!AppState::Instance().IsCurrentSession(account_generation)) {
+                    if (launch_state->dialog)
+                        launch_state->dialog->dismiss();
+                    CancelQueue(launch_state);
+                    return;
+                }
+                launch_state->stage = stage;
+                launch_state->title = title;
+                launch_state->detail = detail;
+                launch_state->progress = progress;
+                launch_state->position = position;
+                SetLaunchProgress(launch_state->animation, launch_state->stage_label, launch_state->detail_label,
                                   stage, title, detail, progress);
+                if (launch_state->minimized && !launch_state->notified && position > 0 &&
+                    position <= LoadStreamSettings().queue_notify_threshold) {
+                    launch_state->notified = true;
+                    brls::Application::notify(Tr("Queue almost ready. Tap the Queue chip to return."));
+                }
             });
         };
         try {
-            if (!launch_state->running())
+            if (!launch_state->launch.running())
                 return;
             post_progress(0, "Checking your NVIDIA account",
                           "Renewing authorization and checking previous sessions.", 0.10f);
             bg_client.CleanupStaleCloudSession(bg_auth);
-            if (!launch_state->running())
+            if (!launch_state->launch.running())
                 return;
             post_progress(1, "Requesting a cloud rig",
                           "GeForce NOW is allocating hardware for your game.", 0.24f);
             SessionInfo info = bg_client.StartSession(
                 bg_auth, bg_app_id, bg_store, bg_internal_title);
-            if (!launch_state->Adopt(info.session_id)) {
+            if (!launch_state->launch.Adopt(info.session_id)) {
                 try { bg_client.StopSession(bg_auth, info.session_id); } catch (...) {}
                 return;
             }
@@ -354,10 +521,10 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                     queue_title = info.app_patching ? "Updating the game" : "Preparing your cloud rig";
                     queue_detail = SessionStatusText(info);
                 }
-                post_progress(1, queue_title, queue_detail, queue_progress);
+                post_progress(1, queue_title, queue_detail, queue_progress, info.queue_position);
 
                 std::this_thread::sleep_for(std::chrono::seconds(5));
-                if (!launch_state->running()) return;
+                if (!launch_state->launch.running()) return;
                 info = bg_client.PollSession(bg_auth, info.session_id);
             }
 
@@ -368,9 +535,16 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             post_progress(2, "Connecting to the streaming server",
                           "The rig is ready. Configuring the secure network path.", 0.72f);
             brls::sync([=]() {
-                if (!launch_state->running()) return;
+                if (!launch_state->launch.running()) return;
+                if (!AppState::Instance().IsCurrentSession(account_generation)) {
+                    if (launch_state->dialog)
+                        launch_state->dialog->dismiss();
+                    CancelQueue(launch_state);
+                    return;
+                }
                 try {
-                    SetLaunchProgress(animation, stage_label, detail_label, 3,
+                    SetLaunchProgress(launch_state->animation, launch_state->stage_label,
+                                      launch_state->detail_label, 3,
                                       "Starting the video stream",
                                       "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
 
@@ -387,7 +561,9 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                     brls::Logger::info("ICE servers: {}", info.ice_servers.size());
 
                     std::string jwt_token = bg_auth.tokens.id_token.empty() ? bg_auth.tokens.access_token : bg_auth.tokens.id_token;
-                    dialog->close();
+                    if (launch_state->dialog)
+                        launch_state->dialog->dismiss();
+                    FinishQueue(launch_state);
                     brls::Application::pushActivity(new brls::Activity(StreamView::create(
                         info.signaling_url,
                         jwt_token,
@@ -398,34 +574,35 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                         bg_client,
                         bg_auth,
                         bg_internal_title)));
-                    launch_state->TransferToStream();
+                    launch_state->launch.TransferToStream();
                 } catch (const std::exception& e) {
-                    const std::string failed_session = launch_state->Cancel();
-                    if (!failed_session.empty()) {
-                        brls::async([bg_client, bg_auth, failed_session]() mutable {
-                            try { bg_client.StopSession(bg_auth, failed_session); } catch (...) {}
-                        });
-                    }
+                    CancelQueue(launch_state);
                     ShowError("Stream startup failed", e.what());
                 }
             });
 
         } catch (const std::exception& e) {
-            const std::string failed_session = launch_state->TakeForCleanup();
+            const std::string failed_session = launch_state->launch.TakeForCleanup();
             if (!failed_session.empty()) {
                 try { bg_client.StopSession(bg_auth, failed_session); } catch (...) {}
             }
             const session_error::Presentation error = session_error::Present(e.what());
             brls::sync([=]() {
-                if (!launch_state->running()) return;
-                animation->SetState(0, 0.04f);
-                stage_label->setText(Tr(error.title));
-                stage_label->setFontSize(24);
-                stage_label->setTextColor(nvgRGB(255, 125, 132));
-                detail_label->setFontSize(17);
-                detail_label->setText(
-                    Tr(error.body) + "\n\n" + Tr("Press B to return to the game page."));
-                dialog->setCancelable(true);
+                if (!launch_state->launch.running()) return;
+                CancelQueue(launch_state);
+                if (launch_state->animation)
+                    launch_state->animation->SetState(0, 0.04f);
+                if (launch_state->stage_label) {
+                    launch_state->stage_label->setText(Tr(error.title));
+                    launch_state->stage_label->setFontSize(24);
+                    launch_state->stage_label->setTextColor(nvgRGB(255, 125, 132));
+                    launch_state->detail_label->setFontSize(17);
+                    launch_state->detail_label->setText(
+                        Tr(error.body) + "\n\n" + Tr("Press B to return to the game page."));
+                    launch_state->dialog->setCancelable(true);
+                } else {
+                    brls::Application::notify(Tr(error.title) + ": " + Tr(error.body));
+                }
             });
         }
     });

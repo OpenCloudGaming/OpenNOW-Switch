@@ -34,6 +34,7 @@ run_cpp localization app/src/localization.cpp
 run_cpp nte_credentials app/src/nte_credentials.cpp
 run_cpp play_history_policy app/src/play_history.cpp -ljansson
 run_cpp stream_settings_persistence app/src/stream_settings.cpp app/src/localization.cpp -ljansson
+run_cpp queue_notify_settings app/src/stream_settings.cpp app/src/localization.cpp -ljansson
 run_cpp app_state_session_generation app/src/app_state.cpp
 run_cpp auth_client_token_refresh -ffunction-sections -fdata-sections -Wl,--gc-sections \
     app/src/gfn/authentication.cpp app/src/gfn/shared.cpp -ljansson

@@ -92,6 +92,7 @@ class SettingsTab : public brls::Box
     bool ToggleControllerLayout(brls::View* view);
     bool ToggleAudio(brls::View* view);
     bool CycleAudioVolume(brls::View* view);
+    bool CycleQueueNotifyThreshold(brls::View* view);
     bool ChooseInterfaceLanguage(brls::View* view);
     bool ShowHomeScreenHelp(brls::View* view);
 

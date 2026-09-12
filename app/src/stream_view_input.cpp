@@ -83,7 +83,7 @@ void StreamView::HandleInlineKeyboardInput(
     const bool touch_down = touch != touches.end();
     int touch_shortcut = -1;
     if (touch_down && !keyboard_touch_was_down_) {
-        for (std::size_t i = 0; i < opennow::input::kKeyboardShortcutControls.size(); ++i) {
+        for (std::size_t i = 0; i < opennow::input::kKeyboardTouchControls.size(); ++i) {
             if (opennow::input::KeyboardShortcutBounds(i, x, y, width).Contains(
                     touch->position.x, touch->position.y)) {
                 touch_shortcut = static_cast<int>(i);
@@ -98,7 +98,7 @@ void StreamView::HandleInlineKeyboardInput(
     else if (b_down && !keyboard_b_was_down_)
         HideInlineKeyboard(false);
     else if (shortcut >= 0 || touch_shortcut >= 0)
-        SendKeyboardShortcut(opennow::input::kKeyboardShortcutControls[
+        SendKeyboardShortcut(opennow::input::kKeyboardTouchControls[
             shortcut >= 0 ? shortcut : touch_shortcut].shortcut);
     keyboard_b_was_down_ = b_down;
     keyboard_plus_was_down_ = plus_down;
@@ -110,7 +110,7 @@ void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float w
 
     nvgSave(vg);
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x + 8.0f, y + 8.0f, width - 16.0f, 192.0f, 12.0f);
+    nvgRoundedRect(vg, x + 8.0f, y + 8.0f, width - 16.0f, 256.0f, 12.0f);
     nvgFillColor(vg, nvgRGBA(13, 19, 22, 242));
     nvgFill(vg);
     nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
@@ -122,8 +122,8 @@ void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float w
     nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
     nvgText(vg, x + width - 20.0f, y + 29.0f,
             "Tap a key or use its chord  |  PLUS Enter  |  B Close", nullptr);
-    for (std::size_t i = 0; i < opennow::input::kKeyboardShortcutControls.size(); ++i) {
-        const auto& control = opennow::input::kKeyboardShortcutControls[i];
+    for (std::size_t i = 0; i < opennow::input::kKeyboardTouchControls.size(); ++i) {
+        const auto& control = opennow::input::kKeyboardTouchControls[i];
         const auto rect = opennow::input::KeyboardShortcutBounds(i, x, y, width);
         nvgBeginPath(vg);
         nvgRoundedRect(vg, rect.x, rect.y, rect.width, rect.height, 7.0f);
@@ -142,8 +142,8 @@ void StreamView::DrawKeyboardShortcuts(NVGcontext* vg, float x, float y, float w
     }
     nvgFontSize(vg, 12.0f);
     nvgFillColor(vg, nvgRGB(188, 198, 202));
-    nvgText(vg, x + width * 0.5f, y + 184.0f,
-            "Win+D Desktop  /  Win+E Explorer  /  Win+R Run  /  Win+Tab Task view", nullptr);
+    nvgText(vg, x + width * 0.5f, y + 248.0f,
+            "Win+D Desktop  /  Win+E Explorer  /  Win+R Run  /  Win+Tab Task view  /  Bksp + Del + Arrows work on existing text", nullptr);
     nvgRestore(vg);
 }
 
@@ -153,8 +153,8 @@ void StreamView::SendNteClick(float normalized_x, float normalized_y) {
         return;
     }
 
-    const int stream_width = std::max(1, session_->stream_width());
-    const int stream_height = std::max(1, session_->stream_height());
+    const int stream_width = std::max(1, session_->negotiated_stream_width());
+    const int stream_height = std::max(1, session_->negotiated_stream_height());
     if (!touch_pointer_initialized_ ||
         touch_pointer_stream_width_ != stream_width ||
         touch_pointer_stream_height_ != stream_height) {
@@ -182,8 +182,8 @@ void StreamView::ReanchorRemotePointer(float target_x, float target_y) {
     if (!session_)
         return;
 
-    const int stream_width = std::max(1, session_->stream_width());
-    const int stream_height = std::max(1, session_->stream_height());
+    const int stream_width = std::max(1, session_->negotiated_stream_width());
+    const int stream_height = std::max(1, session_->negotiated_stream_height());
     target_x = std::clamp(target_x, 0.0f, static_cast<float>(stream_width - 1));
     target_y = std::clamp(target_y, 0.0f, static_cast<float>(stream_height - 1));
 

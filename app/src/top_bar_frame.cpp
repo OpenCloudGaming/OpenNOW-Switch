@@ -7,6 +7,7 @@
 #include "membership_tier_style.hpp"
 #include "subscription_display.hpp"
 #include "ui_refresh_policy.hpp"
+#include "ui_helpers.hpp"
 #include <borealis/core/application.hpp>
 #include <borealis/core/theme.hpp>
 #include <borealis/core/logger.hpp>
@@ -21,6 +22,7 @@ enum class SubscriptionIcon
 {
     Timer,
     HardDrive,
+    Queue,
 };
 
 class SubscriptionIconView final : public brls::View
@@ -57,6 +59,19 @@ class SubscriptionIconView final : public brls::View
             nvgMoveTo(vg, px(12), py(14));
             nvgLineTo(vg, px(15), py(11));
             nvgCircle(vg, px(12), py(14), 8.0f * scale);
+        }
+        else if (icon_ == SubscriptionIcon::Queue)
+        {
+            // Queue icon — three people + clock
+            nvgCircle(vg, px(12), py(7), 3.0f * scale);
+            nvgMoveTo(vg, px(12), py(10));
+            nvgLineTo(vg, px(12), py(14));
+            nvgCircle(vg, px(7), py(9), 2.2f * scale);
+            nvgCircle(vg, px(17), py(9), 2.2f * scale);
+            nvgMoveTo(vg, px(7), py(11.5f));
+            nvgLineTo(vg, px(7), py(14));
+            nvgMoveTo(vg, px(17), py(11.5f));
+            nvgLineTo(vg, px(17), py(14));
         }
         else
         {
@@ -178,6 +193,15 @@ TopBarFrame::TopBarFrame()
         SubscriptionIcon::Timer, time_remaining_label_));
     subscription_container_->addView(MakeSubscriptionChip(
         SubscriptionIcon::HardDrive, storage_remaining_label_));
+    queue_chip_ = MakeSubscriptionChip(
+        SubscriptionIcon::Queue, queue_position_label_);
+    queue_chip_->setFocusable(true);
+    queue_chip_->registerClickAction([](brls::View* v){
+        if (IsQueueMinimized()) RestoreMinimizedQueueDialog();
+        return true;
+    });
+    queue_chip_->setVisibility(brls::Visibility::GONE);
+    subscription_container_->addView(queue_chip_);
     status_container->addView(subscription_container_);
 
     account_container_ = new brls::Box(brls::Axis::ROW);
@@ -251,6 +275,21 @@ void TopBarFrame::draw(NVGcontext* vg, float x, float y, float width, float heig
                        brls::Style style, brls::FrameContext* ctx)
 {
     UpdateStatusBar();
+    // - + chord restores the minimized queue dialog (light + live).
+    // Deferred via sync: opening a dialog inside draw() corrupts the
+    // frame walk and freezes input after closing it.
+    {
+        brls::ControllerState st{};
+        brls::Application::getPlatform()->getInputManager()->updateUnifiedControllerState(&st);
+        static bool was_down = false;
+        const bool chord = st.buttons[brls::BUTTON_BACK] && st.buttons[brls::BUTTON_START];
+        if (chord && !was_down && IsQueueMinimized()) {
+            was_down = true;
+            brls::sync([](){ RestoreMinimizedQueueDialog(); });
+        } else if (!chord) {
+            was_down = false;
+        }
+    }
     brls::Box::draw(vg, x, y, width, height, style, ctx);
 }
 
@@ -430,7 +469,10 @@ void TopBarFrame::UpdateStatusBar(bool force)
             ? subscription::FormatStorageRemaining(session.subscription)
             : Tr("None"))
         : "--";
-    const std::string status = name + "\n" + detail + "\n" + time + "\n" + storage;
+    const int qpos = GetCurrentQueuePosition();
+    const bool queue_active = IsQueueMinimized() || qpos >= 0;
+    const std::string queue = qpos > 0 ? std::to_string(qpos) : (queue_active ? "..." : "");
+    const std::string status = name + "\n" + detail + "\n" + time + "\n" + storage + "\n" + queue;
     if (status != displayed_status_)
     {
         account_name_label_->setText(name);
@@ -438,6 +480,14 @@ void TopBarFrame::UpdateStatusBar(bool force)
         account_detail_label_->setTextColor(membership::TextColor(tier));
         time_remaining_label_->setText(time);
         storage_remaining_label_->setText(storage);
+        if (queue_chip_) {
+            if (queue_active) {
+                queue_position_label_->setText(queue);
+                queue_chip_->setVisibility(brls::Visibility::VISIBLE);
+            } else {
+                queue_chip_->setVisibility(brls::Visibility::GONE);
+            }
+        }
         subscription_container_->setVisibility(brls::Visibility::VISIBLE);
         displayed_status_ = status;
     }

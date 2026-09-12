@@ -24,6 +24,10 @@ enum class KeyboardShortcut
     WindowsExplorer,
     WindowsRun,
     WindowsTaskView,
+    Backspace,
+    Delete,
+    ArrowLeft,
+    ArrowRight,
 };
 
 struct KeyboardShortcutControl
@@ -43,6 +47,18 @@ inline constexpr std::array<KeyboardShortcutControl, 8> kKeyboardShortcutControl
     {KeyboardShortcut::WindowsRun, "Win + R", "MINUS + RIGHT"},
     {KeyboardShortcut::WindowsTaskView, "Win + Tab", "MINUS + DOWN"},
 }};
+
+inline constexpr auto kKeyboardTouchControls = [] {
+    std::array<KeyboardShortcutControl, kKeyboardShortcutControls.size() + 4> controls {};
+    std::size_t index = 0;
+    for (const auto& control : kKeyboardShortcutControls)
+        controls[index++] = control;
+    controls[index++] = {KeyboardShortcut::Backspace, "Bksp", "TAP"};
+    controls[index++] = {KeyboardShortcut::Delete, "Del", "TAP"};
+    controls[index++] = {KeyboardShortcut::ArrowLeft, "Left", "TAP"};
+    controls[index] = {KeyboardShortcut::ArrowRight, "Right", "TAP"};
+    return controls;
+}();
 
 inline int PollKeyboardShortcut(std::uint16_t buttons, bool& latched)
 {
@@ -71,6 +87,10 @@ inline KeyboardStroke MapKeyboardShortcut(KeyboardShortcut shortcut)
         case KeyboardShortcut::WindowsExplorer: return {'E', 0x12, kMeta};
         case KeyboardShortcut::WindowsRun: return {'R', 0x13, kMeta};
         case KeyboardShortcut::WindowsTaskView: return {0x09, 0x0f, kMeta};
+        case KeyboardShortcut::Backspace: return {0x08, 0x0e, 0};
+        case KeyboardShortcut::Delete: return {0x2e, 0x53, 0};
+        case KeyboardShortcut::ArrowLeft: return {0x25, 0x4b, 0};
+        case KeyboardShortcut::ArrowRight: return {0x27, 0x4d, 0};
     }
 
     return {};

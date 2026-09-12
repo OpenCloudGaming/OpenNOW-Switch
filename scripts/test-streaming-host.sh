@@ -33,7 +33,8 @@ run_c() {
 
 for name in audio_latency_policy audio_playback_timeline audio_rtp_utils controller_assignment_policy \
     controller_delivery_policy controller_input_capture controller_layout decode_queue_policy decode_recovery_state \
-    keyboard_input_policy keyboard_shortcut_controls network_loop_policy \
+    gpu_configuration_queue \
+    keyboard_input_policy keyboard_shortcut_controls keyboard_touch_controls network_loop_policy \
     network_quality_policy sender_report_cache startup_timeout_policy stream_end_policy stream_overlay_policy \
     stream_settings_policy software_yuv_upload touch_mapping video_frame_timing \
     video_quality_policy websocket_write_queue; do
@@ -57,6 +58,10 @@ run_cpp websocket_handshake -Iextern/libpeer/third_party/mbedtls/include -Wl,--g
 run_cpp signaling_diagnostics -ljansson
 run_cpp av_frame_queue -Itests/stream_stubs app/src/stream/ffmpeg/AVFrameHolder.cpp -lavcodec -lavutil
 run_cpp gpu_frame_queue -lavutil
+python3 tests/run_deko_renderer_reconfiguration_test.py
+printf 'PASS deko_renderer_reconfiguration\n'
+python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_color_range_test.cpp
+printf 'PASS deko_renderer_color_range\n'
 run_cpp audio_pipeline -Itests/stream_stubs -Iextern/libpeer/src app/src/stream/audio/AudioPipeline.cpp
 for scenario in timeline ssrc; do
     "$out/audio_pipeline" "$scenario"

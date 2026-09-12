@@ -33,17 +33,23 @@ software-only decoder reset remain bounded.
 The renderer previously retired mappings according to decoded-frame
 generations, which can jump when frames are dropped. It now checks GPU
 completion fences before reusing mappings, uploads, or mutable command
-storage. It retains at most eight hardware frames and holds a reference to
-the allocation behind each cached mapping. A busy resource causes a redraw
-of the previous frame instead of a gameplay-path `waitIdle` or queue growth.
+storage. Each render configuration retains at most eight hardware frames and
+holds a reference to the allocation behind each cached mapping. A busy resource
+causes a redraw of the previous frame instead of a gameplay-path `waitIdle` or
+queue growth.
 `gpu_frame_queue_test.cpp` checks ownership with completion tokens, not a GPU.
 
-Frames with dimensions incompatible with the initialized Deko3D layouts are
-rejected before copying or mapping. This prevents a cached larger layout from
-reading smaller replacement planes. Live SPS resolution renegotiation is not
-implemented; a changed layout retains the previous image and needs a stream
-restart. GPU fence progress, dynamic geometry, and dock/undock still need
-hardware acceptance tests.
+Frame-size, display-size, and hardware/software transitions now build a complete
+replacement configuration before changing the active one. The previous
+configuration remains alive until its final draw fence completes. Ownership is
+bounded to one active configuration and one replacement or retiring
+configuration. A failed allocation preserves the previous image and retries no
+more than once every 250 ms. Frames incompatible with that image's layouts are
+never copied into them. `gpu_configuration_queue_test.cpp` checks replacement,
+failure recovery, and deferred retirement. The actual-renderer host test injects
+failures at 26 software and 11 hardware allocation sites during initialization
+and replacement, with stubbed GPU completion. GPU fence progress, live SPS
+changes, and dock/undock still need hardware acceptance tests.
 
 Audio used one RTP-to-played-sample offset even when output packets were
 dropped. A real-pipeline host reproduction accumulated a 40 ms error after
@@ -130,6 +136,14 @@ allocation; cancel after publication claims it exactly once. Errors after
 allocation also release it. `cloud_launch_state_test.cpp` covers both orderings
 and concurrent cancellation. This does not implement automatic rig recovery
 after network loss.
+
+Minimized queues use the same allocation owner. Their position, progress, and
+dialog bindings are updated on the UI thread. Dialog dismissal detaches view
+pointers before the closing transition, and Cancel claims the allocation before
+that transition starts. Only one launch can queue at a time; stale callbacks
+cannot clear a newer queue or launch a stream after an account change. The queue
+chip remains available before NVIDIA reports a position, and the configurable
+near-ready reminder fires once per launch.
 
 ## Accounts and settings
 
@@ -259,8 +273,8 @@ during fetches, cache clear during downloads, and exit during a stalled
 request. Check the affected console's firmware and UTC time when reproducing
 the certificate failure.
 
-Remaining product limitations include live SPS layout changes, a decoded-image
-pixel budget and disk-cache quota, offline catalog freshness, complete live
+Remaining product limitations include a decoded-image pixel budget and
+disk-cache quota, offline catalog freshness, complete live
 localization, and automatic cloud-rig recovery. Rig recovery must separate
 local teardown from remote DELETE and transfer allocation ownership before
 changing today's stale-session cleanup. None of these is claimed complete.
