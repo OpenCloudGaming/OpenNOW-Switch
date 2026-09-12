@@ -34,7 +34,7 @@ void AppendInputLog(const std::string& line);
 void AppendStreamLog(const std::string& line);
 void ResetStreamTraceLog();
 void AppendTraceLog(const std::string& line);
-void AppendTraceBlock(const std::string& title, const std::string& body);
+void AppendSdpSummary(const std::string& title, const std::string& body);
 std::string PreviewText(const std::string& value, size_t max_chars = 160);
 
 bool InputEncodingSelfTest();

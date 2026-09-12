@@ -212,10 +212,9 @@ void SettingsTab::BuildAppPage()
         [this](brls::View* view) { return ShowHomeScreenHelp(view); }));
     content_container_->addView(shortcuts);
 
-    const CoverImageCacheStats images = InspectCoverImageCache();
     auto* cache = MakeSection("Storage", "Cover artwork is cached to keep the library responsive.");
-    AddInfoLine(cache, "Cached covers", std::to_string(images.files));
-    AddInfoLine(cache, "Disk usage", FormatBytes(images.bytes));
+    cover_cache_files_ = AddInfoLine(cache, "Cached covers", "--");
+    cover_cache_bytes_ = AddInfoLine(cache, "Disk usage", "--");
     cache->addView(MakeActionRow(
         "Clear cover artwork", "Covers will download again when needed.", "Clear",
         [this](brls::View* view) { return ClearCoverCache(view); }, true));
@@ -224,6 +223,8 @@ void SettingsTab::BuildAppPage()
     auto* about = MakeSection("OpenNOW", "Native GeForce NOW client for Nintendo Switch.");
     AddInfoLine(about, "Version", kAppVersion);
     content_container_->addView(about);
+    UpdateCoverCacheValues();
+    BeginCoverCacheWork(CacheAction::Inspect);
 }
 
 } // namespace opennow

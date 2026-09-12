@@ -1,4 +1,5 @@
 #include "main_activity.hpp"
+#include "startup_callback_policy.hpp"
 
 #include "app_state.hpp"
 #include "gfn_client.hpp"
@@ -158,52 +159,51 @@ class StartupGateView final : public brls::Box
         addView(card);
     }
 
-    void SetStatus(std::string title, std::string detail)
-    {
-        const auto alive = alive_;
-        brls::sync([this, alive, title = std::move(title), detail = std::move(detail)]() {
-            if (!alive->load() || finished_)
-                return;
-            status_label_->setText(Tr(title));
-            detail_label_->setText(Tr(detail));
-        });
-    }
-
-    void Complete(AuthSession session, const std::string& notification)
-    {
-        const auto alive = alive_;
-        brls::sync([this, alive, session = std::move(session), notification]() mutable {
-            if (!alive->load() || finished_)
-                return;
-            AppState::Instance().SetSession(std::move(session));
-            ShowMainTabs();
-            if (!notification.empty())
-                brls::Application::notify(notification);
-        });
-    }
-
     void BeginAuthentication(GfnClient client, AuthSession saved)
     {
         const auto alive = alive_;
-        brls::async([this, alive, client = std::move(client), saved = std::move(saved)]() mutable {
+        const auto set_status = [this, alive](std::string title, std::string detail) {
+            brls::sync(GuardStartupCallback(alive,
+                [this, title = std::move(title), detail = std::move(detail)] {
+                    if (finished_)
+                        return;
+                    status_label_->setText(Tr(title));
+                    detail_label_->setText(Tr(detail));
+                }));
+        };
+        const auto complete = [this, alive](AuthSession session, std::string notification) {
+            brls::sync(GuardStartupCallback(alive,
+                [this, session = std::move(session), notification = std::move(notification)]() mutable {
+                    if (finished_)
+                        return;
+                    AppState::Instance().SetSession(std::move(session));
+                    ShowMainTabs();
+                    if (!notification.empty())
+                        brls::Application::notify(notification);
+                }));
+        };
+        brls::async([alive, set_status, complete,
+                     client = std::move(client), saved = std::move(saved)]() mutable {
+            if (!alive->load())
+                return;
             try
             {
-                SetStatus("Checking saved session",
+                set_status("Checking saved session",
                           "Refreshing authorization and verifying account access.");
                 AuthSession verified = client.RecoverSavedSession(saved, true);
 
                 if (!alive->load())
                     return;
-                SetStatus("Account verified", "Loading OpenNOW and your saved profile.");
+                set_status("Account verified", "Loading OpenNOW and your saved profile.");
                 verified.reauthentication_required = false;
-                Complete(std::move(verified), "GeForce NOW account is ready");
+                complete(std::move(verified), "GeForce NOW account is ready");
             }
             catch (const ReauthenticationRequired& ex)
             {
                 if (!alive->load())
                     return;
                 saved.reauthentication_required = true;
-                Complete(std::move(saved),
+                complete(std::move(saved),
                          "The provider requires a new QR code sign-in from Settings");
                 brls::Logger::warning("Startup sign-in requires QR reconnection: {}", ex.what());
             }
@@ -216,7 +216,7 @@ class StartupGateView final : public brls::Box
                 const bool expired = saved.tokens.expires_at_ms > 0 &&
                     saved.tokens.expires_at_ms <= now_ms;
                 saved.reauthentication_required = saved.reauthentication_required || expired;
-                Complete(std::move(saved),
+                complete(std::move(saved),
                          expired
                             ? "Automatic sign-in could not finish; it will retry in OpenNOW"
                             : "Session check is temporarily unavailable; using the saved account");

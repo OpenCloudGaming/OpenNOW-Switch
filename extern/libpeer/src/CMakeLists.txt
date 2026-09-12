@@ -12,7 +12,7 @@ add_library(peer
 )
 
 if(PLATFORM_SWITCH)
-  target_compile_definitions(peer PRIVATE CONFIG_USE_USRSCTP=0)
+  target_compile_definitions(peer PRIVATE CONFIG_USE_USRSCTP=1)
 endif()
 
 include_directories(peer PUBLIC
@@ -42,4 +42,3 @@ install(TARGETS peer
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/
 )
-

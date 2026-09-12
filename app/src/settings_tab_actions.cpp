@@ -18,12 +18,70 @@ namespace opennow
 bool SettingsTab::ClearCoverCache(brls::View* view)
 {
     (void)view;
-
-    const size_t removed = ClearCoverImageCache();
-    RefreshSummary();
-    brls::sync([this] { RebuildCategory(); });
-    brls::Application::notify("Removed " + std::to_string(removed) + " cached cover files");
+    if (cover_cache_action_)
+        brls::Application::notify("Cover cache work is already running");
+    else
+        BeginCoverCacheWork(CacheAction::Clear);
     return true;
+}
+
+void SettingsTab::UpdateCoverCacheValues()
+{
+    if (!cover_cache_files_ || !cover_cache_bytes_)
+        return;
+
+    if (cover_cache_action_)
+    {
+        cover_cache_files_->setText(Tr(
+            *cover_cache_action_ == CacheAction::Clear ? "Clearing..." : "Checking..."));
+        cover_cache_bytes_->setText("--");
+        return;
+    }
+
+    cover_cache_files_->setText(
+        cover_cache_stats_ ? std::to_string(cover_cache_stats_->files) : "--");
+    cover_cache_bytes_->setText(
+        cover_cache_stats_ ? FormatBytes(cover_cache_stats_->bytes) : "--");
+}
+
+void SettingsTab::BeginCoverCacheWork(CacheAction action)
+{
+    if (cover_cache_action_)
+        return;
+
+    cover_cache_action_ = action;
+    UpdateCoverCacheValues();
+    const auto alive = alive_;
+    brls::async([this, alive, action] {
+        if (!alive->load())
+            return;
+        try
+        {
+            const size_t removed = action == CacheAction::Clear ? ClearCoverImageCache() : 0;
+            const auto stats = InspectCoverImageCache();
+            brls::sync([this, alive, action, removed, stats] {
+                if (!alive->load())
+                    return;
+                cover_cache_stats_ = stats;
+                cover_cache_action_.reset();
+                UpdateCoverCacheValues();
+                if (action == CacheAction::Clear)
+                    brls::Application::notify(
+                        "Removed " + std::to_string(removed) + " cached cover files");
+            });
+        }
+        catch (const std::exception& ex)
+        {
+            const std::string error = ex.what();
+            brls::sync([this, alive, error] {
+                if (!alive->load())
+                    return;
+                cover_cache_action_.reset();
+                UpdateCoverCacheValues();
+                ShowError("Cover Cache Failed", error);
+            });
+        }
+    }, false);
 }
 
 bool SettingsTab::CycleResolution(brls::View* view)
@@ -89,10 +147,26 @@ std::string SettingsTab::ServerLocationValue() const
     return value;
 }
 
+void SettingsTab::SyncServerLocationAccount()
+{
+    const auto generation = AppState::Instance().session_generation();
+    if (server_locations_generation_ == generation)
+        return;
+
+    server_locations_generation_ = generation;
+    server_locations_.clear();
+    server_locations_loaded_ = false;
+    server_locations_loading_ = false;
+    open_server_location_when_ready_ = false;
+    server_locations_error_.clear();
+}
+
 void SettingsTab::BeginServerLocationLoad(
     bool open_when_ready,
     bool notify_result)
 {
+    EnsureSessionLoaded();
+    SyncServerLocationAccount();
     if (server_locations_loading_)
     {
         open_server_location_when_ready_ =
@@ -102,7 +176,6 @@ void SettingsTab::BeginServerLocationLoad(
         return;
     }
 
-    EnsureSessionLoaded();
     auto& state = AppState::Instance();
     if (!state.HasSession())
     {
@@ -122,8 +195,12 @@ void SettingsTab::BeginServerLocationLoad(
 
     GfnClient client = client_;
     AuthSession session = *state.session();
+    const auto generation = state.session_generation();
+    const auto alive = alive_;
     brls::async(
-        [this, client, session = std::move(session), notify_result]() mutable {
+        [this, alive, generation, client, session = std::move(session), notify_result]() mutable {
+            if (!alive->load())
+                return;
             try
             {
                 std::vector<StreamRegion> regions =
@@ -142,14 +219,14 @@ void SettingsTab::BeginServerLocationLoad(
                     });
 
                 brls::sync(
-                    [this, session = std::move(session),
+                    [this, alive, generation, session = std::move(session),
                      regions = std::move(regions), notify_result]() mutable {
+                        if (!alive->load())
+                            return;
                         auto& current = AppState::Instance();
-                        if (current.HasSession() &&
-                            current.session()->user.user_id == session.user.user_id)
-                        {
-                            current.SetSession(std::move(session));
-                        }
+                        if (!current.IsCurrentSession(generation))
+                            return;
+                        current.SetSession(std::move(session));
 
                         server_locations_ = std::move(regions);
                         server_locations_loaded_ = true;
@@ -181,7 +258,9 @@ void SettingsTab::BeginServerLocationLoad(
             catch (const std::exception& ex)
             {
                 const std::string message = ex.what();
-                brls::sync([this, message, notify_result] {
+                brls::sync([this, alive, generation, message, notify_result] {
+                    if (!alive->load() || !AppState::Instance().IsCurrentSession(generation))
+                        return;
                     const bool should_open =
                         open_server_location_when_ready_ &&
                         category_ == Category::Stream;
@@ -210,6 +289,7 @@ void SettingsTab::BeginServerLocationLoad(
 bool SettingsTab::ChooseServerLocation(brls::View* view)
 {
     (void)view;
+    SyncServerLocationAccount();
     if (server_locations_loading_)
     {
         open_server_location_when_ready_ = true;
@@ -268,10 +348,12 @@ bool SettingsTab::ChooseServerLocation(brls::View* view)
             selected_index = static_cast<int>(index + 1);
     }
 
+    const auto alive = alive_;
+    const auto generation = AppState::Instance().session_generation();
     auto* dropdown = new brls::Dropdown(
         "Server location", labels,
-        [this, options = std::move(options)](int index) {
-            if (index < 0)
+        [this, alive, generation, options = std::move(options)](int index) {
+            if (!alive->load() || !AppState::Instance().IsCurrentSession(generation) || index < 0)
                 return;
             draft_settings_.region =
                 index == 0 || static_cast<size_t>(index) > options.size()
@@ -305,21 +387,29 @@ bool SettingsTab::ToggleCommunityProxy(brls::View* view)
         return true;
     }
 
+    const auto alive = alive_;
     auto* dialog = new brls::Dialog(
         "The Zortos community proxy is optional, shared and may be rate-limited or "
         "unavailable. It only routes NVIDIA catalog and session requests; streaming "
         "traffic stays direct.");
-    dialog->addButton("Enable proxy", [this]() {
+    dialog->addButton("Enable proxy", [this, alive]() {
+        if (!alive->load())
+            return;
+        const auto generation = ++proxy_request_generation_;
         community_proxy_provisioning_ = true;
         UpdateOptionValues();
         brls::Application::notify("Activating community proxy...");
 
         GfnClient client = client_;
-        brls::async([this, client]() mutable {
+        brls::async([this, alive, generation, client]() mutable {
+            if (!alive->load())
+                return;
             try
             {
                 std::string proxy_url = client.ProvisionCommunityProxy();
-                brls::sync([this, proxy_url = std::move(proxy_url)]() mutable {
+                brls::sync([this, alive, generation, proxy_url = std::move(proxy_url)]() mutable {
+                    if (!alive->load() || generation != proxy_request_generation_)
+                        return;
                     draft_settings_.community_proxy_url = std::move(proxy_url);
                     draft_settings_.community_proxy_enabled = true;
                     community_proxy_provisioning_ = false;
@@ -332,7 +422,9 @@ bool SettingsTab::ToggleCommunityProxy(brls::View* view)
             catch (const std::exception& ex)
             {
                 const std::string message = ex.what();
-                brls::sync([this, message] {
+                brls::sync([this, alive, generation, message] {
+                    if (!alive->load() || generation != proxy_request_generation_)
+                        return;
                     community_proxy_provisioning_ = false;
                     UpdateOptionValues();
                     ShowError("Community Proxy Failed", message);
@@ -377,7 +469,9 @@ bool SettingsTab::ChooseGameLanguage(brls::View* view)
 
     auto* dropdown = new brls::Dropdown(
         "Game language", labels,
-        [this](int index) {
+        [this, alive = alive_](int index) {
+            if (!alive->load())
+                return;
             const auto& languages = GameLanguageOptions();
             if (index < 0 || static_cast<size_t>(index) >= languages.size())
                 return;
@@ -426,7 +520,9 @@ bool SettingsTab::ChooseInterfaceLanguage(brls::View* view)
 
     auto* dropdown = new brls::Dropdown(
         Tr("Language"), labels,
-        [this](int index) {
+        [this, alive = alive_](int index) {
+            if (!alive->load())
+                return;
             const auto& languages = InterfaceLanguageOptions();
             if (index < 0 || static_cast<size_t>(index) >= languages.size())
                 return;

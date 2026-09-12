@@ -9,6 +9,8 @@
 namespace opennow
 {
 
+class CachedImage;
+
 class TopBarFrame : public brls::Box
 {
   public:
@@ -33,7 +35,7 @@ class TopBarFrame : public brls::Box
     brls::Box* content_container_;
     brls::Box* account_container_;
     brls::Box* subscription_container_;
-    brls::Image* avatar_image_;
+    CachedImage* avatar_image_;
     brls::Label* time_remaining_label_;
     brls::Label* storage_remaining_label_;
     brls::Label* account_name_label_;

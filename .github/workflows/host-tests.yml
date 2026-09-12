@@ -1,0 +1,30 @@
+name: Host regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            g++ libjansson-dev libcurl4-openssl-dev libsrtp2-dev libusrsctp-dev \
+            libavcodec-dev libavutil-dev libmbedtls-dev python3 openssl cmake
+
+      - name: Run host regression tests
+        run: bash scripts/test-host.sh

@@ -52,7 +52,7 @@ GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
     setHighlightPadding(2);
     setHighlightCornerRadius(12);
 
-    image_ = new brls::Image();
+    image_ = new CachedImage();
     image_->setWidth(212);
     image_->setHeight(112);
     image_->setCornerRadius(7);

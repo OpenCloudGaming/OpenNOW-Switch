@@ -23,8 +23,9 @@ class GfnClient
 
     std::vector<LoginProvider> FetchLoginProviders() const;
     std::vector<PublicGame> FetchPublicGames() const;
-    std::vector<PublicGame> FetchCatalogGames(
-        AuthSession& session, const std::string& search_query = {}) const;
+    CatalogPage FetchCatalogPage(
+        AuthSession& session, const std::string& search_query = {},
+        const std::string& cursor = {}) const;
     std::vector<GameInfo> FetchLibraryGames(AuthSession& session) const;
     std::vector<StreamRegion> FetchStreamRegions(AuthSession& session) const;
     std::vector<StreamRegion> MeasureStreamRegionLatencies(

@@ -102,11 +102,7 @@ DKVideoRenderer::~DKVideoRenderer()
 {
     if (video_context_)
         queue_.waitIdle();
-    while (!submitted_frames_.empty()) {
-        AVFrame* frame = submitted_frames_.front();
-        submitted_frames_.pop_front();
-        av_frame_free(&frame);
-    }
+    submitted_frames_.clear();
     frame_mappings_.clear();
     releaseSoftwareSlots();
     update_cmd_memory_.destroy();
@@ -129,30 +125,6 @@ void DKVideoRenderer::releaseSoftwareSlots()
         slot.chroma_upload.destroy();
     }
     software_slots_.clear();
-}
-
-void DKVideoRenderer::retainSubmittedFrame(AVFrame* frame)
-{
-    AVFrame* reference = frame ? av_frame_clone(frame) : nullptr;
-    if (!reference) {
-        brls::Logger::error("Deko3D renderer failed to retain NVDEC surface");
-        return;
-    }
-
-    submitted_frames_.push_back(reference);
-    // Keep substantially more surfaces than the three display framebuffers.
-    // This gives Deko3D ~133 ms at 60 fps to finish sampling without blocking
-    // the UI thread or allowing NVDEC to immediately recycle the memory.
-    constexpr size_t kGpuFramesInFlight = 8;
-    if (submitted_frames_.size() <= kGpuFramesInFlight)
-        return;
-
-    // Queue submission is ordered and the oldest reference is several display
-    // cycles behind. Never call waitIdle() here: an NVDEC/Deko dependency can
-    // otherwise block the Borealis render thread indefinitely.
-    AVFrame* completed = submitted_frames_.front();
-    submitted_frames_.pop_front();
-    av_frame_free(&completed);
 }
 
 int DKVideoRenderer::getFrameColorspace(const AVFrame* frame)
@@ -348,11 +320,15 @@ void DKVideoRenderer::bindDescriptors(
 bool DKVideoRenderer::updateSoftwareFrame(AVFrame* frame)
 {
     if (!frame || hardware_frames_ || software_slots_.empty() ||
-        !frame->data[0] || !frame->data[1])
+        !frame->data[0] || !frame->data[1] ||
+        frame->width != frame_width_ || frame->height != frame_height_ ||
+        (frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P &&
+         frame->format != AV_PIX_FMT_NV12))
         return false;
 
     auto& slot = software_slots_[software_slot_cursor_];
-    software_slot_cursor_ = (software_slot_cursor_ + 1) % software_slots_.size();
+    if (slot.last_use_fence.wait(0) != DkResult_Success)
+        return false;
     auto* luma = static_cast<uint8_t*>(slot.luma_upload.getCpuAddr());
     auto* chroma = static_cast<uint8_t*>(slot.chroma_upload.getCpuAddr());
 
@@ -378,12 +354,15 @@ bool DKVideoRenderer::updateSoftwareFrame(AVFrame* frame)
         {0, 0, 0, static_cast<uint32_t>(frame_width_ / 2),
          static_cast<uint32_t>(chroma_height), 1});
     queue_.submitCommands(update_cmd_buf_.finishList());
+    current_software_slot_ = static_cast<int>(software_slot_cursor_);
+    software_slot_cursor_ = (software_slot_cursor_ + 1) % software_slots_.size();
     return true;
 }
 
-bool DKVideoRenderer::updateFrameMapping(AVFrame* frame, uint64_t generation)
+bool DKVideoRenderer::updateFrameMapping(AVFrame* frame)
 {
-    if (!frame || frame->format != AV_PIX_FMT_NVTEGRA || !frame->buf[0])
+    if (!frame || frame->format != AV_PIX_FMT_NVTEGRA || !frame->buf[0] ||
+        frame->width != frame_width_ || frame->height != frame_height_)
         return false;
     AVNVTegraMap* map = av_nvtegra_frame_get_fbuf_map(frame);
     if (!map || !frame->data[0] || !frame->data[1])
@@ -395,7 +374,7 @@ bool DKVideoRenderer::updateFrameMapping(AVFrame* frame, uint64_t generation)
     const uint32_t chroma_offset = static_cast<uint32_t>(frame->data[1] - frame->data[0]);
     int index = -1;
     for (size_t i = 0; i < frame_mappings_.size(); ++i) {
-        const auto& candidate = frame_mappings_[i];
+        const auto& candidate = *frame_mappings_[i];
         if (candidate.handle == handle && candidate.cpu_address == cpu_address &&
             candidate.size == size && candidate.chroma_offset == chroma_offset) {
             index = static_cast<int>(i);
@@ -406,14 +385,12 @@ bool DKVideoRenderer::updateFrameMapping(AVFrame* frame, uint64_t generation)
     if (index < 0) {
         constexpr size_t kMappingTarget = 16;
         constexpr size_t kMappingHardLimit = 32;
-        constexpr uint64_t kSafeGenerationAge = 8;
         while (frame_mappings_.size() >= kMappingTarget) {
             size_t stale = frame_mappings_.size();
             for (size_t i = 0; i < frame_mappings_.size(); ++i) {
                 if (static_cast<int>(i) == current_mapping_)
                     continue;
-                const uint64_t last_used = frame_mappings_[i].last_used_generation;
-                if (generation > last_used && generation - last_used > kSafeGenerationAge) {
+                if (frame_mappings_[i]->last_use_fence.wait(0) == DkResult_Success) {
                     stale = i;
                     break;
                 }
@@ -429,29 +406,33 @@ bool DKVideoRenderer::updateFrameMapping(AVFrame* frame, uint64_t generation)
             return false;
         }
 
-        FrameMapping mapping;
+        auto owned_mapping = std::make_unique<FrameMapping>();
+        auto& mapping = *owned_mapping;
         mapping.handle = handle;
         mapping.cpu_address = cpu_address;
         mapping.size = size;
         mapping.chroma_offset = chroma_offset;
-        mapping.last_used_generation = generation;
+        mapping.storage.reset(av_buffer_ref(
+            reinterpret_cast<AVNVTegraFrame*>(frame->buf[0]->data)->map_ref));
+        if (!mapping.storage)
+            return false;
         mapping.memory = dk::MemBlockMaker{device_, size}
             .setFlags(DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached |
                       DkMemBlockFlags_Image)
             .setStorage(cpu_address).create();
+        if (!mapping.memory)
+            return false;
         mapping.luma.initialize(luma_layout_, mapping.memory, 0);
         mapping.chroma.initialize(chroma_layout_, mapping.memory, chroma_offset);
         mapping.luma_descriptor.initialize(mapping.luma);
         mapping.chroma_descriptor.initialize(mapping.chroma);
-        frame_mappings_.emplace_back(std::move(mapping));
+        frame_mappings_.emplace_back(std::move(owned_mapping));
         index = static_cast<int>(frame_mappings_.size()) - 1;
     }
 
-    frame_mappings_[index].last_used_generation = generation;
-
     if (index == current_mapping_)
         return true;
-    auto& active = frame_mappings_[index];
+    auto& active = *frame_mappings_[index];
     bindDescriptors(active.luma_descriptor, active.chroma_descriptor);
     queue_.submitCommands(update_cmd_buf_.finishList());
     current_mapping_ = index;
@@ -472,18 +453,38 @@ void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame*
     checkAndInitialize(width, height, frame);
     if (!initialized_)
         return;
-    if (generation != rendered_generation_) {
-        const bool updated = hardware_frames_
-            ? updateFrameMapping(frame, generation)
-            : updateSoftwareFrame(frame);
-        if (!updated)
-            return;
-        if (hardware_frames_)
-            retainSubmittedFrame(frame);
-        rendered_generation_ = generation;
+    submitted_frames_.releaseCompleted([](dk::Fence& fence) {
+        return fence.wait(0) == DkResult_Success;
+    });
+    const uint32_t command_slice = update_cmd_slice_;
+    bool updated = false;
+    if (generation != rendered_generation_ &&
+        update_cmd_fences_[command_slice].wait(0) == DkResult_Success) {
+        if (hardware_frames_) {
+            if (submitted_frames_.retain(frame)) {
+                updated = updateFrameMapping(frame);
+                if (!updated)
+                    submitted_frames_.discardLast();
+            }
+        } else {
+            updated = updateSoftwareFrame(frame);
+        }
+        if (updated)
+            rendered_generation_ = generation;
     }
-    if (static_cmd_list_)
-        queue_.submitCommands(static_cmd_list_);
+    if (!static_cmd_list_ || (hardware_frames_ ? current_mapping_ < 0 : current_software_slot_ < 0))
+        return;
+    queue_.submitCommands(static_cmd_list_);
+    dk::Fence completed {};
+    queue_.signalFence(completed, true);
+    if (updated && update_cmd_slice_ != command_slice)
+        update_cmd_fences_[command_slice] = completed;
+    if (hardware_frames_) {
+        frame_mappings_[current_mapping_]->last_use_fence = completed;
+        submitted_frames_.setCompletion(completed);
+    } else {
+        software_slots_[current_software_slot_].last_use_fence = completed;
+    }
     if (render_stats_.rendered_frames == 0)
         render_stats_.measurement_start_timestamp = started;
     render_stats_.total_render_time += monotonic_millis() - started;

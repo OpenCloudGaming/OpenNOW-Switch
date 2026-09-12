@@ -24,6 +24,7 @@ void WebRtcSession::start_decoder_worker() {
 void WebRtcSession::decoder_loop() {
     for (;;) {
         DecodeUnit unit;
+        bool reset_decoder = false;
         {
             std::unique_lock<std::mutex> lock(decoder_queue_mutex_);
             decoder_queue_cv_.wait(lock, [this] {
@@ -34,6 +35,12 @@ void WebRtcSession::decoder_loop() {
 
             unit = std::move(decoder_queue_.front());
             decoder_queue_.pop_front();
+            if (!decoder_recovery_.is_current(unit.generation)) {
+                decoder_queue_drops_++;
+                recycle_decode_buffer_locked(std::move(unit.data));
+                continue;
+            }
+            reset_decoder = decoder_recovery_.take_decoder_reset();
         }
 
         const auto decode_started_at = std::chrono::steady_clock::now();
@@ -43,7 +50,7 @@ void WebRtcSession::decoder_loop() {
         RecordLatency(queue_wait_buckets_, queue_wait_us);
         AtomicMax(queue_wait_us_max_, queue_wait_us);
 
-        if (decoder_reset_requested_.exchange(false) && decoder_)
+        if (reset_decoder && decoder_ && !decoder_->uses_hardware_frames())
             decoder_->reset_stream();
 
         const int decoded = decoder_
@@ -52,6 +59,14 @@ void WebRtcSession::decoder_loop() {
         const uint64_t decode_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - decode_started_at).count());
+        {
+            std::lock_guard<std::mutex> lock(decoder_queue_mutex_);
+            if (decoder_recovery_.complete(unit.generation, decoded >= 0) ==
+                opennow::webrtc::DecodeRecoveryState::Completion::Failed) {
+                decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
+                clear_decoder_queue_locked();
+            }
+        }
         decode_us_total_.fetch_add(decode_us, std::memory_order_relaxed);
         RecordLatency(decode_latency_buckets_, decode_us);
         AtomicMax(decode_us_max_, decode_us);
@@ -80,15 +95,6 @@ void WebRtcSession::decoder_loop() {
                                 " preview=" + HexPreview(unit.data.data(), unit.data.size()));
                 last_logged_decode_error_count_.store(error_count, std::memory_order_relaxed);
             }
-            decoder_resync_required_.store(true);
-            if (!decoder_ || !decoder_->uses_hardware_frames())
-                decoder_reset_requested_.store(true);
-            keyframe_needed_.store(true);
-        }
-
-        if (unit.idr && decoded >= 0) {
-            decoder_resync_required_.store(false);
-            keyframe_needed_.store(false);
         }
 
         {
@@ -125,11 +131,6 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
     const bool idr = ContainsH264Idr(data, size);
     std::lock_guard<std::mutex> lock(decoder_queue_mutex_);
 
-    if (decoder_resync_required_.load() && !idr) {
-        decoder_queue_drops_++;
-        return;
-    }
-
     const size_t kMaxQueuedAccessUnits =
         opennow::video::MaximumQueuedAccessUnits(settings_.fps);
     const auto now = std::chrono::steady_clock::now();
@@ -139,14 +140,13 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
     if (stale_backlog || decoder_queue_.size() >= kMaxQueuedAccessUnits) {
         decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
         clear_decoder_queue_locked();
-        decoder_resync_required_.store(true);
-        if (!decoder_ || !decoder_->uses_hardware_frames())
-            decoder_reset_requested_.store(true);
-        keyframe_needed_.store(true);
-        if (!idr) {
-            decoder_queue_drops_++;
-            return;
-        }
+        decoder_recovery_.require_resync();
+    }
+
+    const auto generation = decoder_recovery_.admit(idr);
+    if (!generation) {
+        decoder_queue_drops_++;
+        return;
     }
 
     std::vector<uint8_t> buffer;
@@ -161,7 +161,7 @@ void WebRtcSession::enqueue_decode_unit(const uint8_t* data, size_t size, uint32
     std::memcpy(buffer.data(), data, size);
     decoder_queue_.push_back({
         std::move(buffer), idr, rtp_timestamp,
-        now
+        now, *generation
     });
     AtomicMax(decoder_queue_high_water_, decoder_queue_.size());
     decoder_queue_cv_.notify_one();
@@ -236,10 +236,8 @@ void WebRtcSession::maybe_recover_decode_stall() {
         std::lock_guard<std::mutex> queue_lock(decoder_queue_mutex_);
         decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
         clear_decoder_queue_locked();
+        decoder_recovery_.require_resync();
     }
-    decoder_resync_required_.store(true);
-    if (!decoder_ || !decoder_->uses_hardware_frames())
-        decoder_reset_requested_.store(true);
     request_keyframe("decode_timeout");
 }
 
@@ -269,13 +267,11 @@ void WebRtcSession::maybe_recover_rtp_damage() {
     // display on either backend. Hold the previous good frame and resume from
     // an IDR; only the software decoder is flushed because Deko3D can still own
     // references to NVDEC output surfaces.
-    if (!decoder_resync_required_.exchange(true)) {
-        std::lock_guard<std::mutex> queue_lock(decoder_queue_mutex_);
+    std::lock_guard<std::mutex> queue_lock(decoder_queue_mutex_);
+    if (!decoder_recovery_.waiting_for_idr()) {
         decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
         clear_decoder_queue_locked();
-        if (!decoder_ || !decoder_->uses_hardware_frames())
-            decoder_reset_requested_.store(true);
-        keyframe_needed_.store(true);
+        decoder_recovery_.require_resync();
     }
     // Do not flush healthy queued frames or request an IDR for every damaged
     // access unit. Large IDRs amplify packet bursts and previously created a
@@ -291,8 +287,8 @@ void WebRtcSession::request_keyframe(const char* reason) {
         now - last_keyframe_request_at_ < kMinimumPliInterval) {
         // Keep one coalesced request pending. poll() will retry it after the
         // cooldown instead of flooding the server with expensive IDR frames.
-        if (decoder_resync_required_.load())
-            keyframe_needed_.store(true);
+        std::lock_guard<std::mutex> queue_lock(decoder_queue_mutex_);
+        decoder_recovery_.defer_keyframe_request();
         return;
     }
 
@@ -322,19 +318,17 @@ void WebRtcSession::request_keyframe(const char* reason) {
 void WebRtcSession::on_video_packet(const PeerVideoPacket& packet) {
     const uint8_t* data = packet.data;
     const size_t size = packet.size;
+    maybe_recover_rtp_damage();
     last_video_packet_at_us_.store(NowUs(), std::memory_order_release);
     video_access_unit_bytes_.fetch_add(size, std::memory_order_relaxed);
     AtomicMax(video_access_unit_max_bytes_, static_cast<uint64_t>(size));
     if (video_ssrc_ != packet.ssrc) {
         video_ssrc_ = packet.ssrc;
         have_video_sender_report_ = false;
-        for (const auto& report : sender_reports_) {
-            if (report.ssrc == video_ssrc_) {
-                video_sr_ntp_us_ = report.ntp_us;
-                video_sr_rtp_timestamp_ = report.rtp_timestamp;
-                have_video_sender_report_ = true;
-                break;
-            }
+        if (const auto* report = sender_reports_.find(video_ssrc_)) {
+            video_sr_ntp_us_ = report->ntp_us;
+            video_sr_rtp_timestamp_ = report->rtp_timestamp;
+            have_video_sender_report_ = true;
         }
     }
     const int packet_count = packets_received_.fetch_add(1) + 1;
@@ -362,25 +356,15 @@ void WebRtcSession::on_audio_packet(const PeerAudioPacket& packet) {
     if (audio_) {
         audio_->submit(packet);
         if (new_audio_ssrc) {
-            for (const auto& report : sender_reports_) {
-                if (report.ssrc == audio_ssrc_) {
-                    audio_->set_sender_report(report.ssrc, report.ntp_us, report.rtp_timestamp);
-                    break;
-                }
-            }
+            if (const auto* report = sender_reports_.find(audio_ssrc_))
+                audio_->set_sender_report(report->ssrc, report->ntp_us, report->rtp_timestamp);
         }
     }
 }
 
 void WebRtcSession::on_rtp_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_t rtp_timestamp) {
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
-    auto found = std::find_if(sender_reports_.begin(), sender_reports_.end(), [ssrc](const SenderReport& item) {
-        return item.ssrc == ssrc;
-    });
-    if (found == sender_reports_.end())
-        sender_reports_.push_back({ssrc, ntp_us, rtp_timestamp});
-    else
-        *found = {ssrc, ntp_us, rtp_timestamp};
+    sender_reports_.remember({ssrc, ntp_us, rtp_timestamp}, audio_ssrc_, video_ssrc_);
 
     if (ssrc == audio_ssrc_ && audio_)
         audio_->set_sender_report(ssrc, ntp_us, rtp_timestamp);

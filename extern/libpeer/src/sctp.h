@@ -141,10 +141,16 @@ typedef enum SctpDataPpid {
 } SctpDataPpid;
 
 #define SCTP_MAX_STREAMS 5
+#define SCTP_SEND_BUFFER_SIZE (16 * 1024)
+#define SCTP_RECEIVE_BUFFER_SIZE (64 * 1024)
+#define SCTP_MAX_MESSAGE_SIZE SCTP_RECEIVE_BUFFER_SIZE
 
 typedef struct {
   char label[32];  // Stream label
   uint16_t sid;    // Stream ID
+  uint8_t channel_type;
+  uint32_t reliability;
+  int ack_pending;
 } SctpStreamEntry;
 
 typedef struct Sctp {
@@ -161,6 +167,15 @@ typedef struct Sctp {
   DtlsSrtp* dtls_srtp;
   int stream_count;
   SctpStreamEntry stream_table[SCTP_MAX_STREAMS];
+#if CONFIG_USE_USRSCTP
+  struct SctpTransport* transport;
+  uint8_t* message_buf;
+  size_t message_len;
+  uint16_t message_sid;
+  uint32_t message_ppid;
+  int receive_failed;
+  int closing;
+#endif
 
   /* datachannel */
   void (*onmessage)(char* msg, size_t len, void* userdata, uint16_t sid);
@@ -180,6 +195,8 @@ void sctp_destroy_association(Sctp* sctp);
 void sctp_usrsctp_init();
 
 void sctp_usrsctp_deinit();
+
+void sctp_tick(Sctp* sctp);
 
 int sctp_is_connected(Sctp* sctp);
 

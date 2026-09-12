@@ -18,7 +18,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
 
   private:
     int decode(char* indata, int inlen, int64_t pts);
-    AVFrame* get_frame(bool native_frame);
+    AVFrame* get_frame(bool native_frame, int& decode_error);
 
     AVPacket* m_packet = nullptr;
     AVBufferRef *hw_device_ctx = nullptr;

@@ -1,5 +1,6 @@
 #include "webrtc_session.hpp"
 #include "nvst_sdp.hpp"
+#include "signaling_diagnostics.hpp"
 #include "stream/RemoteCandidatePolicy.hpp"
 #include "internal.hpp"
 
@@ -206,56 +207,6 @@ int CountSdpLinesWithPrefix(const std::string& sdp, const std::string& prefix)
     return count;
 }
 
-
-std::string CompactSignalingMessage(const std::string& msg)
-{
-    json_error_t error;
-    json_t* root = json_loads(msg.c_str(), 0, &error);
-    if (!root)
-        return "RX invalid-json " + PreviewText(msg, 120);
-
-    std::string summary = "RX message";
-    json_t* ack = json_object_get(root, "ack");
-    if (ack && json_is_integer(ack)) {
-        summary = "RX ack=" + std::to_string(json_integer_value(ack));
-    } else if (json_object_get(root, "hb")) {
-        summary = "RX hb";
-    } else if (json_t* peer_info = json_object_get(root, "peer_info"); peer_info && json_is_object(peer_info)) {
-        const char* name = json_string_value(json_object_get(peer_info, "name"));
-        json_t* id = json_object_get(peer_info, "id");
-        summary = "RX peer_info";
-        if (name)
-            summary += " name=" + std::string(name);
-        if (id && json_is_integer(id))
-            summary += " id=" + std::to_string(json_integer_value(id));
-    } else if (json_t* peer_msg = json_object_get(root, "peer_msg"); peer_msg && json_is_object(peer_msg)) {
-        const char* raw_payload = json_string_value(json_object_get(peer_msg, "msg"));
-        if (raw_payload) {
-            json_error_t payload_error;
-            json_t* payload = json_loads(raw_payload, 0, &payload_error);
-            if (payload) {
-                const char* type = json_string_value(json_object_get(payload, "type"));
-                const char* candidate = json_string_value(json_object_get(payload, "candidate"));
-                if (type && std::string(type) == "offer") {
-                    const char* sdp = json_string_value(json_object_get(payload, "sdp"));
-                    const char* nvst = json_string_value(json_object_get(payload, "nvstSdp"));
-                    summary = "RX offer sdpBytes=" + std::to_string(sdp ? std::strlen(sdp) : 0) +
-                        " nvstBytes=" + std::to_string(nvst ? std::strlen(nvst) : 0);
-                } else if (candidate) {
-                    summary = "RX candidate " + PreviewText(candidate, 120);
-                } else {
-                    summary = "RX peer_msg " + PreviewText(raw_payload, 120);
-                }
-                json_decref(payload);
-            } else {
-                summary = "RX peer_msg raw " + PreviewText(raw_payload, 120);
-            }
-        }
-    }
-
-    json_decref(root);
-    return summary;
-}
 
 std::string MediaKindFromMLine(const std::string& line)
 {
@@ -685,8 +636,8 @@ extern "C" {
 
 void WebRtcSession::handle_signaling_message(const std::string& msg) {
     signaling_rx_count_++;
-    AppendStreamLog("RX " + msg);
-    const std::string compact_message = CompactSignalingMessage(msg);
+    const std::string compact_message = opennow::webrtc::CompactSignalingMessage(msg);
+    AppendStreamLog(compact_message);
     AppendTraceLog(compact_message);
 
     if (last_messages_.size() >= 3) {
@@ -762,15 +713,15 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
                         offer_count_++;
                         current_state_ = "Got offer, sending answer";
                         const std::string raw_offer_sdp = json_string_value(sdp);
-                        AppendTraceBlock("RAW OFFER SDP", raw_offer_sdp);
+                        AppendSdpSummary("RAW OFFER SDP", raw_offer_sdp);
                         const std::string offer_sdp =
                             PrepareGfnOfferSdp(raw_offer_sdp, signaling_url_, media_ip_, media_port_);
-                        AppendTraceBlock("PREPARED OFFER SDP", offer_sdp);
+                        AppendSdpSummary("PREPARED OFFER SDP", offer_sdp);
                         json_t* nvst_offer = json_object_get(payload, "nvstSdp");
                         const std::string nvst_offer_sdp =
                             nvst_offer && json_is_string(nvst_offer) ? json_string_value(nvst_offer) : "";
                         if (!nvst_offer_sdp.empty())
-                            AppendTraceBlock("OFFER NVST SDP", nvst_offer_sdp);
+                            AppendSdpSummary("OFFER NVST SDP", nvst_offer_sdp);
                         server_ice_ufrag_ = ExtractSdpValue(offer_sdp, "a=ice-ufrag:");
                         const opennow::webrtc::RiInputCapabilities ri_caps =
                             ParseRiInputCapabilities(offer_sdp);
@@ -795,12 +746,12 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
                         remote_description_set_ = true;
                         const char* answer_sdp = peer_connection_create_answer(pc_);
                         if (answer_sdp) {
-                            AppendTraceBlock("LIBPEER RAW ANSWER SDP", answer_sdp);
+                            AppendSdpSummary("LIBPEER RAW ANSWER SDP", answer_sdp);
                             const std::string adapted_answer_sdp = AdaptAnswerSdpToOffer(answer_sdp, offer_sdp, settings_);
                             const std::string nvst_sdp = opennow::webrtc::BuildNvstSdp(
                                 adapted_answer_sdp, settings_, ri_caps);
-                            AppendTraceBlock("ADAPTED ANSWER SDP", adapted_answer_sdp);
-                            AppendTraceBlock("ANSWER NVST SDP", nvst_sdp);
+                            AppendSdpSummary("ADAPTED ANSWER SDP", adapted_answer_sdp);
+                            AppendSdpSummary("ANSWER NVST SDP", nvst_sdp);
                             AppendStreamLog("SDP answer created localUfrag=" +
                                             ExtractSdpValue(adapted_answer_sdp, "a=ice-ufrag:") +
                                             " localCandidates=" +

@@ -3,6 +3,9 @@
 #include "stream_settings.hpp"
 #include "stream_end_policy.hpp"
 #include "signaling_client.hpp"
+#include "webrtc/decode_recovery_state.hpp"
+#include "webrtc/peer_runtime.hpp"
+#include "webrtc/sender_report_cache.hpp"
 #include <string>
 #include <memory>
 #include <atomic>
@@ -115,6 +118,7 @@ private:
     std::vector<opennow::IceServerInfo> ice_servers_;
     opennow::StreamSettings settings_;
     std::string peer_name_;
+    opennow::webrtc::PeerRuntime peer_runtime_;
     int peer_id_ = 0;
     int remote_peer_id_ = 1;
     int ack_counter_ = 0;
@@ -149,12 +153,11 @@ private:
         bool idr = false;
         uint32_t rtp_timestamp = 0;
         std::chrono::steady_clock::time_point enqueued_at {};
+        opennow::webrtc::DecodeRecoveryState::Generation generation = 0;
     };
     std::thread decoder_thread_;
     std::atomic<bool> decoder_running_ {false};
-    std::atomic<bool> decoder_resync_required_ {false};
-    std::atomic<bool> decoder_reset_requested_ {false};
-    std::atomic<bool> keyframe_needed_ {false};
+    opennow::webrtc::DecodeRecoveryState decoder_recovery_;
     mutable std::mutex decoder_queue_mutex_;
     std::condition_variable decoder_queue_cv_;
     std::deque<DecodeUnit> decoder_queue_;
@@ -238,12 +241,7 @@ private:
     std::string server_ice_ufrag_;
     std::vector<std::string> pending_local_candidates_;
     std::vector<std::string> last_messages_;
-    struct SenderReport {
-        uint32_t ssrc = 0;
-        uint64_t ntp_us = 0;
-        uint32_t rtp_timestamp = 0;
-    };
-    std::vector<SenderReport> sender_reports_;
+    opennow::webrtc::SenderReportCache sender_reports_;
     uint32_t audio_ssrc_ = 0;
     uint32_t video_ssrc_ = 0;
     uint64_t video_sr_ntp_us_ = 0;

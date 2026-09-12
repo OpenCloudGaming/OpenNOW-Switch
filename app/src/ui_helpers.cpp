@@ -2,18 +2,17 @@
 
 #include "app_state.hpp"
 #include "cover_image_cache.hpp"
+#include "cloud_launch_state.hpp"
 #include "play_history.hpp"
 #include "session_error_policy.hpp"
 #include "localization.hpp"
 #include "network_utils.hpp"
 #include <borealis.hpp>
 #include <switch.h>
-#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
-#include <mutex>
 #include <thread>
 #include "StreamView.hpp"
 
@@ -21,13 +20,6 @@ namespace opennow
 {
 namespace
 {
-
-struct LaunchSessionState
-{
-    std::atomic<bool> running {true};
-    std::mutex mutex;
-    std::string session_id;
-};
 
 class LaunchAnimationView final : public brls::View
 {
@@ -223,7 +215,7 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     game_header->setAlignItems(brls::AlignItems::CENTER);
     game_header->setMarginBottom(6);
 
-    auto* cover = new brls::Image();
+    auto* cover = new CachedImage();
     cover->setWidth(82);
     cover->setHeight(82);
     cover->setCornerRadius(12);
@@ -288,15 +280,11 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
     std::string bg_internal_title = internal_title.empty() ? title : internal_title;
     std::string bg_history_game_id = history_game_id.empty() ? launch_app_id : history_game_id;
 
-    auto launch_state = std::make_shared<LaunchSessionState>();
+    auto launch_state = std::make_shared<CloudLaunchState>();
+    const auto account_generation = AppState::Instance().session_generation();
 
     dialog->addButton(Tr("Cancel session"), [launch_state, bg_client, bg_auth]() {
-        launch_state->running = false;
-        std::string session_id;
-        {
-            std::lock_guard<std::mutex> lock(launch_state->mutex);
-            session_id = launch_state->session_id;
-        }
+        std::string session_id = launch_state->Cancel();
         if (!session_id.empty()) {
             brls::async([bg_client, bg_auth, sid = std::move(session_id)]() mutable {
                 try { bg_client.StopSession(bg_auth, sid); } catch (...) {}
@@ -307,28 +295,32 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
 
     brls::async([dialog, animation, stage_label, detail_label,
                  bg_client, bg_auth, bg_app_id, bg_store, bg_internal_title,
-                 bg_history_game_id, launch_state]() mutable {
+                 bg_history_game_id, launch_state, account_generation]() mutable {
         auto post_progress = [animation, stage_label, detail_label, launch_state](
             int stage, std::string title, std::string detail, float progress) {
             brls::sync([animation, stage_label, detail_label, launch_state,
                         stage, title = std::move(title), detail = std::move(detail), progress]() {
-                if (!launch_state->running)
+                if (!launch_state->running())
                     return;
                 SetLaunchProgress(animation, stage_label, detail_label,
                                   stage, title, detail, progress);
             });
         };
         try {
+            if (!launch_state->running())
+                return;
             post_progress(0, "Checking your NVIDIA account",
                           "Renewing authorization and checking previous sessions.", 0.10f);
             bg_client.CleanupStaleCloudSession(bg_auth);
+            if (!launch_state->running())
+                return;
             post_progress(1, "Requesting a cloud rig",
                           "GeForce NOW is allocating hardware for your game.", 0.24f);
             SessionInfo info = bg_client.StartSession(
                 bg_auth, bg_app_id, bg_store, bg_internal_title);
-            {
-                std::lock_guard<std::mutex> lock(launch_state->mutex);
-                launch_state->session_id = info.session_id;
+            if (!launch_state->Adopt(info.session_id)) {
+                try { bg_client.StopSession(bg_auth, info.session_id); } catch (...) {}
+                return;
             }
 
             int unknown_status_polls = 0;
@@ -365,7 +357,7 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                 post_progress(1, queue_title, queue_detail, queue_progress);
 
                 std::this_thread::sleep_for(std::chrono::seconds(5));
-                if (!launch_state->running) return;
+                if (!launch_state->running()) return;
                 info = bg_client.PollSession(bg_auth, info.session_id);
             }
 
@@ -376,42 +368,56 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
             post_progress(2, "Connecting to the streaming server",
                           "The rig is ready. Configuring the secure network path.", 0.72f);
             brls::sync([=]() {
-                if (!launch_state->running) return;
-                SetLaunchProgress(animation, stage_label, detail_label, 3,
-                                  "Starting the video stream",
-                                  "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
-                dialog->close([launch_state](){ launch_state->running = false; });
+                if (!launch_state->running()) return;
+                try {
+                    SetLaunchProgress(animation, stage_label, detail_label, 3,
+                                      "Starting the video stream",
+                                      "Negotiating WebRTC and waiting for the first clean frame.", 0.86f);
 
-                auto& app_state = AppState::Instance();
-                if (app_state.HasSession() && app_state.session()->user.user_id == bg_auth.user.user_id)
-                    app_state.SetSession(bg_auth);
-                const std::string played_at = CurrentUtcIsoTimestamp();
-                RecordGamePlayed(bg_history_game_id, bg_internal_title, played_at);
-                app_state.MarkGamePlayed(bg_history_game_id, bg_internal_title, played_at);
-                
-                brls::Logger::info("WebRTC Stream Ready!");
-                brls::Logger::info("Server IP: {}", info.server_ip);
-                brls::Logger::info("Signaling URL: {}", info.signaling_url);
-                brls::Logger::info("Media endpoint: {}:{}", info.media_ip, info.media_port);
-                brls::Logger::info("ICE servers: {}", info.ice_servers.size());
-                
-                std::string jwt_token = bg_auth.tokens.id_token.empty() ? bg_auth.tokens.access_token : bg_auth.tokens.id_token;
-                brls::Application::pushActivity(new brls::Activity(StreamView::create(
-                    info.signaling_url,
-                    jwt_token,
-                    info.session_id,
-                    info.media_ip,
-                    info.media_port,
-                    info.ice_servers,
-                    bg_client,
-                    bg_auth,
-                    bg_internal_title)));
+                    auto& app_state = AppState::Instance();
+                    if (app_state.IsCurrentSession(account_generation))
+                        app_state.SetSession(bg_auth);
+                    const std::string played_at = CurrentUtcIsoTimestamp();
+                    RecordGamePlayed(bg_history_game_id, bg_internal_title, played_at);
+                    app_state.MarkGamePlayed(bg_history_game_id, bg_internal_title, played_at);
+
+                    brls::Logger::info("WebRTC Stream Ready!");
+                    brls::Logger::info("Server IP: {}", info.server_ip);
+                    brls::Logger::info("Media endpoint: {}:{}", info.media_ip, info.media_port);
+                    brls::Logger::info("ICE servers: {}", info.ice_servers.size());
+
+                    std::string jwt_token = bg_auth.tokens.id_token.empty() ? bg_auth.tokens.access_token : bg_auth.tokens.id_token;
+                    dialog->close();
+                    brls::Application::pushActivity(new brls::Activity(StreamView::create(
+                        info.signaling_url,
+                        jwt_token,
+                        info.session_id,
+                        info.media_ip,
+                        info.media_port,
+                        info.ice_servers,
+                        bg_client,
+                        bg_auth,
+                        bg_internal_title)));
+                    launch_state->TransferToStream();
+                } catch (const std::exception& e) {
+                    const std::string failed_session = launch_state->Cancel();
+                    if (!failed_session.empty()) {
+                        brls::async([bg_client, bg_auth, failed_session]() mutable {
+                            try { bg_client.StopSession(bg_auth, failed_session); } catch (...) {}
+                        });
+                    }
+                    ShowError("Stream startup failed", e.what());
+                }
             });
 
         } catch (const std::exception& e) {
+            const std::string failed_session = launch_state->TakeForCleanup();
+            if (!failed_session.empty()) {
+                try { bg_client.StopSession(bg_auth, failed_session); } catch (...) {}
+            }
             const session_error::Presentation error = session_error::Present(e.what());
             brls::sync([=]() {
-                if (!launch_state->running) return;
+                if (!launch_state->running()) return;
                 animation->SetState(0, 0.04f);
                 stage_label->setText(Tr(error.title));
                 stage_label->setFontSize(24);
