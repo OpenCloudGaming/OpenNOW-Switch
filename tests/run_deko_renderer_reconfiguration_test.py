@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 
 
@@ -31,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix="opennow-deko-test-") as output:
         "-DPLATFORM_SWITCH", "-D__SWITCH__", "-DBOREALIS_USE_DEKO3D",
         "-I" + str(directory), "-I" + str(root / "tests"),
         "-I" + str(root / "app/src"),
-        str(root / "tests/deko_renderer_reconfiguration_test.cpp"),
+        str(root / "tests" / (sys.argv[1] if len(sys.argv) > 1 else "deko_renderer_reconfiguration_test.cpp")),
         "-o", str(directory / "test"),
     ]
     if sanitizers := os.environ.get("OPENNOW_SANITIZERS"):

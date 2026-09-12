@@ -64,6 +64,7 @@ private:
         dk::ImageLayout luma_layout_;
         dk::ImageLayout chroma_layout_;
         bool hardware_frames_ = false;
+        bool full_range_ = false;
 
         struct BufferDeleter {
             void operator()(AVBufferRef* buffer) const { av_buffer_unref(&buffer); }

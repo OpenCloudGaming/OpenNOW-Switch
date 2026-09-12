@@ -25,6 +25,13 @@ constexpr unsigned kUpdateCommandSliceBytes = 0x1000;
 constexpr unsigned kUpdateCommandSlices = 8;
 constexpr size_t kSoftwareFrameSlots = 4;
 
+bool frame_full_range(const AVFrame* frame)
+{
+    return frame && frame->format != AV_PIX_FMT_NVTEGRA &&
+        (frame->color_range == AVCOL_RANGE_JPEG ||
+         (frame->color_range == AVCOL_RANGE_UNSPECIFIED && frame->format == AV_PIX_FMT_YUVJ420P));
+}
+
 bool supported_frame(const AVFrame* frame)
 {
     if (!frame || frame->width <= 0 || frame->height <= 0 ||
@@ -165,7 +172,7 @@ int DKVideoRenderer::getFrameColorspace(const AVFrame* frame)
 
 bool DKVideoRenderer::isFrameFullRange(const AVFrame* frame)
 {
-    return frame && frame->color_range == AVCOL_RANGE_JPEG;
+    return frame_full_range(frame);
 }
 
 bool DKVideoRenderer::Configuration::initialize(
@@ -210,11 +217,8 @@ bool DKVideoRenderer::Configuration::initialize(
         return false;
 
     Transformation transform {};
-    bool full_range = frame->color_range == AVCOL_RANGE_JPEG;
-    // CloudMatch negotiates limited range; some NVTEGRA frames incorrectly report JPEG.
-    if (frame->color_range == AVCOL_RANGE_JPEG)
-        full_range = false;
-    set_color_transform(transform, frame->colorspace, full_range);
+    full_range_ = frame_full_range(frame);
+    set_color_transform(transform, frame->colorspace, full_range_);
 
     const float frame_aspect = static_cast<float>(frame_height_) / frame_width_;
     const float screen_aspect = static_cast<float>(screen_height_) / screen_width_;
@@ -334,7 +338,8 @@ bool DKVideoRenderer::Configuration::matches(
 {
     return screen_width_ == width && screen_height_ == height &&
         frame_width_ == frame->width && frame_height_ == frame->height &&
-        hardware_frames_ == (frame->format == AV_PIX_FMT_NVTEGRA);
+        hardware_frames_ == (frame->format == AV_PIX_FMT_NVTEGRA) &&
+        full_range_ == frame_full_range(frame);
 }
 
 void DKVideoRenderer::Configuration::bindDescriptors(
