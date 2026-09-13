@@ -41,6 +41,7 @@ struct PeerConnection {
   uint8_t temp_buf[CONFIG_MTU];
   uint8_t agent_buf[CONFIG_MTU];
   int agent_ret;
+  int dtls_pending;
   int b_local_description_created;
   int remote_ice_lite;
 
@@ -300,14 +301,20 @@ static int peer_connection_dtls_srtp_recv(void* ctx, unsigned char* buf, size_t 
   DtlsSrtp* dtls_srtp = (DtlsSrtp*)ctx;
   PeerConnection* pc = (PeerConnection*)dtls_srtp->user_data;
 
-  if (pc->agent_ret > 0 && pc->agent_ret <= len) {
-    memcpy(buf, pc->agent_buf, pc->agent_ret);
-    return pc->agent_ret;
+  if (pc->agent_ret > 0) {
+    const int bytes = pc->agent_ret;
+    pc->agent_ret = -1;
+    pc->dtls_pending = 0;
+    if ((size_t)bytes > len)
+      return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
+    memcpy(buf, pc->agent_buf, bytes);
+    return bytes;
   }
 
-  // DTLS is advanced by peer_connection_loop(). Blocking here starves that
-  // loop, so a missing datagram must be reported as "try again", not -1.
-  const int ret = agent_recv(&pc->agent, buf, len);
+  if (pc->state == PEER_CONNECTION_COMPLETED)
+    return MBEDTLS_ERR_SSL_WANT_READ;
+
+  const int ret = agent_recv_nonblocking(&pc->agent, buf, len);
   if (ret > 0)
     return ret;
 
@@ -578,11 +585,42 @@ static char* peer_connection_dtls_role_setup_value(DtlsSrtpRole d) {
   return d == DTLS_SRTP_ROLE_SERVER ? "a=setup:passive" : "a=setup:active";
 }
 
+static int peer_connection_read_dtls(PeerConnection* pc) {
+  int ret = dtls_srtp_read(&pc->dtls_srtp, pc->temp_buf, sizeof(pc->temp_buf));
+  LOGD("Got DTLS data %d", ret);
+
+  if (ret > 0) {
+    pc->sctp_read_events++;
+    if (peer_connection_diagnostics_enabled &&
+        (pc->sctp_read_events <= 10 || pc->sctp_read_events % 600 == 0)) {
+      char sctp_preview[64];
+      peer_connection_hex_preview(pc->temp_buf, ret, sctp_preview, sizeof(sctp_preview));
+      peer_connection_diag_log("dtls_read_appdata ret=%d sctpEvents=%d preview=%s",
+                               ret, pc->sctp_read_events, sctp_preview);
+    }
+    sctp_incoming_data(&pc->sctp, (char*)pc->temp_buf, ret);
+  } else if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+    peer_connection_diag_log("dtls_peer_close_notify packets=%d sctpConnected=%d",
+                             pc->completed_dtls_packets, sctp_is_connected(&pc->sctp));
+    STATE_CHANGED(pc, PEER_CONNECTION_CLOSED);
+  } else if (ret < 0 && (pc->completed_dtls_packets <= 10 || pc->completed_dtls_packets % 600 == 0)) {
+    peer_connection_diag_log("dtls_read_no_appdata ret=%d dtlsPackets=%d",
+                             ret, pc->completed_dtls_packets);
+  }
+  if (ret <= 0 && ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+    pc->dtls_pending = 0;
+    pc->agent_ret = -1;
+  }
+  return ret;
+}
+
 int peer_connection_loop(PeerConnection* pc) {
   uint32_t ssrc = 0;
   int packet_processed = 0;
-  memset(pc->agent_buf, 0, sizeof(pc->agent_buf));
-  pc->agent_ret = -1;
+  if (!pc->dtls_pending) {
+    memset(pc->agent_buf, 0, sizeof(pc->agent_buf));
+    pc->agent_ret = -1;
+  }
 
   switch (pc->state) {
     case PEER_CONNECTION_NEW:
@@ -659,11 +697,17 @@ int peer_connection_loop(PeerConnection* pc) {
       break;
     case PEER_CONNECTION_COMPLETED:
       sctp_tick(&pc->sctp);
+      if (pc->dtls_pending || mbedtls_ssl_check_pending(&pc->dtls_srtp.ssl)) {
+        packet_processed = peer_connection_read_dtls(pc) > 0;
+        if (packet_processed || pc->dtls_pending || pc->state != PEER_CONNECTION_COMPLETED)
+          break;
+      }
       if ((pc->agent_ret = agent_recv_nonblocking(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf))) > 0) {
         packet_processed = 1;
         LOGD("agent_recv %d", pc->agent_ret);
         pc->completed_udp_packets++;
         if (dtls_srtp_probe(pc->agent_buf)) {
+          pc->dtls_pending = 1;
           pc->completed_dtls_packets++;
           if (peer_connection_diagnostics_enabled &&
               (pc->completed_dtls_packets <= 10 || pc->completed_dtls_packets % 600 == 0)) {
@@ -674,31 +718,7 @@ int peer_connection_loop(PeerConnection* pc) {
                                      pc->agent_ret,
                                      preview);
           }
-          int ret = dtls_srtp_read(&pc->dtls_srtp, pc->temp_buf, sizeof(pc->temp_buf));
-          LOGD("Got DTLS data %d", ret);
-
-          if (ret > 0) {
-            pc->sctp_read_events++;
-            if (peer_connection_diagnostics_enabled &&
-                (pc->sctp_read_events <= 10 || pc->sctp_read_events % 600 == 0)) {
-              char sctp_preview[64];
-              peer_connection_hex_preview(pc->temp_buf, ret, sctp_preview, sizeof(sctp_preview));
-              peer_connection_diag_log("dtls_read_appdata ret=%d sctpEvents=%d preview=%s",
-                                       ret,
-                                       pc->sctp_read_events,
-                                       sctp_preview);
-            }
-            sctp_incoming_data(&pc->sctp, (char*)pc->temp_buf, ret);
-          } else if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-            peer_connection_diag_log("dtls_peer_close_notify packets=%d sctpConnected=%d",
-                                     pc->completed_dtls_packets,
-                                     sctp_is_connected(&pc->sctp));
-            STATE_CHANGED(pc, PEER_CONNECTION_CLOSED);
-          } else if (ret < 0 && (pc->completed_dtls_packets <= 10 || pc->completed_dtls_packets % 600 == 0)) {
-            peer_connection_diag_log("dtls_read_no_appdata ret=%d dtlsPackets=%d",
-                                     ret,
-                                     pc->completed_dtls_packets);
-          }
+          peer_connection_read_dtls(pc);
 
         } else if (rtcp_probe(pc->agent_buf, pc->agent_ret)) {
           LOGD("Got RTCP packet");

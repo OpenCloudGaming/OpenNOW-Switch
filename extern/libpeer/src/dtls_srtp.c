@@ -497,15 +497,8 @@ int dtls_srtp_write(DtlsSrtp* dtls_srtp, const unsigned char* buf, size_t len) {
 }
 
 int dtls_srtp_read(DtlsSrtp* dtls_srtp, unsigned char* buf, size_t len) {
-  int ret;
-
   memset(buf, 0, len);
-
-  do {
-    ret = mbedtls_ssl_read(&dtls_srtp->ssl, buf, len);
-
-  } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-  return ret;
+  return mbedtls_ssl_read(&dtls_srtp->ssl, buf, len);
 }
 
 int dtls_srtp_probe(uint8_t* buf) {
