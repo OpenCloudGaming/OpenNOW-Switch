@@ -112,6 +112,7 @@ ExternalProject_Add(srtp2
 
 ExternalProject_Add(usrsctp
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/usrsctp
+  BUILD_ALWAYS ON
   CMAKE_ARGS
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
