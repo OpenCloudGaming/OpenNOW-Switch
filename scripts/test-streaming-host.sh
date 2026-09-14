@@ -85,6 +85,12 @@ run_c rtcp_nack extern/libpeer/src/rtcp.c
 run_c rtcp_receiver_report extern/libpeer/src/rtcp.c
 run_c peer_rtcp_receive "${sections[@]}" -Wno-unused-but-set-variable \
     -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
+run_c dtls_nonblocking_read "${sections[@]}" -Wno-unused-parameter -Wno-empty-body \
+    -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/dtls_srtp.c
+run_c peer_dtls_receive "${sections[@]}" -Wno-unused-but-set-variable \
+    -Iextern/libpeer/third_party/mbedtls/include
+run_c peer_dtls_loop "${sections[@]}" -Wno-unused-but-set-variable \
+    -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
 run_c agent_socket_poll "${sections[@]}"
 "$cc" "${cflags[@]}" -Iextern/libpeer/third_party/mbedtls/include \
     -c extern/libpeer/src/peer.c -o "$out/peer_runtime.o"
