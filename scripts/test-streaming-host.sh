@@ -83,6 +83,7 @@ run_c rtp_h264_assembly extern/libpeer/src/rtp.c
 run_c rtp_reorder extern/libpeer/src/rtp.c
 run_c rtcp_nack extern/libpeer/src/rtcp.c
 run_c rtcp_receiver_report extern/libpeer/src/rtcp.c
+run_c sctp_socket_address -Iextern/libpeer/third_party/usrsctp/usrsctplib
 run_c peer_rtcp_receive "${sections[@]}" -Wno-unused-but-set-variable \
     -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
 run_c dtls_nonblocking_read "${sections[@]}" -Wno-unused-parameter -Wno-empty-body \

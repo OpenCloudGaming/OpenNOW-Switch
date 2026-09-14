@@ -150,6 +150,7 @@ if (have_sin6_len)
 	add_definitions(-DHAVE_SIN6_LEN)
 endif ()
 
+unset(have_sconn_len CACHE)
 check_struct_has_member("struct sockaddr_conn" "sconn_len" "usrsctp.h" have_sconn_len)
 if (have_sconn_len)
 	message(STATUS "HAVE_SCONN_LEN")

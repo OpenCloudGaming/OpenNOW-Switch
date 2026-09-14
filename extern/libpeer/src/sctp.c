@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stddef.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -13,6 +14,13 @@
 #if CONFIG_USE_USRSCTP
 #include <pthread.h>
 #include <usrsctp.h>
+
+_Static_assert(offsetof(struct sockaddr_conn, sconn_family) ==
+               offsetof(struct sockaddr, sa_family),
+               "SCTP address family must match the platform socket ABI");
+_Static_assert(sizeof(((struct sockaddr_conn*)0)->sconn_family) ==
+               sizeof(((struct sockaddr*)0)->sa_family),
+               "SCTP address family width must match the platform socket ABI");
 #endif
 
 static atomic_int sctp_diagnostics_enabled;
@@ -1013,6 +1021,9 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
 
     struct sockaddr_conn sconn;
     memset(&sconn, 0, sizeof(sconn));
+#if defined(__SWITCH__)
+    sconn.sconn_len = sizeof(sconn);
+#endif
     sconn.sconn_family = AF_CONN;
     sconn.sconn_port = htons(sctp->local_port);
     sconn.sconn_addr = (void*)sctp;
@@ -1024,6 +1035,9 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     struct sockaddr_conn rconn;
 
     memset(&rconn, 0, sizeof(struct sockaddr_conn));
+#if defined(__SWITCH__)
+    rconn.sconn_len = sizeof(rconn);
+#endif
     rconn.sconn_family = AF_CONN;
     rconn.sconn_port = htons(sctp->remote_port);
     rconn.sconn_addr = (void*)sctp;
