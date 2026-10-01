@@ -37,6 +37,9 @@ struct PeerConnection {
   void (*oniceconnectionstatechange)(PeerConnectionState state, void* user_data);
   void (*on_connected)(void* userdata);
   void (*on_receiver_packet_loss)(float fraction_loss, uint32_t total_loss, void* user_data);
+  void (*ondatachannelmessage)(char* msg, size_t len, void* userdata, uint16_t sid);
+  void (*ondatachannelopen)(void* userdata);
+  void (*ondatachannelclose)(void* userdata);
 
   uint8_t temp_buf[CONFIG_MTU];
   uint8_t agent_buf[CONFIG_MTU];
@@ -139,6 +142,30 @@ static int peer_connection_video_packet_buffered(const RtpDecoder* decoder,
                                                  uint16_t sequence) {
   const size_t slot = sequence % RTP_REORDER_WINDOW;
   return decoder->reorder_used[slot] && decoder->reorder_sequences[slot] == sequence;
+}
+
+static void peer_connection_datachannel_message(char* msg, size_t len,
+                                               void* userdata, uint16_t sid) {
+  PeerConnection* pc = userdata;
+  if (pc->ondatachannelmessage)
+    pc->ondatachannelmessage(msg, len, pc->config.user_data, sid);
+}
+
+static void peer_connection_datachannel_open(void* userdata) {
+  PeerConnection* pc = userdata;
+  if (pc->ondatachannelopen)
+    pc->ondatachannelopen(pc->config.user_data);
+}
+
+static void peer_connection_datachannel_close(void* userdata) {
+  PeerConnection* pc = userdata;
+  if (pc->ondatachannelclose)
+    pc->ondatachannelclose(pc->config.user_data);
+  if (pc->config.datachannel &&
+      (pc->state == PEER_CONNECTION_CONNECTED || pc->state == PEER_CONNECTION_COMPLETED)) {
+    peer_connection_diag_log("sctp_association_closed");
+    STATE_CHANGED(pc, PEER_CONNECTION_FAILED);
+  }
 }
 
 static uint32_t peer_connection_nack_packet_count(uint16_t bitmask) {
@@ -445,6 +472,7 @@ PeerConnection* peer_connection_create(PeerConfiguration* config) {
   agent_create(&pc->agent);
 
   memset(&pc->sctp, 0, sizeof(pc->sctp));
+  peer_connection_ondatachannel(pc, NULL, NULL, NULL);
 
   if (pc->config.audio_codec) {
     rtp_encoder_init(&pc->artp_encoder, pc->config.audio_codec,
@@ -664,13 +692,16 @@ int peer_connection_loop(PeerConnection* pc) {
 #endif
           peer_connection_diag_log("sctp_create_start");
           pc->sctp_create_attempted = 1;
+          pc->sctp.userdata = pc;
           int sctp_ret = sctp_create_association(&pc->sctp, &pc->dtls_srtp);
           peer_connection_diag_log("sctp_create_done ret=%d", sctp_ret);
-          if (sctp_ret == 0) {
-            pc->sctp.userdata = pc->config.user_data;
-          } else {
+          if (sctp_ret != 0) {
             LOGE("SCTP create socket failed");
+            STATE_CHANGED(pc, PEER_CONNECTION_FAILED);
+            break;
           }
+          if (pc->state != PEER_CONNECTION_CONNECTED)
+            break;
         }
 
         peer_connection_log_candidate_pairs(pc, "transport_completed");
@@ -697,6 +728,8 @@ int peer_connection_loop(PeerConnection* pc) {
       break;
     case PEER_CONNECTION_COMPLETED:
       sctp_tick(&pc->sctp);
+      if (pc->state != PEER_CONNECTION_COMPLETED)
+        break;
       if (pc->dtls_pending || mbedtls_ssl_check_pending(&pc->dtls_srtp.ssl)) {
         packet_processed = peer_connection_read_dtls(pc) > 0;
         if (packet_processed || pc->dtls_pending || pc->state != PEER_CONNECTION_COMPLETED)
@@ -1100,9 +1133,13 @@ void peer_connection_ondatachannel(PeerConnection* pc,
                                    void (*onopen)(void* userdata),
                                    void (*onclose)(void* userdata)) {
   if (pc) {
-    sctp_onopen(&pc->sctp, onopen);
-    sctp_onclose(&pc->sctp, onclose);
-    sctp_onmessage(&pc->sctp, onmessage);
+    pc->ondatachannelmessage = onmessage;
+    pc->ondatachannelopen = onopen;
+    pc->ondatachannelclose = onclose;
+    pc->sctp.userdata = pc;
+    sctp_onopen(&pc->sctp, peer_connection_datachannel_open);
+    sctp_onclose(&pc->sctp, peer_connection_datachannel_close);
+    sctp_onmessage(&pc->sctp, peer_connection_datachannel_message);
   }
 }
 

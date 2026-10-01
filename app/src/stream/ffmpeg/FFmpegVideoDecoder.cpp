@@ -5,6 +5,7 @@
 #include "../../video_quality_policy.hpp"
 #include "../DecodeQueuePolicy.hpp"
 #include <cstdio>
+#include <cstring>
 #include <new>
 #include <vector>
 extern "C" {
@@ -285,6 +286,14 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
 
     m_frames_in++;
 
+    av_packet_unref(m_packet);
+    const int packet_result = av_new_packet(m_packet, inlen);
+    if (packet_result < 0)
+        return packet_result;
+    std::memcpy(m_packet->data, indata, static_cast<size_t>(inlen));
+    m_packet->pts = pts;
+    m_packet->dts = pts;
+
     int decoded_frames = 0;
     bool corrupt_frame_dropped = false;
     auto drain_frames = [&]() {
@@ -310,12 +319,12 @@ int FFmpegVideoDecoder::submit_decode_unit(uint8_t* indata, int inlen, int64_t p
         return decode_error;
     };
 
-    int decode_result = decode(reinterpret_cast<char*>(indata), inlen, pts);
+    int decode_result = decode();
     if (decode_result == AVERROR(EAGAIN)) {
         const int drain_result = drain_frames();
         if (drain_result < 0)
             return drain_result;
-        decode_result = decode(reinterpret_cast<char*>(indata), inlen, pts);
+        decode_result = decode();
     }
 
     if (decode_result < 0)
@@ -340,12 +349,7 @@ int FFmpegVideoDecoder::capabilities() const {
     return 0;
 }
 
-int FFmpegVideoDecoder::decode(char* indata, int inlen, int64_t pts) {
-    m_packet->data = (uint8_t*)indata;
-    m_packet->size = inlen;
-    m_packet->pts = pts;
-    m_packet->dts = pts;
-
+int FFmpegVideoDecoder::decode() {
 #if !defined(PLATFORM_SWITCH)
     int policy;
     sched_param params{};
@@ -356,7 +360,7 @@ int FFmpegVideoDecoder::decode(char* indata, int inlen, int64_t pts) {
 
 //    m_decoder_context->skip_frame = AVDISCARD_ALL;
 
-    int err = avcodec_send_packet(m_decoder_context, m_packet);
+    const int err = avcodec_send_packet(m_decoder_context, m_packet);
     if (err == AVERROR(EAGAIN)) {
         brls::Logger::debug("FFmpeg: decoder wants frame drain before accepting more data");
         return err;

@@ -151,7 +151,7 @@ TopBarFrame::TopBarFrame()
     addView(header_container_);
 
     auto* brand = new brls::Box(brls::Axis::ROW);
-    brand->setWidth(420);
+    brand->setWidth(220);
     brand->setShrink(0.0f);
     brand->setAlignItems(brls::AlignItems::CENTER);
     brand->setJustifyContent(brls::JustifyContent::FLEX_START);
@@ -173,12 +173,13 @@ TopBarFrame::TopBarFrame()
 
     tabs_container_ = new brls::Box(brls::Axis::ROW);
     tabs_container_->setGrow(1.0f);
+    tabs_container_->setShrink(0.0f);
     tabs_container_->setAlignItems(brls::AlignItems::CENTER);
     tabs_container_->setJustifyContent(brls::JustifyContent::CENTER);
     header_container_->addView(tabs_container_);
 
     auto* status_container = new brls::Box(brls::Axis::ROW);
-    status_container->setWidth(420);
+    status_container->setWidth(500);
     status_container->setHeight(54);
     status_container->setShrink(0.0f);
     status_container->setAlignItems(brls::AlignItems::CENTER);
@@ -206,7 +207,7 @@ TopBarFrame::TopBarFrame()
 
     account_container_ = new brls::Box(brls::Axis::ROW);
     account_container_->setHeight(54);
-    account_container_->setShrink(0.0f);
+    account_container_->setShrink(1.0f);
     account_container_->setMarginLeft(3);
     account_container_->setAlignItems(brls::AlignItems::CENTER);
     account_container_->setJustifyContent(brls::JustifyContent::FLEX_END);
@@ -223,7 +224,7 @@ TopBarFrame::TopBarFrame()
     account_container_->addView(avatar_image_);
 
     auto* account_labels = new brls::Box(brls::Axis::COLUMN);
-    account_labels->setShrink(0.0f);
+    account_labels->setShrink(1.0f);
     account_labels->setJustifyContent(brls::JustifyContent::CENTER);
     account_name_label_ = new brls::Label();
     account_name_label_->setText("Guest");
@@ -326,6 +327,7 @@ void TopBarFrame::addTab(const std::string& label, TabViewCreator creator)
 
     auto* text = new brls::Label();
     text->setText(Tr(label));
+    text->setSingleLine(true);
     text->setFontSize(18);
     text->setTextColor(nvgRGB(128, 133, 143));
 

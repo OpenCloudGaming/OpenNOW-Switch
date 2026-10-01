@@ -560,7 +560,7 @@ struct AudioPipeline::Impl {
                        item.payload_type == 63;
             });
             if (next != packets.end()) {
-                const auto redundant = opennow::audio::ParseFirstRedundant(
+                const auto redundant = opennow::audio::ParseLatestRedundant(
                     next->payload.data(), next->payload.size());
                 if (redundant.data && redundant.size > 0) {
                     packet.payload.assign(redundant.data, redundant.data + redundant.size);

@@ -235,8 +235,8 @@ static const int yuv420Planes[][5] = {
 };
 
 static const int p010Planes[][5] = {
-    {2, 1, 2, GL_R16, GL_RED},  // Y
-    {4, 2, 4, GL_RG16, GL_RG},  // UV
+    {2, 1, 1, GL_R16, GL_RED},  // Y
+    {4, 2, 2, GL_RG16, GL_RG},  // UV
     {0, 0, 0, 0, 0},            // NOT EXISTS
 };
 
@@ -278,7 +278,7 @@ static const float* gl_color_matrix(enum AVColorSpace color_space,
     case AVCOL_SPC_BT2020_CL:
         return color_full ? bt2020Full : bt2020Lim;
     default:
-        return bt601Lim;
+        return color_full ? bt601Full : bt601Lim;
     }
 }
 
@@ -475,6 +475,7 @@ void GLVideoRenderer::bindTexture(int id) {
     textureHeight[id] = m_frame_height / currentPlanes[id][2];
     glTexImage2D(GL_TEXTURE_2D, 0, currentPlanes[id][3], textureWidth[id], textureHeight[id],
                  0, currentPlanes[id][4], currentFormat, nullptr);
+    m_uploaded_generation = 0;
     glUniform1i(m_texture_uniform[id], id);
 }
 
@@ -545,12 +546,6 @@ void GLVideoRenderer::checkAndUpdateScale(int width, int height,
             bindTexture(i);
         }
 
-        bool colorFull = frame->color_range == AVCOL_RANGE_JPEG;
-
-        glUniform3fv(m_offset_location, 1, gl_color_offset(colorFull));
-        glUniformMatrix3fv(m_yuvmat_location, 1, GL_FALSE,
-                           gl_color_matrix(frame->colorspace, colorFull));
-
         float frameAspect = ((float)m_frame_height / (float)m_frame_width);
         float screenAspect = ((float)m_screen_height / (float)m_screen_width);
 
@@ -616,6 +611,10 @@ void GLVideoRenderer::drawLatest(NVGcontext* vg, int width, int height,
 
     glUseProgram(m_shader_program);
     checkAndUpdateScale(width, height, frame);
+    const bool color_full = isFrameFullRange(frame);
+    glUniform3fv(m_offset_location, 1, gl_color_offset(color_full));
+    glUniformMatrix3fv(m_yuvmat_location, 1, GL_FALSE,
+                       gl_color_matrix(frame->colorspace, color_full));
 
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -732,7 +731,8 @@ int GLVideoRenderer::getFrameColorspace(const AVFrame* frame) {
 
 bool GLVideoRenderer::isFrameFullRange(const AVFrame* frame) {
     if (!frame) return false;
-    return frame->color_range == AVCOL_RANGE_JPEG;
+    return frame->color_range == AVCOL_RANGE_JPEG ||
+        (frame->color_range == AVCOL_RANGE_UNSPECIFIED && frame->format == AV_PIX_FMT_YUVJ420P);
 }
 
 #endif // USE_GL_RENDERER

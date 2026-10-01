@@ -213,6 +213,8 @@ private:
     bool startup_control_sent_ = false;
     int datachannel_open_attempts_ = 0;
     int input_protocol_version_ = 2;
+    std::vector<uint8_t> pending_input_handshake_;
+    bool input_handshake_acknowledged_ = false;
     int partial_reliable_threshold_ms_ = 16;
     int input_heartbeat_tx_count_ = 0;
     int gamepad_tx_count_ = 0;
@@ -283,6 +285,7 @@ private:
     int send_datachannel_binary(uint16_t sid, const std::string& label, const uint8_t* payload, size_t size);
     void maybe_send_input_heartbeat();
     void maybe_activate_input();
+    bool acknowledge_input_handshake();
     void maybe_request_startup_keyframe_retry();
     void maybe_recover_decode_stall();
     void maybe_recover_rtp_damage();

@@ -168,8 +168,8 @@ bool WebSocketClient::connect() {
     size_t rcvd = 0;
     std::string response;
     
-    int retries = 50; // 5 seconds max
-    while (retries > 0) {
+    const auto receive_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < receive_deadline) {
         res = curl_easy_recv(curl_, buf, sizeof(buf) - 1, &rcvd);
         if (res == CURLE_OK && rcvd > 0) {
             response.append(buf, rcvd);
@@ -196,7 +196,6 @@ bool WebSocketClient::connect() {
             }
         } else if (res == CURLE_AGAIN) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            retries--;
         } else {
             last_error_ = "Recv error: " + std::string(curl_easy_strerror(res));
             brls::Logger::error("WebSocket recv error: {}", curl_easy_strerror(res));
@@ -224,6 +223,7 @@ void WebSocketClient::close_transport() {
     connected_ = false;
     closing_ = false;
     tx_queue_.reset();
+    pending_receive_error_.clear();
     rx_buffer_.clear();
     fragmented_message_.clear();
     fragmented_opcode_ = 0;
@@ -436,6 +436,19 @@ void WebSocketClient::poll() {
             break;
     }
 
+    if (!connected_) {
+        if (closing_)
+            drain_outgoing();
+        return;
+    }
+    if (!pending_receive_error_.empty()) {
+        if (frames_processed >= kMaximumFramesPerPoll)
+            return;
+        last_error_ = pending_receive_error_;
+        close_transport();
+        return;
+    }
+
     if (!drain_outgoing() || !connected_ || frames_processed >= kMaximumFramesPerPoll)
         return;
 
@@ -454,12 +467,12 @@ void WebSocketClient::poll() {
             read_this_poll += rcvd;
         } else {
             if (res == CURLE_OK && rcvd == 0) {
-                if (read_this_poll > 0)
-                    break;
-                last_error_ = "Remote endpoint closed the signaling connection";
-                close_transport();
+                pending_receive_error_ = "Remote endpoint closed the signaling connection";
             } else if (res != CURLE_AGAIN) {
-                last_error_ = "Receive error: " + std::string(curl_easy_strerror(res));
+                pending_receive_error_ = "Receive error: " + std::string(curl_easy_strerror(res));
+            }
+            if (!pending_receive_error_.empty() && read_this_poll == 0) {
+                last_error_ = pending_receive_error_;
                 close_transport();
             }
             break;

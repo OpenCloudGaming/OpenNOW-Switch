@@ -16,6 +16,8 @@ using namespace opennow::webrtc::internal;
 namespace
 {
 
+constexpr size_t kMaxInputHandshakeBytes = 64;
+
 void PutU16Le(std::vector<uint8_t>& out, uint16_t value)
 {
     out.push_back(static_cast<uint8_t>(value & 0xff));
@@ -395,7 +397,8 @@ void WebRtcSession::on_datachannel_message(const char* msg, size_t len, uint16_t
                    " bytes=" + std::to_string(len) +
                    " hex=" + HexPreview(reinterpret_cast<const uint8_t*>(msg), len, 24));
 
-    if (msg && len >= 2 && (label.empty() || label == "input_channel_v1" || sid == 0)) {
+    if (!input_handshake_acknowledged_ && msg && len >= 2 && len <= kMaxInputHandshakeBytes &&
+        sid == 0 && (label.empty() || label == "input_channel_v1")) {
         const auto* bytes = reinterpret_cast<const uint8_t*>(msg);
         const uint16_t first_word = static_cast<uint16_t>(bytes[0] | (bytes[1] << 8));
         int version = 2;
@@ -410,16 +413,33 @@ void WebRtcSession::on_datachannel_message(const char* msg, size_t len, uint16_t
         }
 
         if (handshake) {
-            input_ready_ = true;
+            input_ready_ = false;
             input_protocol_version_ = std::max(2, version);
-            AppendStreamLog("DATA input_handshake_complete version=" +
-                            std::to_string(input_protocol_version_) +
-                            " firstWord=" + std::to_string(first_word));
-            AppendInputLog("HANDSHAKE complete protocol=" + std::to_string(input_protocol_version_) +
-                           " firstWord=" + std::to_string(first_word));
-            maybe_send_input_heartbeat();
+            pending_input_handshake_.assign(bytes, bytes + len);
+            if (acknowledge_input_handshake())
+                maybe_send_input_heartbeat();
         }
     }
+}
+
+bool WebRtcSession::acknowledge_input_handshake() {
+    if (pending_input_handshake_.empty())
+        return false;
+
+    const int sent = send_datachannel_binary(
+        0, "input_handshake", pending_input_handshake_.data(), pending_input_handshake_.size());
+    if (sent < 0) {
+        input_activation_due_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+        return false;
+    }
+
+    pending_input_handshake_.clear();
+    input_handshake_acknowledged_ = true;
+    input_ready_ = true;
+    input_activation_due_ = {};
+    AppendStreamLog("DATA input_handshake_complete version=" + std::to_string(input_protocol_version_));
+    AppendInputLog("HANDSHAKE complete protocol=" + std::to_string(input_protocol_version_));
+    return true;
 }
 
 void WebRtcSession::on_datachannel_open() {
@@ -535,7 +555,7 @@ void WebRtcSession::maybe_send_keepalive() {
 
 
 void WebRtcSession::maybe_open_datachannel() {
-    if (!pc_ || datachannel_open_requested_)
+    if (!pc_ || !datachannel_opened_ || datachannel_open_requested_)
         return;
 
     const auto now = std::chrono::steady_clock::now();
@@ -585,6 +605,7 @@ void WebRtcSession::maybe_open_datachannel() {
 }
 
 void WebRtcSession::reset_input_channel_for_retry(const char* reason) {
+    const int previous_attempts = datachannel_open_attempts_;
     datachannel_opened_ = false;
     datachannel_open_requested_ = false;
     reliable_input_channel_requested_ = false;
@@ -595,9 +616,13 @@ void WebRtcSession::reset_input_channel_for_retry(const char* reason) {
     last_datachannel_open_attempt_ = {};
     last_input_heartbeat_sent_ = {};
     consecutive_input_send_failures_ = 0;
+    datachannel_open_attempts_ = 0;
+    input_protocol_version_ = 2;
+    pending_input_handshake_.clear();
+    input_handshake_acknowledged_ = false;
     AppendInputLog(std::string("RECOVERY input_channel_reset reason=") +
                    (reason ? reason : "unknown") +
-                   " attempts=" + std::to_string(datachannel_open_attempts_));
+                   " attempts=" + std::to_string(previous_attempts));
 }
 
 void WebRtcSession::note_input_send_result(int sent, const char* label) {
@@ -630,10 +655,17 @@ void WebRtcSession::maybe_activate_input() {
         std::chrono::steady_clock::now() < input_activation_due_)
         return;
 
+    if (!pending_input_handshake_.empty()) {
+        acknowledge_input_handshake();
+        return;
+    }
+
     input_ready_ = true;
-    input_protocol_version_ = 2;
-    AppendStreamLog("DATA input_ready fallback=v2 controller=xbox sidReliable=0 sidFast=2");
-    AppendInputLog("HANDSHAKE fallback protocol=2 inputReady=1 controller=xbox sid=0");
+    const std::string mode = input_handshake_acknowledged_ ? "reactivate" : "fallback";
+    AppendStreamLog("DATA input_ready mode=" + mode + " protocol=" + std::to_string(input_protocol_version_) +
+                    " controller=xbox sidReliable=0");
+    AppendInputLog("HANDSHAKE " + mode + " protocol=" + std::to_string(input_protocol_version_) +
+                   " inputReady=1 controller=xbox sid=0");
 }
 
 void WebRtcSession::send_datachannel_text(const std::string& label, const std::string& payload) {

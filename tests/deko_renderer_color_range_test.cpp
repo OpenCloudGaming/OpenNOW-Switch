@@ -30,6 +30,16 @@ int main()
         assert(renderer.isFrameFullRange(frame));
         assert(deko_test::last_transform[12] == 0.0f);
 
+        for (const auto colorspace : {AVCOL_SPC_SMPTE170M, AVCOL_SPC_BT709,
+                                     AVCOL_SPC_BT2020_NCL, AVCOL_SPC_BT709}) {
+            frame->colorspace = colorspace;
+            deko_test::completed = deko_test::submitted;
+            renderer.drawLatest(nullptr, 1280, 720, frame, 0, 1);
+            const float expected = colorspace == AVCOL_SPC_BT709 ? 1.5748f :
+                colorspace == AVCOL_SPC_BT2020_NCL ? 1.4746f : 1.4020f;
+            assert(deko_test::last_transform[8] == expected);
+        }
+
         AVFrame hardware {};
         hardware.format = AV_PIX_FMT_NVTEGRA;
         hardware.color_range = AVCOL_RANGE_JPEG;

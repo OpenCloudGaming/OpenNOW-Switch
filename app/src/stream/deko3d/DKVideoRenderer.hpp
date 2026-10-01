@@ -65,6 +65,7 @@ private:
         dk::ImageLayout chroma_layout_;
         bool hardware_frames_ = false;
         bool full_range_ = false;
+        AVColorSpace color_space_ = AVCOL_SPC_UNSPECIFIED;
 
         struct BufferDeleter {
             void operator()(AVBufferRef* buffer) const { av_buffer_unref(&buffer); }

@@ -56,6 +56,10 @@ run_cpp websocket_client -DFMT_HEADER_ONLY -isystem extern/ffmpeg/include \
     app/src/WebSocketClient.cpp app/src/signaling_client.cpp app/src/http_client.cpp "${crypto[@]}"
 run_cpp websocket_handshake -Iextern/libpeer/third_party/mbedtls/include -Wl,--gc-sections "${crypto[@]}"
 run_cpp signaling_diagnostics -ljansson
+run_cpp webrtc_input_handshake -Iextern/libpeer/src \
+    -Iextern/libpeer/third_party/mbedtls/include \
+    -Iextern/borealis/library/include/borealis/extern/nanovg "${sections[@]}" \
+    app/src/webrtc/input.cpp -ljansson
 run_cpp av_frame_queue -Itests/stream_stubs app/src/stream/ffmpeg/AVFrameHolder.cpp -lavcodec -lavutil
 run_cpp gpu_frame_queue -lavutil
 python3 tests/run_deko_renderer_reconfiguration_test.py
@@ -63,7 +67,7 @@ printf 'PASS deko_renderer_reconfiguration\n'
 python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_color_range_test.cpp
 printf 'PASS deko_renderer_color_range\n'
 run_cpp audio_pipeline -Itests/stream_stubs -Iextern/libpeer/src app/src/stream/audio/AudioPipeline.cpp
-for scenario in timeline ssrc; do
+for scenario in timeline ssrc red; do
     "$out/audio_pipeline" "$scenario"
     printf 'PASS audio_pipeline/%s\n' "$scenario"
 done
@@ -71,10 +75,18 @@ done
     app/src/stream/ffmpeg/FFmpegVideoDecoder.cpp app/src/stream/ffmpeg/AVFrameHolder.cpp \
     -Wl,--wrap=av_frame_alloc,--wrap=av_frame_free,--wrap=av_packet_alloc,--wrap=avcodec_send_packet,--wrap=avcodec_receive_frame \
     -lavcodec -lavutil -o "$out/ffmpeg_video_decoder"
-for scenario in allocation{0..6} packet array receive receive-again send-again again eof; do
+for scenario in allocation{0..6} packet array receive receive-again send-again again eof padding; do
     "$out/ffmpeg_video_decoder" "$scenario"
     printf 'PASS ffmpeg_video_decoder/%s\n' "$scenario"
 done
+run_cpp ffmpeg_packet_ownership -Itests/stream_stubs \
+    app/src/stream/ffmpeg/FFmpegVideoDecoder.cpp app/src/stream/ffmpeg/AVFrameHolder.cpp \
+    -Wl,--wrap=av_new_packet,--wrap=avcodec_send_packet,--wrap=avcodec_receive_frame \
+    -lavcodec -lavutil
+bash tests/run_ffmpeg_decode_integration_test.sh
+printf 'PASS ffmpeg_decode_integration\n'
+bash tests/run_gl_renderer_reconfiguration_test.sh
+printf 'PASS gl_renderer_reconfiguration\n'
 run_cpp nvst_sdp app/src/webrtc/nvst_sdp.cpp
 run_cpp cloud_session_protocol "${sections[@]}" app/src/gfn/cloud_session_protocol.cpp app/src/gfn/shared.cpp -ljansson
 run_cpp stream_bitrate_pipeline "${sections[@]}" app/src/stream_settings.cpp app/src/localization.cpp \

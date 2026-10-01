@@ -41,6 +41,10 @@ run_cpp auth_client_token_refresh -ffunction-sections -fdata-sections -Wl,--gc-s
 run_cpp auth_saved_session_refresh -ffunction-sections -fdata-sections -Wl,--gc-sections \
     app/src/gfn/authentication.cpp app/src/gfn/persistence.cpp app/src/gfn/shared.cpp \
     -ljansson -lmbedcrypto
+for name in gfn_atomic_write gfn_device_identity gfn_trace_redaction; do
+    run_cpp "$name" -ffunction-sections -fdata-sections -Wl,--gc-sections \
+        app/src/gfn/shared.cpp -ljansson
+done
 run_cpp catalog_response -ffunction-sections -fdata-sections -Wl,--gc-sections \
     app/src/gfn/shared.cpp -ljansson
 run_cpp cover_image_cache -Itests/cover_cache_stubs app/src/cover_image_cache.cpp
