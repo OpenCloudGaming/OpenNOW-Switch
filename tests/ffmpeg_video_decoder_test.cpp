@@ -13,6 +13,7 @@ int frame_allocation_failure = -1;
 bool packet_allocation_failure = false;
 bool array_allocation_failure = false;
 bool send_again = false;
+bool check_packet_padding = false;
 int receive_error = AVERROR(EAGAIN);
 std::set<AVFrame*> allocated_frames;
 }
@@ -85,8 +86,13 @@ AVPacket* __wrap_av_packet_alloc()
     return packet_allocation_failure ? nullptr : __real_av_packet_alloc();
 }
 
-int __wrap_avcodec_send_packet(AVCodecContext*, const AVPacket*)
+int __wrap_avcodec_send_packet(AVCodecContext*, const AVPacket* packet)
 {
+    if (check_packet_padding) {
+        assert(packet->size == 1 && packet->data[0] == 0x55);
+        for (int i = 0; i < AV_INPUT_BUFFER_PADDING_SIZE; ++i)
+            assert(packet->data[packet->size + i] == 0);
+    }
     if (send_again) {
         send_again = false;
         return AVERROR(EAGAIN);
@@ -113,7 +119,9 @@ int main(int argc, char** argv)
     else if (scenario == "receive" || scenario == "receive-again")
         receive_error = AVERROR_INVALIDDATA;
     else
-        assert(scenario == "again" || scenario == "eof" || scenario == "send-again");
+        assert(scenario == "again" || scenario == "eof" || scenario == "send-again" ||
+               scenario == "padding");
+    check_packet_padding = scenario == "padding";
     send_again = scenario == "receive-again" || scenario == "send-again";
     if (scenario == "eof")
         receive_error = AVERROR_EOF;
@@ -126,8 +134,14 @@ int main(int argc, char** argv)
     } else {
         assert(result == 0);
         uint8_t packet[1 + AV_INPUT_BUFFER_PADDING_SIZE] {};
+        if (check_packet_padding)
+            packet[0] = 0x55;
         const int decoded = decoder.submit_decode_unit(packet, 1, 90000);
         assert(decoded == (scenario.starts_with("receive") ? AVERROR_INVALIDDATA : 0));
+        if (check_packet_padding) {
+            uint8_t unpadded[] = {0x55};
+            assert(decoder.submit_decode_unit(unpadded, sizeof(unpadded), 91500) == 0);
+        }
     }
     decoder.cleanup();
     decoder.cleanup();

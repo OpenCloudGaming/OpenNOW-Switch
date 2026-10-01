@@ -17,7 +17,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     bool uses_hardware_frames() const override { return m_uses_hardware_frames; }
 
   private:
-    int decode(char* indata, int inlen, int64_t pts);
+    int decode();
     AVFrame* get_frame(bool native_frame, int& decode_error);
 
     AVPacket* m_packet = nullptr;

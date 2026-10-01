@@ -11,7 +11,7 @@
 namespace
 {
 
-enum class UpgradeResponse { Valid, Bare, WrongAccept };
+enum class UpgradeResponse { Valid, Bare, WrongAccept, SlowDrip };
 UpgradeResponse next_upgrade = UpgradeResponse::Valid;
 
 struct FakeTransport
@@ -31,6 +31,7 @@ struct FakeTransport
     CURLcode receive_result = CURLE_AGAIN;
     UpgradeResponse upgrade = std::exchange(next_upgrade, UpgradeResponse::Valid);
     std::string request;
+    size_t upgrade_offset = 0;
 };
 
 std::vector<std::unique_ptr<FakeTransport>> transports;
@@ -148,10 +149,16 @@ CURLcode curl_easy_recv(CURL* curl, void* buffer, size_t length, size_t* receive
             (fake.upgrade == UpgradeResponse::Bare ? std::string() :
                 "Upgrade: WebSocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: " +
                 (fake.upgrade == UpgradeResponse::WrongAccept ? "synthetic-secret" : *accept) + "\r\n") + "\r\n";
-        assert(length >= response.size());
-        std::memcpy(buffer, response.data(), response.size());
-        *received = response.size();
-        fake.handshaking = false;
+        if (fake.upgrade == UpgradeResponse::SlowDrip && fake.upgrade_offset < 55) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            *received = 1;
+        } else {
+            *received = response.size() - fake.upgrade_offset;
+        }
+        assert(length >= *received);
+        std::memcpy(buffer, response.data() + fake.upgrade_offset, *received);
+        fake.upgrade_offset += *received;
+        fake.handshaking = fake.upgrade_offset != response.size();
         return CURLE_OK;
     }
     *received = std::min(length, fake.input.size());
@@ -167,6 +174,40 @@ CURLcode curl_easy_recv(CURL* curl, void* buffer, size_t length, size_t* receive
 int main()
 {
     using Queue = opennow::websocket::WriteQueue;
+    for (const CURLcode error : {CURLE_OK, CURLE_RECV_ERROR}) {
+        WebSocketClient client("ws://example.invalid");
+        assert(client.connect());
+        auto& fake = latest();
+        std::vector<std::string> messages;
+        client.set_on_message([&](const std::string& message) { messages.push_back(message); });
+        for (size_t i = 0; i < 32; ++i)
+            fake.input.insert(fake.input.end(), {0x81, 1, 'x'});
+        fake.input.insert(fake.input.end(), {0x81, 2, 'y'});
+        fake.receive_result = error;
+        for (size_t i = 0; i < 4; ++i)
+            client.poll();
+        assert(messages == std::vector<std::string>(32, "x"));
+        assert(!client.is_connected());
+        assert(fake.closed);
+        assert(client.get_last_error() == (error == CURLE_OK
+            ? "Remote endpoint closed the signaling connection" : "Receive error: fake transport error"));
+        assert(client.connect());
+        auto& fresh = latest();
+        fresh.input = {0x81, 1, 'z'};
+        client.poll();
+        client.poll();
+        assert(messages.back() == "z");
+        assert(client.is_connected());
+    }
+    {
+        next_upgrade = UpgradeResponse::SlowDrip;
+        WebSocketClient client("ws://example.invalid");
+        const auto started = Queue::Clock::now();
+        assert(!client.connect());
+        assert(Queue::Clock::now() - started < std::chrono::seconds(6));
+        assert(latest().closed);
+        assert(client.get_last_error() == "Handshake timeout");
+    }
     for (const auto response : {UpgradeResponse::Bare, UpgradeResponse::WrongAccept}) {
         next_upgrade = response;
         WebSocketClient client("wss://example.invalid");

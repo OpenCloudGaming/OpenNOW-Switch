@@ -6,6 +6,7 @@
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -229,11 +230,46 @@ static void check_ssrc_timeline()
     pipeline.stop();
 }
 
+static void check_red_recovery()
+{
+    AudioPipeline pipeline;
+    pipeline.configure(1000, 30);
+    assert(pipeline.start());
+    submit_epoch(pipeline, 1);
+    await([] { return starts == 1; });
+    uint8_t payload[] = {
+        0x80 | 111, 15, 0, 2,
+        0x80 | 111, 7, 128, 2,
+        111, 0xf0, 2, 0xf0, 3, 0xf0, 4
+    };
+    PeerAudioPacket packet {};
+    packet.data = payload;
+    packet.size = sizeof(payload);
+    packet.timestamp = 480 * 4;
+    packet.ssrc = 1;
+    packet.sequence = 4;
+    packet.payload_type = 63;
+    pipeline.submit(packet);
+    await([] { return decoded_sequences.size() == 5; });
+    {
+        std::lock_guard lock(mutex);
+        std::printf("RED recovered sequence markers:");
+        for (const int sequence : decoded_sequences)
+            std::printf(" %d", sequence);
+        std::printf("\n");
+        std::fflush(stdout);
+        assert(decoded_sequences == std::vector<int>({0, 1, 2, 3, 4}));
+    }
+    pipeline.stop();
+}
+
 int main(int argc, char** argv)
 {
     if (argc > 1) {
         if (std::string(argv[1]) == "timeline")
             check_output_timeline();
+        else if (std::string(argv[1]) == "red")
+            check_red_recovery();
         else {
             assert(std::string(argv[1]) == "ssrc");
             check_ssrc_timeline();

@@ -32,6 +32,7 @@ private:
     bool connected_ = false;
     bool closing_ = false;
     std::string last_error_;
+    std::string pending_receive_error_;
     std::vector<uint8_t> rx_buffer_;
     std::string fragmented_message_;
     uint8_t fragmented_opcode_ = 0;

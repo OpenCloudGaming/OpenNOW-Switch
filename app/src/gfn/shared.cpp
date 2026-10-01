@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <random>
 #include <stdexcept>
 
@@ -23,6 +24,7 @@ namespace opennow::gfn::detail
 namespace
 {
 constexpr const char* kDefaultProviderId = "PDiAhv2kJTFeQ7WOPqiQ2tRZ7lGhR2X11dXvM4TZSxg";
+void WriteTextFile(const std::string& path, const std::string& content);
 }
 
 std::string Trim(const std::string& value)
@@ -63,7 +65,8 @@ JsonPtr LoadJson(const std::string& body)
     if (!root)
     {
         throw std::runtime_error(
-            "JSON parse failed at line " + std::to_string(error.line) + ": " + error.text);
+            "JSON parse failed at line " + std::to_string(error.line) +
+            ", column " + std::to_string(error.column));
     }
 
     return root;
@@ -176,10 +179,26 @@ std::string GenerateUuid()
 
 std::string GenerateDeviceId()
 {
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
     const std::string path = GetAppHome() + "/device_id.txt";
     std::string stored = Trim(ReadTextFile(path));
     if (device_identity::IsUsableStoredDeviceId(stored))
         return stored;
+
+    stored = Trim(ReadTextFile(path + ".bak"));
+    if (device_identity::IsUsableStoredDeviceId(stored))
+    {
+        const std::string temporary = path + ".tmp";
+        WriteTextFile(temporary, stored);
+        std::remove(path.c_str());
+        if (std::rename(temporary.c_str(), path.c_str()) != 0)
+        {
+            std::remove(temporary.c_str());
+            throw std::runtime_error("Unable to restore " + path);
+        }
+        return stored;
+    }
 
     stored = GenerateUuid();
     WriteTextFileAtomically(path, stored);
@@ -238,6 +257,12 @@ void WriteTextFile(const std::string& path, const std::string& content)
         throw std::runtime_error("Unable to write " + path);
 
     stream.write(content.data(), static_cast<std::streamsize>(content.size()));
+    stream.close();
+    if (!stream)
+    {
+        std::remove(path.c_str());
+        throw std::runtime_error("Unable to complete write to " + path);
+    }
 }
 
 } // namespace
@@ -351,13 +376,13 @@ std::string JsonForTrace(const std::string& body)
 
     json_error_t error {};
     JsonPtr root(json_loads(body.c_str(), 0, &error), &json_decref);
-    if (!root)
-        return body;
+    if (!root || !json_is_object(root.get()))
+        return "<unrecognized JSON response omitted>";
 
     RedactJsonInPlace(root.get());
     char* dump = json_dumps(root.get(), JSON_INDENT(2));
     if (!dump)
-        return body;
+        return "<JSON serialization failed>";
 
     std::unique_ptr<char, decltype(&std::free)> output(dump, &std::free);
     return output.get();

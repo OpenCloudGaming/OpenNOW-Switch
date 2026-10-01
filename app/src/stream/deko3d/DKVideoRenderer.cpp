@@ -218,7 +218,8 @@ bool DKVideoRenderer::Configuration::initialize(
 
     Transformation transform {};
     full_range_ = frame_full_range(frame);
-    set_color_transform(transform, frame->colorspace, full_range_);
+    color_space_ = frame->colorspace;
+    set_color_transform(transform, color_space_, full_range_);
 
     const float frame_aspect = static_cast<float>(frame_height_) / frame_width_;
     const float screen_aspect = static_cast<float>(screen_height_) / screen_width_;
@@ -339,7 +340,7 @@ bool DKVideoRenderer::Configuration::matches(
     return screen_width_ == width && screen_height_ == height &&
         frame_width_ == frame->width && frame_height_ == frame->height &&
         hardware_frames_ == (frame->format == AV_PIX_FMT_NVTEGRA) &&
-        full_range_ == frame_full_range(frame);
+        full_range_ == frame_full_range(frame) && color_space_ == frame->colorspace;
 }
 
 void DKVideoRenderer::Configuration::bindDescriptors(

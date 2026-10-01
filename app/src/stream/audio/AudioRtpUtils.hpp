@@ -17,20 +17,30 @@ struct RedundantPayload {
     uint16_t timestamp_offset = 0;
 };
 
-inline RedundantPayload ParseFirstRedundant(const uint8_t* data, size_t size) {
+inline RedundantPayload ParseLatestRedundant(const uint8_t* data, size_t size) {
     if (!data || size < 5 || (data[0] & 0x80) == 0)
         return {};
-    const uint16_t timestamp_offset = uint16_t((uint16_t(data[1]) << 6) | (data[2] >> 2));
-    const size_t first_length = size_t(((data[2] & 0x03) << 8) | data[3]);
     size_t header = 0;
+    size_t redundant_bytes = 0;
+    size_t length = 0;
+    uint16_t timestamp_offset = 0;
     while (header < size && (data[header] & 0x80) != 0) {
-        if (header + 4 > size)
+        if (header + 4 > size || (data[header] & 0x7f) != 111)
             return {};
+        length = size_t(((data[header + 2] & 0x03) << 8) | data[header + 3]);
+        redundant_bytes += length;
+        if (length == 0 || redundant_bytes > size)
+            return {};
+        timestamp_offset =
+            uint16_t((uint16_t(data[header + 1]) << 6) | (data[header + 2] >> 2));
         header += 4;
     }
-    if (header >= size || ++header + first_length > size || first_length == 0)
+    if (header >= size || (data[header] & 0x7f) != 111)
         return {};
-    return {data + header, first_length, timestamp_offset};
+    ++header;
+    if (redundant_bytes >= size - header)
+        return {};
+    return {data + header + redundant_bytes - length, length, timestamp_offset};
 }
 
 inline ParsedPayload ParseRedPrimary(const uint8_t* data, size_t size, uint8_t payload_type) {

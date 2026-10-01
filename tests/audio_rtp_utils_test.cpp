@@ -23,9 +23,27 @@ int main() {
     auto primary = ParseRedPrimary(red, sizeof(red), 63);
     assert(primary.red && primary.size == 3);
     assert(primary.data[0] == 0x11 && primary.data[2] == 0x33);
-    auto redundant = ParseFirstRedundant(red, sizeof(red));
+    auto redundant = ParseLatestRedundant(red, sizeof(red));
     assert(redundant.size == 2 && redundant.timestamp_offset == 0);
     assert(redundant.data[0] == 0xaa && redundant.data[1] == 0xbb);
+
+    const uint8_t multiple[] = {
+        0x80 | 111, 15, 0, 2, 0x80 | 111, 7, 128, 2,
+        111, 0xaa, 0xbb, 0xcc, 0xdd, 0x11
+    };
+    redundant = ParseLatestRedundant(multiple, sizeof(multiple));
+    assert(redundant.size == 2 && redundant.timestamp_offset == 480);
+    assert(redundant.data[0] == 0xcc && redundant.data[1] == 0xdd);
+    for (size_t size = 0; size < sizeof(multiple); ++size)
+        assert(!ParseLatestRedundant(multiple, size).data);
+    uint8_t wrong_codec[sizeof(multiple)];
+    for (size_t i = 0; i < sizeof(multiple); ++i)
+        wrong_codec[i] = multiple[i];
+    wrong_codec[4] = 0x80 | 110;
+    assert(!ParseLatestRedundant(wrong_codec, sizeof(wrong_codec)).data);
+    const uint8_t short_frame[] = {0x80 | 111, 3, 192, 1, 111, 0xaa, 0xbb};
+    redundant = ParseLatestRedundant(short_frame, sizeof(short_frame));
+    assert(redundant.size == 1 && redundant.timestamp_offset == 240 && redundant.data[0] == 0xaa);
 
     const uint8_t malformed[] = {0x80 | 111, 0x00};
     assert(ParseRedPrimary(malformed, sizeof(malformed), 63).data == nullptr);
