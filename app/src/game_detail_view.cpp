@@ -158,7 +158,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     logo->setHeight(32);
     logo->setShrink(0);
     logo->setMarginRight(28);
-    logo->setImageFromRes("img/opennow-logo-mark.png");
+    logo->setImageFromRes("img/opennow-logo-mark-small.png");
     header->addView(logo);
     auto* route = ui::MakeLabel(Tr(data_.owned ? "Library" : "Store") + "  /", 18, ui::Muted());
     route->setSingleLine(true);
@@ -219,8 +219,9 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     description->setSingleLine(false);
     auto* description_frame = new brls::ScrollingFrame();
     description_frame->setId("detail/description");
-    description_frame->setHeight(76);
+    description_frame->setHeight(72);
     description_frame->setShrink(0);
+    description_frame->setScrollingIndicatorVisible(false);
     description_frame->setMarginBottom(20);
     description_frame->setContentView(description);
     left->addView(description_frame);

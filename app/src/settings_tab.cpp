@@ -150,9 +150,10 @@ SettingsTab::SettingsTab()
     scrolling_frame_->setGrow(1.0f);
     scrolling_frame_->setMinHeight(0);
     scrolling_frame_->setId("settings/options");
+    scrolling_frame_->setScrollingIndicatorVisible(false);
     scrolling_frame_->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
     content_container_ = new brls::Box(brls::Axis::COLUMN);
-    content_container_->setPadding(4, 0, 12, 0);
+    content_container_->setPadding(4, 4, 12, 4);
     scrolling_frame_->setContentView(content_container_);
     content_shell->addView(scrolling_frame_);
     body->addView(content_shell);
@@ -162,6 +163,7 @@ SettingsTab::SettingsTab()
     help_scroll->setWidth(332);
     help_scroll->setShrink(0);
     help_scroll->setMinHeight(0);
+    help_scroll->setScrollingIndicatorVisible(false);
     auto* help = new brls::Box(brls::Axis::COLUMN);
     help->setId("settings/help");
     help->setPadding(4, 0, 12, 0);

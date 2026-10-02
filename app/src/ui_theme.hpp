@@ -32,6 +32,14 @@ class StyledLabel final : public brls::Label
 
 brls::Label* MakeLabel(const std::string& text, float size = 18,
                       NVGcolor color = Text(), FontRole role = FontRole::Body);
+float TextWidth(const std::string& text, float size, FontRole role);
+
+class FadingScrollFrame final : public brls::ScrollingFrame
+{
+  public:
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+              brls::Style style, brls::FrameContext* ctx) override;
+};
 
 class ActionRow : public brls::Box
 {

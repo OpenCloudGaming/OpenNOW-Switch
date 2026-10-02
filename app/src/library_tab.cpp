@@ -28,6 +28,12 @@ constexpr std::array<const char*, 6> kStoreFilters = {"All", "Steam", "Epic", "U
 constexpr std::array<const char*, 4> kLibrarySortModes = {
     "Last Played", "Last Added", "A-Z", "Store"};
 
+void SetToolbarCaption(ui::ActionRow* control, const std::string& text)
+{
+    control->SetTitle(text);
+    control->setWidth(ui::TextWidth(text, 14, ui::FontRole::Medium) + 16);
+}
+
 brls::Label* MakeParagraph(const std::string& text, float bottom_margin = 16.0f, float font_size = 18.0f)
 {
     auto* label = ui::MakeLabel(Tr(text), font_size, ui::Muted());
@@ -107,18 +113,18 @@ LibraryTab::LibraryTab()
                            std::function<bool(brls::View*)> action) {
         auto* control = new ui::ActionRow(text, {}, std::move(action));
         control->setId(id);
-        control->setWidth(width);
+        control->setWidth(width > 0 ? width : ui::TextWidth(text, 14, ui::FontRole::Medium) + 16);
         control->setHeight(38);
         control->setPadding(0, 8, 0, 8);
         return control;
     };
-    search_button_ = make_control("library-search", "Y  " + Tr("Search"), 88,
+    search_button_ = make_control("library-search", "Y  " + Tr("Search"), 0,
         [this](brls::View*) { return RunUiAction("library.search.button", [this] { BeginSearch(); }); });
-    filter_button_ = make_control("library-filter", "ZL  " + Tr("All"), 100,
+    filter_button_ = make_control("library-filter", "ZL  " + Tr("All"), 0,
         [this](brls::View*) { return RunUiAction("library.filter.button", [this] { CycleStoreFilter(); }); });
-    sort_button_ = make_control("library-sort", "ZR  " + Tr("Last Played"), 124,
+    sort_button_ = make_control("library-sort", "ZR  " + Tr("Last Played"), 0,
         [this](brls::View*) { return RunUiAction("library.sort.button", [this] { CycleSortMode(); }); });
-    more_button_ = make_control("library-more", "X  " + Tr("More"), 96,
+    more_button_ = make_control("library-more", "X  " + Tr("More"), 0,
         [this](brls::View*) { return RunUiAction("library.more.button", [this] { LoadMoreOrRefresh(); }); });
     toolbar_buttons_ = {search_button_, filter_button_, sort_button_, more_button_};
     for (auto* control : {search_button_, filter_button_, sort_button_, more_button_})
@@ -131,8 +137,10 @@ LibraryTab::LibraryTab()
     toolbar->setShrink(0);
     toolbar->setAlignItems(brls::AlignItems::CENTER);
     toolbar->setMarginBottom(4);
-    heading_->setMarginRight(12);
-    toolbar->addView(heading_);
+    heading_->setGrow(0);
+    heading_->setMarginBottom(8);
+    timetable->addView(heading_);
+    toolbar->setMarginBottom(8);
     for (size_t i = 0; i < toolbar_buttons_.size(); ++i)
     {
         toolbar_buttons_[i]->setMarginRight(i + 1 < toolbar_buttons_.size() ? 8 : 0);
@@ -148,8 +156,9 @@ LibraryTab::LibraryTab()
     status_label_->setMaxHeight(60);
     timetable->addView(status_label_);
 
-    scrolling_frame_ = new brls::ScrollingFrame();
+    scrolling_frame_ = new ui::FadingScrollFrame();
     scrolling_frame_->setGrow(1.0f);
+    scrolling_frame_->setScrollingIndicatorVisible(false);
     scrolling_frame_->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
 
     list_container_ = new brls::Box(brls::Axis::COLUMN);
@@ -402,9 +411,10 @@ void LibraryTab::RebuildList()
     previous_button_->SetValue({});
     heading_->setText(Tr("My Library"));
     selection_label_->setText(Tr("Now selected"));
-    search_button_->SetTitle("Y  " + Tr("Search"));
-    filter_button_->SetTitle("ZL  " + Tr(kStoreFilters[store_filter_index_]));
-    sort_button_->SetTitle("ZR  " + Tr(kLibrarySortModes[sort_mode_index_]));
+    SetToolbarCaption(search_button_, "Y  " + Tr("Search"));
+    SetToolbarCaption(filter_button_, "ZL  " + Tr(kStoreFilters[store_filter_index_]));
+    SetToolbarCaption(sort_button_, "ZR  " + Tr(kLibrarySortModes[sort_mode_index_]));
+    SetToolbarCaption(more_button_, "X  " + Tr("More"));
 
     const auto& state = AppState::Instance();
     if (!state.HasSession())
@@ -459,7 +469,7 @@ void LibraryTab::RebuildList()
     UpdateSessionUi();
     next_button_->SetTitle(Tr(page_end < filtered_count_ ? "Next page" : "Refresh library"));
     previous_button_->SetValue(page_index_ > 0 ? std::to_string(page_index_) : "");
-    more_button_->SetTitle("X  " + Tr(page_end < filtered_count_ ? "More" : "Refresh"));
+    SetToolbarCaption(more_button_, "X  " + Tr(page_end < filtered_count_ ? "More" : "Refresh"));
 
     if (filtered_indices.empty())
     {

@@ -68,7 +68,7 @@ CatalogTab::CatalogTab()
     : brls::Box(brls::Axis::COLUMN)
 {
     setId("catalog");
-    setPadding(10, 40, 10, 40);
+    setPadding(10, 36, 10, 36);
     setBackgroundColor(ui::Ground());
     interface_language_ = GetInterfaceLanguage();
 
@@ -82,7 +82,10 @@ CatalogTab::CatalogTab()
     more_button_->setId("catalog-more");
     search_button_->setStyle(&brls::BUTTONSTYLE_HIGHLIGHT);
     toolbar_buttons_ = {search_button_, filter_button_, sort_button_, more_button_};
-    addView(ui::MakeGameBrowserHeader("Store", toolbar_buttons_));
+    auto* header = ui::MakeGameBrowserHeader("Store", toolbar_buttons_);
+    header->setMarginLeft(4);
+    header->setMarginRight(4);
+    addView(header);
 
     search_button_->registerClickAction([this](brls::View*) {
         return RunUiAction("catalog.search.button", [this]() { BeginSearch(); });
@@ -102,15 +105,18 @@ CatalogTab::CatalogTab()
     status_label_->setFontSize(14);
     status_label_->setWidthPercentage(100);
     status_label_->setMaxHeight(64);
+    status_label_->setMarginLeft(4);
+    status_label_->setMarginRight(4);
     addView(status_label_);
 
-    scrolling_frame_ = new brls::ScrollingFrame();
+    scrolling_frame_ = new ui::FadingScrollFrame();
     scrolling_frame_->setGrow(1.0f);
+    scrolling_frame_->setScrollingIndicatorVisible(false);
     scrolling_frame_->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
 
     list_container_ = new brls::Box(brls::Axis::COLUMN);
     list_container_->setId("catalog-list");
-    list_container_->setPadding(0, 0, 32, 0);
+    list_container_->setPadding(4, 4, 32, 4);
     scrolling_frame_->setContentView(list_container_);
 
     addView(scrolling_frame_);

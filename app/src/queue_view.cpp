@@ -81,7 +81,7 @@ QueueView::QueueView(const QueueDisplayState& state, const StreamSettings& setti
     logo->setWidth(62);
     logo->setHeight(38);
     logo->setScalingType(brls::ImageScalingType::FIT);
-    logo->setImageFromRes("img/opennow-logo-mark.png");
+    logo->setImageFromRes("img/opennow-logo-mark-small.png");
     logo->setMarginRight(10);
     header->addView(logo);
     auto* brand = ui::MakeLabel("OpenNOW", 22, ui::Text(), ui::FontRole::Heading);

@@ -169,7 +169,7 @@ TopBarFrame::TopBarFrame()
     brand_mark->setHeight(40);
     brand_mark->setMarginRight(10);
     brand_mark->setScalingType(brls::ImageScalingType::FIT);
-    brand_mark->setImageFromRes("img/opennow-logo-mark.png");
+    brand_mark->setImageFromRes("img/opennow-logo-mark-small.png");
     brand->addView(brand_mark);
 
     auto* brand_name = new ui::StyledLabel(ui::FontRole::Display);

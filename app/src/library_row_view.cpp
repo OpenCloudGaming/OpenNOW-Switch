@@ -6,6 +6,7 @@
 
 #include <borealis/core/touch/tap_gesture.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace opennow
@@ -63,7 +64,7 @@ LibraryRowView::LibraryRowView(LibraryRowDisplay display, std::function<void()> 
     addView(text);
 
     prompt_ = ui::MakeLabel("A  " + Tr("Open"), 14, ui::Green(), ui::FontRole::Medium);
-    prompt_->setWidth(72);
+    prompt_->setWidth(std::max(72.0f, ui::TextWidth("A  " + Tr("Open"), 14, ui::FontRole::Medium) + 4));
     prompt_->setMarginLeft(12);
     prompt_->setSingleLine(true);
     prompt_->setShrink(0);

@@ -40,9 +40,10 @@ def verify(nro_path, resources):
 
     expected = sorted((resources / "font").glob("*"))
     expected.append(resources / "img" / "opennow-logo-mark.png")
+    expected.append(resources / "img" / "opennow-logo-mark-small.png")
     for asset in expected:
         if not asset.is_file():
-            continue
+            raise ValueError(f"Required bundled UI asset missing: {asset}")
         path = asset.relative_to(resources).as_posix()
         if entries.get(path) != asset.read_bytes():
             raise ValueError(f"NRO asset missing or stale: {path}")

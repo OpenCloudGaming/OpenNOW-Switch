@@ -61,7 +61,7 @@ StreamOverlayView::StreamOverlayView()
     setFocusable(true);
     setHideHighlightBackground(true);
     setHideHighlightBorder(true);
-    logo_.setImageFromRes("img/opennow-logo-mark.png");
+    logo_.setImageFromRes("img/opennow-logo-mark-small.png");
     for (size_t index = 0; index < fonts_.size(); ++index)
         fonts_[index] = ui::Font(static_cast<ui::FontRole>(index));
 }

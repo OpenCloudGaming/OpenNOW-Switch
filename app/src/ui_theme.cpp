@@ -6,7 +6,9 @@
 #include <borealis/core/font.hpp>
 #include <borealis/core/touch/tap_gesture.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -84,6 +86,7 @@ int Font(FontRole role)
 StyledLabel::StyledLabel(FontRole role)
 {
     font = Font(role);
+    setAutoAnimate(false);
 }
 
 brls::Label* MakeLabel(const std::string& text, float size, NVGcolor color, FontRole role)
@@ -94,6 +97,37 @@ brls::Label* MakeLabel(const std::string& text, float size, NVGcolor color, Font
     label->setTextColor(color);
     label->setLineHeight(1.35f);
     return label;
+}
+
+float TextWidth(const std::string& text, float size, FontRole role)
+{
+    auto* vg = brls::Application::getNVGContext();
+    nvgSave(vg);
+    nvgFontFaceId(vg, Font(role));
+    nvgFontSize(vg, size);
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
+    float bounds[4] {};
+    const float advance = nvgTextBounds(vg, 0, 0, text.c_str(), nullptr, bounds);
+    nvgRestore(vg);
+    return std::ceil(std::max(advance, bounds[2]) - std::min(0.0f, bounds[0]));
+}
+
+void FadingScrollFrame::draw(NVGcontext* vg, float x, float y, float width, float height,
+                           brls::Style style, brls::FrameContext* ctx)
+{
+    brls::ScrollingFrame::draw(vg, x, y, width, height, style, ctx);
+    if (getContentHeight() - getContentOffsetY() <= height + 0.5f)
+        return;
+    nvgSave(vg);
+    nvgBeginPath(vg);
+    nvgRect(vg, x, y + height - 40, width, 40);
+    const auto ground = Ground();
+    auto transparent = ground;
+    transparent.a = 0;
+    nvgFillPaint(vg, nvgLinearGradient(vg, x, y + height - 40, x, y + height,
+        transparent, ground));
+    nvgFill(vg);
+    nvgRestore(vg);
 }
 
 ActionRow::ActionRow(std::string title, std::string value,
@@ -113,12 +147,15 @@ ActionRow::ActionRow(std::string title, std::string value,
     title_ = MakeLabel(title, 18, Text(), FontRole::Medium);
     title_->setGrow(1);
     title_->setShrink(1);
+    title_->setMinWidth(0);
     title_->setSingleLine(true);
     addView(title_);
     value_ = MakeLabel(value, 16, Muted());
     value_->setMaxWidthPercentage(45);
+    value_->setShrink(1);
     value_->setMarginLeft(16);
     value_->setSingleLine(true);
+    value_->setVisibility(value.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
     addView(value_);
     registerClickAction(std::move(activate));
     addGestureRecognizer(new brls::TapGestureRecognizer(this));
@@ -131,7 +168,11 @@ void ActionRow::SetTitle(const std::string& title)
     title_->setText(title);
     updateActionHint(brls::BUTTON_A, title);
 }
-void ActionRow::SetValue(const std::string& value) { value_->setText(value); }
+void ActionRow::SetValue(const std::string& value)
+{
+    value_->setText(value);
+    value_->setVisibility(value.empty() ? brls::Visibility::GONE : brls::Visibility::VISIBLE);
+}
 void ActionRow::SetFontSize(float size) { title_->setFontSize(size); }
 void ActionRow::SetTone(ActionTone tone)
 {
