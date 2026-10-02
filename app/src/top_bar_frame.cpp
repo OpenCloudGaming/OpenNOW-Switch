@@ -479,6 +479,12 @@ void TopBarFrame::SelectTab(int index)
 
 void TopBarFrame::UpdateStatusBar(bool force)
 {
+    if (displayed_language_ != GetInterfaceLanguage())
+    {
+        displayed_language_ = GetInterfaceLanguage();
+        for (auto& tab : tabs_)
+            tab.header_label->setText(Tr(tab.label));
+    }
     if (!account_name_label_ || !account_detail_label_)
         return;
 
