@@ -1,5 +1,6 @@
 #include "app_state.hpp"
 #include "catalog_tab.hpp"
+#include "cover_image_cache.hpp"
 #include "game_card_view.hpp"
 #include "game_detail_view.hpp"
 #include "library_tab.hpp"
@@ -249,6 +250,48 @@ void CheckFonts(brls::View* root)
         Check(std::isfinite(measured) && measured > 100 && bounds[3] > bounds[1], "actual font chain measures mixed Latin/Cyrillic/Chinese text");
     }
 }
+void CheckTabLanguage(brls::View* root)
+{
+    Check(Text(Required(root, "shell-tabs")) == opennow::Tr("Store") + "\n" +
+        opennow::Tr("Library") + "\n" + opennow::Tr("Settings") + "\n",
+        "all three retained shell tab labels reflect current interface language");
+}
+void SaveLanguageThroughSettings(brls::View* root, const std::string& language)
+{
+    auto* frame = dynamic_cast<opennow::TopBarFrame*>(root);
+    if (!frame) throw std::runtime_error("Language regression requires production shell");
+    frame->focusTab(2); Pump();
+    Activate(Required(root, "settings/category/app"));
+    Activate(Action(root, "App language"));
+    Check(dynamic_cast<brls::Dropdown*>(CurrentRoot()) != nullptr, "actual App language opens native selector");
+    const auto& options = opennow::InterfaceLanguageOptions();
+    const auto current = std::find_if(options.begin(), options.end(), [](const auto& option) {
+        return option.code == opennow::GetInterfaceLanguage();
+    });
+    const auto target = std::find_if(options.begin(), options.end(), [&](const auto& option) { return option.code == language; });
+    if (current == options.end() || target == options.end()) throw std::runtime_error("Unsupported language regression fixture");
+    const auto difference = target - current;
+    for (int index = 0; index < std::abs(difference); ++index)
+        Key(difference > 0 ? brls::BUTTON_NAV_DOWN : brls::BUTTON_NAV_UP);
+    Key(brls::BUTTON_A); Key(brls::BUTTON_X);
+    Check(opennow::LoadStreamSettings().interface_language == language && opennow::GetInterfaceLanguage() == language,
+        "actual Settings selector and X Save persist and apply interface language");
+    CheckTabLanguage(root);
+    frame->focusTab(1); Pump();
+    for (const auto& [id, key] : std::array<std::pair<const char*, const char*>, 3> {{
+        {"library-search", "Search"}, {"library-filter", "All"}, {"library-sort", "Last Added"}}})
+        std::printf("LOCALE language=%s id=%s actual=[%s] expected=[%s]\n",
+            language.c_str(), id, Text(Required(root, id)).c_str(), opennow::Tr(key).c_str());
+    std::printf("LOCALE language=%s heading_expected=[%s] heading_present=%d\n", language.c_str(),
+        opennow::Tr("My Library").c_str(), Text(root).find(opennow::Tr("My Library")) != std::string::npos);
+    Check(Text(root).find(opennow::Tr("My Library")) != std::string::npos &&
+        Text(Required(root, "library-search")).find(opennow::Tr("Search")) != std::string::npos &&
+        Text(Required(root, "library-filter")).find(opennow::Tr("All")) != std::string::npos &&
+        Text(Required(root, "library-sort")).find(opennow::Tr("Last Added")) != std::string::npos,
+        "retained Library heading and controls refresh after actual language Save");
+    Check(Text(Required(root, "library-preview-title")).find(ui_fixture::Library().front().title) != std::string::npos,
+        "retained Library preserves selected game identity across language Save");
+}
 void Screenshot(const std::string& path)
 {
     const int width = brls::Application::windowWidth, height = brls::Application::windowHeight;
@@ -317,13 +360,32 @@ void LibraryChecks(brls::View* root, bool guest, bool empty)
     }
     Until([] { return ui_fixture::Snapshot().library_requests > 0; }, "real Library fetch callback reached fixture");
     auto* preview = Required(root, "library-preview-title");
+    opennow::CachedImage* preview_image = nullptr;
+    Walk(preview->getParent(), [&](brls::View* view) {
+        if (auto* image = dynamic_cast<opennow::CachedImage*>(view)) preview_image = image;
+    });
+    Check(preview_image != nullptr, "actual Library preview has a native cover image");
+    auto check_preview_cover = [&](const std::string& url) {
+        const auto calls = ui_fixture::Snapshot();
+        const auto request = std::find_if(calls.cover_requests.rbegin(), calls.cover_requests.rend(),
+            [&](const ui_fixture::CoverCall& call) { return call.image == preview_image; });
+        Check(request != calls.cover_requests.rend() && request->url == url,
+            "actual Library preview cover identity matches selected game at image boundary");
+    };
     auto* row = Required(root, "library-row-fixture-1000");
     brls::Application::giveFocus(row); Pump();
     Check(Text(preview).find(ui_fixture::Library().front().title) != std::string::npos, "focused Library game identity updates actual preview title");
-    Check(ui_fixture::Snapshot().cover_urls.back() == ui_fixture::Library().front().image_url, "focused Library identity requests that game's actual cover URL at external image boundary");
+    check_preview_cover(ui_fixture::Library().front().image_url);
     Key(brls::BUTTON_NAV_DOWN);
     Check(brls::Application::getCurrentFocus() != row, "Library down moves to another selectable row");
     Check(Text(preview).find(ui_fixture::Library().front().title) == std::string::npos, "Library preview follows changed focus identity");
+    const auto* selected_row = brls::Application::getCurrentFocus();
+    const auto games = ui_fixture::Library();
+    const auto selected = std::find_if(games.begin(), games.end(), [&](const opennow::GameInfo& game) {
+        return selected_row == root->getView("library-row-" + game.uuid);
+    });
+    Check(selected != games.end(), "native focused Library row maps to actual fixture identity");
+    if (selected != games.end()) check_preview_cover(selected->image_url);
     Activate(Required(root, "library-sort"));
     Check(Text(Required(root, "library-sort")).find(opennow::Tr("Last Added")) != std::string::npos, "Library sort callback cycles to actual Last Added feed order");
     Tap(Required(root, "library-filter"));
@@ -349,6 +411,17 @@ void LibraryChecks(brls::View* root, bool guest, bool empty)
     Check(root->getView("catalog") != nullptr, "real L action switches to Store");
     Key(brls::BUTTON_RB);
     Check(root->getView("library") && root->getView("library-row-fixture-1000"), "real R action returns to live Library with page identity");
+    brls::Application::giveFocus(Required(root, "library-row-fixture-1000")); Pump();
+    const auto original_language = opennow::GetInterfaceLanguage();
+    const auto before_language = ui_fixture::Snapshot();
+    SaveLanguageThroughSettings(root, original_language == "ru" ? "en" : "ru");
+    SaveLanguageThroughSettings(root, original_language);
+    const auto after_language = ui_fixture::Snapshot();
+    Check(after_language.library_requests == before_language.library_requests &&
+        after_language.catalog_requests == before_language.catalog_requests &&
+        after_language.public_requests == before_language.public_requests &&
+        after_language.region_requests == before_language.region_requests,
+        "actual language Save and retained-tab refresh cause no new feed or region requests");
 }
 void SettingsChecks(brls::View* root, const std::string& capture)
 {
@@ -559,9 +632,9 @@ int main(int argc, char** argv)
         if (!guest) state.SetSession(session); else state.MarkSessionLoaded();
         state.SetLibraryGames(ui_fixture::Library());
         auto* frame = new opennow::TopBarFrame();
-        frame->addTab(opennow::Tr("Store"), [] { return new opennow::CatalogTab(); });
-        frame->addTab(opennow::Tr("Library"), [] { return new opennow::LibraryTab(); });
-        frame->addTab(opennow::Tr("Settings"), [] { return new opennow::SettingsTab(); });
+        frame->addTab("Store", [] { return new opennow::CatalogTab(); });
+        frame->addTab("Library", [] { return new opennow::LibraryTab(); });
+        frame->addTab("Settings", [] { return new opennow::SettingsTab(); });
         frame->focusTab(scenario == "store" || scenario == "empty-store" ? 0 : scenario == "settings" ? 2 : 1);
         brls::Application::pushActivity(new brls::Activity(frame)); Pump();
         int width, height, viewport[4] {}; SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &width, &height); glGetIntegerv(GL_VIEWPORT, viewport);
@@ -584,7 +657,7 @@ int main(int argc, char** argv)
         Check(opennow::ui::StreamSummary(fractional).find("12 Mbps") != std::string::npos, "configured stream summary preserves integer 12000 kbps");
         if (scenario == "store" || scenario == "empty-store") StoreChecks(frame, empty, guest);
         else if (scenario == "settings") SettingsChecks(frame, capture);
-        else if (scenario == "queue") QueueChecks(session, capture);
+        else if (scenario == "queue") { DrainToasts(); QueueChecks(session, capture); }
         else if (scenario == "overlay") OverlayChecks();
         else if (scenario == "detail")
         {

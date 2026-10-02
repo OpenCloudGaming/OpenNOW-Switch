@@ -107,7 +107,11 @@ void CachedImage::draw(NVGcontext* vg, float x, float y, float width, float heig
 { brls::Image::draw(vg, x, y, width, height, style, ctx); }
 void SetCachedCoverImage(CachedImage* image, const std::string& url)
 {
-    { std::lock_guard lock(fixture_mutex); calls.cover_urls.push_back(url); }
+    {
+        std::lock_guard lock(fixture_mutex);
+        calls.cover_urls.push_back(url);
+        calls.cover_requests.push_back({image, url});
+    }
     image->setImageFromRes("img/opennow-logo-mark.png");
 }
 void SetCachedAvatarImage(CachedImage*, const std::string&) {}
