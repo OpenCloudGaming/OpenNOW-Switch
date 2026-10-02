@@ -31,6 +31,8 @@ capture_case() {
     if [[ -f "$output/$name.ppm.restored.ppm" ]]; then convert "$output/$name.ppm.restored.ppm" "$output/$name.ppm.restored.png"; fi
     find "$output" -maxdepth 1 -name "$name.ppm.settings-*.ppm" -print0 |
         while IFS= read -r -d '' path; do convert "$path" "${path%.ppm}.png"; done
+    find "$output" -maxdepth 1 -name "$name.ppm.*-title-*.ppm" -print0 |
+        while IFS= read -r -d '' path; do convert "$path" "${path%.ppm}.png"; done
 }
 for width in 1280 1920; do
     for language in en zh-CN es ru it fr pl uk; do

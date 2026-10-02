@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include <array>
 
 namespace opennow { class CachedImage; }
 
@@ -13,6 +14,14 @@ namespace ui_fixture
 {
 struct LaunchCall { std::string user_id, app_id, title, store; };
 struct CoverCall { const opennow::CachedImage* image; std::string url; };
+struct TextDraw
+{
+    std::string text;
+    std::array<float, 4> bounds;
+    std::array<float, 6> transform;
+    float x, y, raw_x, raw_y;
+    bool scrolling_path;
+};
 struct Calls
 {
     int library_requests = 0;
@@ -38,4 +47,6 @@ void SetSessionMode(SessionMode mode);
 void ReleaseStart();
 void ClearLauncherPreference();
 void RecordNotification(const std::string& text);
+void BeginTextCapture();
+std::vector<TextDraw> EndTextCapture();
 }

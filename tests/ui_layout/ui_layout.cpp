@@ -36,6 +36,8 @@
 namespace
 {
 int failures = 0;
+std::string capture_path;
+void Screenshot(const std::string& path);
 void Check(bool passed, const std::string& message)
 {
     std::printf("%s %s\n", passed ? "PASS" : "FAIL", message.c_str());
@@ -250,6 +252,218 @@ void CheckFonts(brls::View* root)
         Check(std::isfinite(measured) && measured > 100 && bounds[3] > bounds[1], "actual font chain measures mixed Latin/Cyrillic/Chinese text");
     }
 }
+struct GlyphMetrics { float width, left_bearing, right_overhang; };
+GlyphMetrics MeasureGlyphs(brls::Label* label, const std::string& text, const ui_fixture::TextDraw* draw = nullptr)
+{
+    auto* vg = brls::Application::getNVGContext();
+    nvgSave(vg);
+    nvgFontFaceId(vg, label->getFont());
+    nvgFontSize(vg, label->getFontSize());
+    nvgFontQuality(vg, label->getFontQuality());
+    nvgTextLineHeight(vg, label->getLineHeight());
+    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
+    if (draw)
+    {
+        nvgResetTransform(vg);
+        const auto& transform = draw->transform;
+        nvgTransform(vg, transform[0], transform[1], transform[2], transform[3], transform[4], transform[5]);
+    }
+    const float x = draw ? draw->raw_x : 0, y = draw ? draw->raw_y : 0;
+    float bounds[4] {};
+    const float advance = nvgTextBounds(vg, x, y, text.c_str(), nullptr, bounds);
+    nvgRestore(vg);
+    return {bounds[2] - bounds[0], std::min(0.0f, bounds[0] - x), std::max(0.0f, bounds[2] - x - advance)};
+}
+float GlyphWidth(brls::Label* label) { return MeasureGlyphs(label, label->getFullText()).width; }
+std::vector<ui_fixture::TextDraw> CaptureText()
+{
+    ui_fixture::BeginTextCapture();
+    Pump(1);
+    return ui_fixture::EndTextCapture();
+}
+void CheckPaintedLabel(brls::Label* label, const std::vector<ui_fixture::TextDraw>& draws,
+                       const std::string& name, bool require_ellipsis = false,
+                       const brls::Rect* row_bounds = nullptr, const brls::Rect* scissor_bounds = nullptr)
+{
+    const auto full = label->getFullText();
+    if (full.empty()) return;
+    const auto frame = label->getFrame();
+    bool found = false;
+    for (const auto& draw : draws)
+    {
+        const bool ellipsis = draw.text.ends_with("…");
+        const bool identity = draw.text == full ||
+            (ellipsis && full.starts_with(draw.text.substr(0, draw.text.size() - std::string("…").size())));
+        if (!identity || std::abs(draw.y - frame.getMidY()) > 1 ||
+            draw.bounds[2] < frame.getMinX() || draw.bounds[0] > frame.getMaxX()) continue;
+        found = true;
+        const auto glyphs = MeasureGlyphs(label, draw.text, &draw);
+        std::printf("GLYPHS %s text=[%s] ink=%.2f,%.2f,%.2f,%.2f frame=%.2f,%.2f,%.2f,%.2f scrolling=%d\n",
+            name.c_str(), draw.text.c_str(), draw.bounds[0], draw.bounds[1], draw.bounds[2], draw.bounds[3],
+            frame.getMinX(), frame.getMinY(), frame.getMaxX(), frame.getMaxY(), draw.scrolling_path);
+        Check(!draw.scrolling_path, name + " paints static text, not a scissored marquee");
+        Check(std::abs(draw.x - frame.getMinX()) <= 0.5f, name + " native text anchor remains at allocated label origin");
+        const float raster_pixel = 1.0f / brls::Application::windowScale;
+        Check(draw.bounds[0] >= frame.getMinX() + glyphs.left_bearing - raster_pixel &&
+            draw.bounds[2] <= frame.getMaxX() + glyphs.right_overhang + raster_pixel,
+            name + " painted glyphs fit label width with actual measured bearings");
+        std::printf("BEARINGS %s anchor=%.2f expected=%.2f left=%.2f right=%.2f raster_pixel=%.5f\n",
+            name.c_str(), draw.x, frame.getMinX(), glyphs.left_bearing, glyphs.right_overhang, raster_pixel);
+        for (const auto* bounds : {row_bounds, scissor_bounds})
+            if (bounds) Check(draw.bounds[0] >= bounds->getMinX() - 0.5f && draw.bounds[2] <= bounds->getMaxX() + 0.5f &&
+                draw.bounds[1] >= bounds->getMinY() - 0.5f && draw.bounds[3] <= bounds->getMaxY() + 0.5f,
+                name + " actual glyph ink remains inside row and scissor bounds");
+        Check(draw.bounds[1] >= frame.getMinY() - 1 && draw.bounds[3] <= frame.getMaxY() + 1,
+            name + " actual painted glyphs fit allocated label height");
+        if (require_ellipsis) Check(ellipsis, name + " overflowing game identity has a complete static ellipsis");
+    }
+    Check(found, name + " observed actual NanoVG text draw");
+}
+void CheckActionRow(opennow::ui::ActionRow* row, const std::vector<ui_fixture::TextDraw>& draws,
+                    const std::string& name, bool full_caption = false)
+{
+    const auto frame = row->getFrame();
+    const float left = frame.getMinX() + YGNodeLayoutGetPadding(row->getYGNode(), YGEdgeLeft);
+    const float right = frame.getMaxX() - YGNodeLayoutGetPadding(row->getYGNode(), YGEdgeRight);
+    float previous_right = left;
+    brls::Rect scissor;
+    bool has_scissor = false;
+    auto* parent = row->hasParent() ? row->getParent() : nullptr;
+    while (parent)
+    {
+        if (auto* viewport = dynamic_cast<brls::ScrollingFrame*>(parent))
+        {
+            scissor = viewport->getFrame();
+            has_scissor = true;
+            break;
+        }
+        parent = parent->hasParent() ? parent->getParent() : nullptr;
+    }
+    for (auto* child : row->getChildren())
+    {
+        auto* label = dynamic_cast<brls::Label*>(child);
+        if (!label || label->getVisibility() != brls::Visibility::VISIBLE || label->getFullText().empty()) continue;
+        const auto label_frame = label->getFrame();
+        Check(label_frame.getMinX() >= left - 0.5f && label_frame.getMaxX() <= right + 0.5f,
+            name + " title/value label stays inside row content padding");
+        Check(label_frame.getMinX() >= previous_right - 0.5f, name + " title and value do not overlap");
+        previous_right = label_frame.getMaxX();
+        const float required = GlyphWidth(label);
+        std::printf("CAPTION %s text=[%s] font=%d size=%.1f glyph_width=%.2f available=%.2f\n",
+            name.c_str(), label->getFullText().c_str(), label->getFont(), label->getFontSize(), required, label_frame.getWidth());
+        if (full_caption) Check(required <= label_frame.getWidth() + 0.5f, name + " complete fixed caption fits measured content width");
+        CheckPaintedLabel(label, draws, name, false, &frame, has_scissor ? &scissor : nullptr);
+    }
+}
+void CheckVisibleActionRows(brls::View* root, const std::string& name)
+{
+    const auto draws = CaptureText();
+    Walk(root, [&](brls::View* view) {
+        auto* row = dynamic_cast<opennow::ui::ActionRow*>(view);
+        if (!row) return;
+        const auto frame = row->getFrame();
+        auto* parent = row->hasParent() ? row->getParent() : nullptr;
+        while (parent)
+        {
+            if (auto* viewport = dynamic_cast<brls::ScrollingFrame*>(parent))
+            {
+                const auto bounds = viewport->getFrame();
+                if (frame.getMinY() < bounds.getMinY() || frame.getMaxY() > bounds.getMaxY()) return;
+            }
+            parent = parent->hasParent() ? parent->getParent() : nullptr;
+        }
+        auto title = Text(row);
+        std::replace(title.begin(), title.end(), '\n', ' ');
+        CheckActionRow(row, draws, name + "/" + title);
+    });
+}
+void CheckLibraryToolbar(brls::View* root)
+{
+    const auto draws = CaptureText();
+    for (const char* id : {"library-search", "library-filter", "library-sort", "library-more", "library-previous", "library-next"})
+    {
+        auto* row = dynamic_cast<opennow::ui::ActionRow*>(Required(root, id));
+        if (!row) throw std::runtime_error("Library toolbar is not a production ActionRow");
+        CheckActionRow(row, draws, id, true);
+    }
+}
+void CheckStaticGameTitle(brls::View* owner, brls::Label* title, const std::string& name)
+{
+    Check(title != nullptr, name + " native title label exists");
+    if (!title) throw std::runtime_error("Missing production game title label");
+    brls::Application::giveFocus(owner); Pump(); DrainToasts();
+    const bool overflow = GlyphWidth(title) > title->getWidth() + 1;
+    Check(overflow, name + " fixture genuinely exceeds native title width");
+    CheckPaintedLabel(title, CaptureText(), name + "/focused", overflow);
+    auto read_title_pixels = [&] {
+        const auto frame = title->getFrame();
+        const float scale = brls::Application::windowScale;
+        const int x = std::lround(frame.getMinX() * scale), width = std::lround(frame.getWidth() * scale);
+        const int y = brls::Application::windowHeight - std::lround(frame.getMaxY() * scale), height = std::lround(frame.getHeight() * scale);
+        std::vector<unsigned char> pixels(width * height * 3);
+        glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        return pixels;
+    };
+    const auto first_pixels = read_title_pixels();
+    const std::string title_name = name.starts_with("library") ? "library" : "store";
+    Screenshot(capture_path + "." + title_name + "-title-focused.ppm");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2200);
+    while (std::chrono::steady_clock::now() < deadline) Pump(1);
+    CheckPaintedLabel(title, CaptureText(), name + "/after-scroll-timer", overflow);
+    Check(first_pixels == read_title_pixels(), name + " title framebuffer pixels remain unchanged after native scroll timer");
+    Screenshot(capture_path + "." + title_name + "-title-after-scroll-timer.ppm");
+}
+float CheckScrollDecorations(brls::ScrollingFrame* viewport, const std::string& name)
+{
+    float reserved_right = 0;
+    for (auto* child : viewport->getChildren())
+    {
+        if (!child->isDetached() || child->getWidth() != 4 || child->getAlpha() <= 0.001f) continue;
+        reserved_right = std::max(reserved_right, viewport->getFrame().getMaxX() - child->getFrame().getMinX());
+    }
+    Check(reserved_right == 0, name + " has no visible scrollbar over art, labels or focus border");
+    return reserved_right;
+}
+void CheckFocusedScrollInsets(brls::View* focused, const std::string& name)
+{
+    auto* parent = focused->hasParent() ? focused->getParent() : nullptr;
+    while (parent && !dynamic_cast<brls::ScrollingFrame*>(parent)) parent = parent->hasParent() ? parent->getParent() : nullptr;
+    auto* viewport = dynamic_cast<brls::ScrollingFrame*>(parent);
+    Check(viewport != nullptr, name + " is inside a native scrolling viewport");
+    if (!viewport) throw std::runtime_error("Missing native scrolling ancestor");
+    const auto bounds = viewport->getFrame(), frame = focused->getFrame();
+    const float reserved = CheckScrollDecorations(viewport, name);
+    Check(frame.getMinX() - 4 >= bounds.getMinX() - 0.5f && frame.getMaxX() + 4 <= bounds.getMaxX() - reserved + 0.5f,
+        name + " complete focus border fits horizontally inside scrolling viewport");
+}
+void CheckSettingsActionRows(brls::View* root, const std::string& category)
+{
+    auto* viewport = dynamic_cast<brls::ScrollingFrame*>(Required(root, "settings/options"));
+    if (!viewport) throw std::runtime_error("Missing production settings scissor viewport");
+    std::vector<opennow::ui::ActionRow*> rows;
+    Walk(viewport, [&](brls::View* view) { if (auto* row = dynamic_cast<opennow::ui::ActionRow*>(view)) rows.push_back(row); });
+    Check(!rows.empty(), "Settings category contains production action rows: " + category);
+    auto* original_focus = brls::Application::getCurrentFocus();
+    const auto bounds = viewport->getFrame();
+    for (auto* row : rows)
+    {
+        brls::Application::giveFocus(row); Pump(16);
+        const auto frame = row->getFrame();
+        auto title = Text(row);
+        std::replace(title.begin(), title.end(), '\n', ' ');
+        const auto name = "settings/" + category + "/" + title;
+        const float scrollbar_reservation = CheckScrollDecorations(viewport, name);
+        Check(brls::Application::getCurrentFocus() == row, name + " actual row owns focus");
+        Check(frame.getMinX() - 4 >= bounds.getMinX() - 0.5f, name + " focus border has left scissor inset");
+        Check(frame.getMaxX() + 4 <= bounds.getMaxX() - scrollbar_reservation + 0.5f,
+            name + " focus border clears actual right scissor and scrollbar reservation");
+        Check(frame.getMinY() - 4 >= bounds.getMinY() - 0.5f && frame.getMaxY() + 4 <= bounds.getMaxY() + 0.5f,
+            name + " focused row and border fit vertical scissor viewport");
+        CheckActionRow(row, CaptureText(), name);
+    }
+    if (original_focus) { brls::Application::giveFocus(original_focus); Pump(); }
+}
 void CheckTabLanguage(brls::View* root)
 {
     Check(Text(Required(root, "shell-tabs")) == opennow::Tr("Store") + "\n" +
@@ -314,6 +528,8 @@ void StoreChecks(brls::View* root, bool empty, bool guest)
     Walk(root, [&](brls::View* view) { if (auto* card = dynamic_cast<opennow::GameCardView*>(view)) cards.push_back(card); });
     if (empty) { Check(cards.empty(), "empty real Store feed creates no game cards"); return; }
     Check(cards.size() == 15, "production Store page retains fifteen games");
+    CheckStaticGameTitle(cards.front(), dynamic_cast<brls::Label*>(cards.front()->getView("catalog-card-title")), "store/game-title");
+    CheckFocusedScrollInsets(cards.front(), "store/first-column");
     for (size_t index = 0; index < cards.size(); ++index)
     {
         const auto rect = cards[index]->getFrame();
@@ -327,6 +543,7 @@ void StoreChecks(brls::View* root, bool empty, bool guest)
     Check(brls::Application::getCurrentFocus() == cards[9], "real Store down navigation preserves fifth column");
     Key(brls::BUTTON_NAV_UP);
     Check(brls::Application::getCurrentFocus() == cards[4], "real Store up navigation returns to fifth column");
+    CheckFocusedScrollInsets(cards[4], "store/fifth-column");
     brls::Application::giveFocus(Required(root, "catalog-filter")); Key(brls::BUTTON_LT);
     Check(Text(root).find("Epic\n") == std::string::npos, "Store Steam filter removes Epic cards");
     for (int index = 0; index < 5; ++index) Key(brls::BUTTON_LT);
@@ -353,6 +570,7 @@ void StoreChecks(brls::View* root, bool empty, bool guest)
 }
 void LibraryChecks(brls::View* root, bool guest, bool empty)
 {
+    CheckLibraryToolbar(root);
     if (guest || empty)
     {
         Check(Text(root).find(ui_fixture::Library().empty() ? "Fixture game" : ui_fixture::Library().front().title) == std::string::npos, "guest or empty library has no fabricated games");
@@ -373,6 +591,13 @@ void LibraryChecks(brls::View* root, bool guest, bool empty)
             "actual Library preview cover identity matches selected game at image boundary");
     };
     auto* row = Required(root, "library-row-fixture-1000");
+    brls::Label* game_title = nullptr;
+    Walk(row, [&](brls::View* view) {
+        if (auto* label = dynamic_cast<brls::Label*>(view); label && label->getFullText() == ui_fixture::Library().front().title)
+            game_title = label;
+    });
+    CheckStaticGameTitle(row, game_title, "library/game-title");
+    CheckFocusedScrollInsets(row, "library/selected-row");
     brls::Application::giveFocus(row); Pump();
     Check(Text(preview).find(ui_fixture::Library().front().title) != std::string::npos, "focused Library game identity updates actual preview title");
     check_preview_cover(ui_fixture::Library().front().image_url);
@@ -422,10 +647,24 @@ void LibraryChecks(brls::View* root, bool guest, bool empty)
         after_language.public_requests == before_language.public_requests &&
         after_language.region_requests == before_language.region_requests,
         "actual language Save and retained-tab refresh cause no new feed or region requests");
+    const int before_caption_cycles = ui_fixture::Snapshot().library_requests;
+    for (int sort = 0; sort < 4; ++sort)
+    {
+        for (int filter = 0; filter < 6; ++filter)
+        {
+            CheckLibraryToolbar(root);
+            Key(brls::BUTTON_LT);
+        }
+        Key(brls::BUTTON_RT);
+    }
+    Check(ui_fixture::Snapshot().library_requests == before_caption_cycles, "all native toolbar caption states remain local without feed requests");
+    CheckLibraryToolbar(root);
+    brls::Application::giveFocus(Required(root, "library-row-fixture-1000")); Pump();
 }
 void SettingsChecks(brls::View* root, const std::string& capture)
 {
     auto capture_category = [&](const std::string& category) {
+        CheckSettingsActionRows(root, category);
         CheckChildren(dynamic_cast<brls::Box*>(root), "settings-" + category);
         CheckFonts(root); DrainToasts(); Screenshot(capture + ".settings-" + category + ".ppm");
     };
@@ -450,6 +689,7 @@ void SettingsChecks(brls::View* root, const std::string& capture)
 }
 void DetailChecks(opennow::GameDetailView* root)
 {
+    CheckVisibleActionRows(root, "detail/actions");
     auto* description = dynamic_cast<brls::ScrollingFrame*>(Required(root, "detail/description"));
     Check(description && description->getChildren().front()->getHeight() > description->getHeight(), "actual production description overflows bounded scroll viewport");
     brls::Application::giveFocus(Required(root, "detail/play")); Pump(); Key(brls::BUTTON_NAV_UP);
@@ -496,6 +736,7 @@ void DetailChecks(opennow::GameDetailView* root)
     opennow::AppState::Instance().ActivateSession(auth); Pump(48);
     Check(ui_fixture::Snapshot().launches.size() == guarded_starts, "account change between selection and deferred dismiss prevents stale-account launch");
     Key(brls::BUTTON_B);
+    description->setContentOffsetY(0, false); Pump();
 }
 
 void QueueChecks(const opennow::AuthSession& session, const std::string& capture)
@@ -504,7 +745,8 @@ void QueueChecks(const opennow::AuthSession& session, const std::string& capture
     opennow::LaunchSessionDialog(opennow::GfnClient(), session, "1000", "Native queue fixture", "Steam", "Native queue fixture", "fixture-1000", "fixture://cover/1000");
     Until([] { return opennow::GetCurrentQueuePosition() == 123; }, "real queue worker publishes actual three-digit position");
     Check(Text(Required(CurrentRoot(), "queue/position")).find("123") != std::string::npos, "native queue displays all three position digits");
-    CheckChildren(dynamic_cast<brls::Box*>(CurrentRoot()), "queue"); CheckFonts(CurrentRoot()); Screenshot(capture + ".queue.ppm");
+    CheckChildren(dynamic_cast<brls::Box*>(CurrentRoot()), "queue"); CheckFonts(CurrentRoot());
+    CheckVisibleActionRows(CurrentRoot(), "queue/actions"); Screenshot(capture + ".queue.ppm");
     Tap(Required(CurrentRoot(), "queue/minimize"));
     Check(opennow::IsQueueMinimized(), "actual Minimize dismisses UI without canceling worker");
     const auto original = opennow::LoadStreamSettings();
@@ -608,6 +850,7 @@ int main(int argc, char** argv)
     {
         const std::string language = argc > 1 ? argv[1] : "en", account = argc > 2 ? argv[2] : "Player";
         const std::string capture = argc > 3 ? argv[3] : "native.ppm", scenario = argc > 5 ? argv[5] : "library";
+        capture_path = capture;
         const int physical_width = argc > 4 ? std::stoi(argv[4]) : 1280;
         const bool guest = account == "guest", empty = scenario == "empty" || scenario == "empty-store";
         ui_fixture::Reset(capture + ".storage", empty);
@@ -649,6 +892,7 @@ int main(int argc, char** argv)
             if (auto* label = dynamic_cast<brls::Label*>(view)) Check(label->isSingleLine() && label->getHeight() <= 20, "production tab label stays on one line");
         });
         CheckFonts(frame);
+        CheckVisibleActionRows(frame, "initial-actions");
         opennow::StreamSettings fractional; fractional.bitrate_kbps = 12345;
         Check(opennow::ui::StreamSummary(fractional).find("12.345") != std::string::npos, "configured stream summary preserves 12345 kbps");
         fractional.bitrate_kbps = 12500;

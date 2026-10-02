@@ -26,6 +26,30 @@ std::string storage, saved_variant;
 ui_fixture::SessionMode session_mode = ui_fixture::SessionMode::Ready;
 std::condition_variable start_gate;
 bool start_released = false;
+bool capture_text = false;
+std::vector<ui_fixture::TextDraw> text_draws;
+
+void RecordTextDraw(NVGcontext* vg, float x, float y, const char* text, const char* end, bool scrolling_path)
+{
+    if (!capture_text || !text || text == end || !*text) return;
+    float bounds[4] {}, transform[6] {};
+    nvgTextBounds(vg, x, y, text, end, bounds);
+    nvgCurrentTransform(vg, transform);
+    ui_fixture::TextDraw draw;
+    draw.text = end ? std::string(text, end) : std::string(text);
+    std::copy(std::begin(transform), std::end(transform), draw.transform.begin());
+    draw.raw_x = x;
+    draw.raw_y = y;
+    const float scale = brls::Application::windowScale;
+    nvgTransformPoint(&draw.bounds[0], &draw.bounds[1], transform, bounds[0], bounds[1]);
+    nvgTransformPoint(&draw.bounds[2], &draw.bounds[3], transform, bounds[2], bounds[3]);
+    nvgTransformPoint(&draw.x, &draw.y, transform, x, y);
+    for (auto& value : draw.bounds) value /= scale;
+    draw.x /= scale;
+    draw.y /= scale;
+    draw.scrolling_path = scrolling_path;
+    text_draws.push_back(std::move(draw));
+}
 }
 
 namespace ui_fixture
@@ -84,6 +108,21 @@ void SetSessionMode(SessionMode mode) { std::lock_guard lock(fixture_mutex); ses
 void ReleaseStart() { { std::lock_guard lock(fixture_mutex); start_released = true; } start_gate.notify_all(); }
 void ClearLauncherPreference() { std::lock_guard lock(fixture_mutex); saved_variant.clear(); }
 void RecordNotification(const std::string& text) { std::lock_guard lock(fixture_mutex); calls.notifications.push_back(text); }
+void BeginTextCapture() { text_draws.clear(); capture_text = true; }
+std::vector<TextDraw> EndTextCapture() { capture_text = false; return std::move(text_draws); }
+}
+
+extern "C" float __real_nvgText(NVGcontext*, float, float, const char*, const char*);
+extern "C" float __wrap_nvgText(NVGcontext* vg, float x, float y, const char* text, const char* end)
+{
+    RecordTextDraw(vg, x, y, text, end, true);
+    return __real_nvgText(vg, x, y, text, end);
+}
+extern "C" float __real_nvgTextWithCursor(NVGcontext*, float, float, const char*, const char*, int);
+extern "C" float __wrap_nvgTextWithCursor(NVGcontext* vg, float x, float y, const char* text, const char* end, int cursor)
+{
+    RecordTextDraw(vg, x, y, text, end, false);
+    return __real_nvgTextWithCursor(vg, x, y, text, end, cursor);
 }
 
 extern "C" void RealNotify(const std::string& text)

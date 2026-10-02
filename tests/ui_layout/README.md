@@ -52,6 +52,20 @@ failures do not stop subsequent cases, and any failure makes the runner nonzero.
   in 1200-pixel rows. Absolute art is not a flow sibling, and scrolling content
   may exceed its viewport. Two-pixel Yoga containment tolerance does not relax
   exact card dimensions.
+- Actual NanoVG glyph bounds and font measurements for fixed Library captions
+  in every 4-sort × 6-filter combination; row title/value containment inside
+  content padding; focused Settings rows inside their scissor viewport; and no
+  visible scrollbar over cards, labels or focus borders. Library/Store long
+  game titles must use complete static ellipses, with identical cropped native
+  framebuffer pixels before and after the native scroll timer. The test-link
+  NanoVG observers forward every draw to the real implementation. Geometry-only
+  passes do not establish readable text or visual acceptance.
+  Bearings are measured at the recorded NanoVG transform and raster origin with
+  the label's font quality. Fontstash rounds glyph quads to physical pixels, so
+  only the label's own ink boundary allows one physical pixel (`1/windowScale`).
+  Draw-anchor tolerance remains 0.5 logical pixels; full-caption fit, padded-row
+  containment, no overlap, ancestor-scissor bounds and static-title pixel
+  stability are unchanged.
 - Public Borealis controller dispatch, real focus routing, hit-testing and
   START/END gestures, actual SDL IME text-input/submission, Library focus-preview
   identity, filter/sort/search, bounded fifteen-row local pages with previous
