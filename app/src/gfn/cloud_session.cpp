@@ -14,6 +14,7 @@ using namespace gfn::detail;
 using namespace gfn::cloud_session;
 
 SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& launch_app_id,
+                                    const StreamSettings& stream_settings,
                                     const std::string& launch_store,
                                     const std::string& internal_title) const
 {
@@ -22,7 +23,6 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     const std::string device_id = GenerateDeviceId();
     const std::string sub_session_id = GenerateUuid();
 
-    const StreamSettings stream_settings = LoadStreamSettings();
     const std::string proxy_url = community_proxy::EnabledUrl(stream_settings);
     std::string automatic_region_url;
     std::string automatic_region_trace;

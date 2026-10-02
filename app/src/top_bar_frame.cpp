@@ -8,10 +8,14 @@
 #include "subscription_display.hpp"
 #include "ui_refresh_policy.hpp"
 #include "ui_helpers.hpp"
+#include "ui_theme.hpp"
 #include <borealis/core/application.hpp>
 #include <borealis/core/theme.hpp>
 #include <borealis/core/logger.hpp>
+#include <borealis/core/touch/tap_gesture.hpp>
 #include <algorithm>
+#include <array>
+#include <utility>
 
 namespace opennow
 {
@@ -100,7 +104,7 @@ class SubscriptionIconView final : public brls::View
         nvgStrokeWidth(vg, 2.0f * scale);
         nvgLineCap(vg, NVG_ROUND);
         nvgLineJoin(vg, NVG_ROUND);
-        nvgStrokeColor(vg, nvgRGB(77, 218, 130));
+        nvgStrokeColor(vg, ui::Muted());
         nvgStroke(vg);
     }
 
@@ -116,10 +120,10 @@ brls::Box* MakeSubscriptionChip(SubscriptionIcon icon, brls::Label*& value_label
     chip->setAlignItems(brls::AlignItems::CENTER);
     chip->setPadding(5, 10, 5, 5);
     chip->setMarginRight(6);
-    chip->setCornerRadius(17);
-    chip->setBorderThickness(1.5f);
-    chip->setBorderColor(nvgRGB(38, 208, 103));
-    chip->setBackgroundColor(nvgRGBA(8, 28, 17, 170));
+    chip->setCornerRadius(10);
+    chip->setBorderThickness(1);
+    chip->setBorderColor(ui::Rule());
+    chip->setBackgroundColor(ui::Ground());
 
     chip->addView(new SubscriptionIconView(icon));
 
@@ -127,7 +131,7 @@ brls::Box* MakeSubscriptionChip(SubscriptionIcon icon, brls::Label*& value_label
     value_label->setFontSize(12);
     value_label->setSingleLine(true);
     value_label->setShrink(0.0f);
-    value_label->setTextColor(nvgRGB(234, 255, 241));
+    value_label->setTextColor(ui::Muted());
     chip->addView(value_label);
     return chip;
 }
@@ -138,15 +142,19 @@ TopBarFrame::TopBarFrame()
     : brls::Box(brls::Axis::COLUMN)
 {
     setGrow(1.0f);
-    setBackgroundColor(nvgRGB(12, 13, 16));
+    setBackgroundColor(ui::Ground());
 
     // Header container
     header_container_ = new brls::Box(brls::Axis::ROW);
+    header_container_->setId("shell-header");
     header_container_->setHeight(76);
+    header_container_->setShrink(0);
     header_container_->setAlignItems(brls::AlignItems::CENTER);
     header_container_->setJustifyContent(brls::JustifyContent::SPACE_BETWEEN);
-    header_container_->setPadding(0, 28, 0, 28);
-    header_container_->setBackgroundColor(nvgRGB(9, 10, 12));
+    header_container_->setPadding(0, 40, 0, 40);
+    header_container_->setBackgroundColor(ui::Ground());
+    header_container_->setLineBottom(1);
+    header_container_->setLineColor(ui::Rule());
     
     addView(header_container_);
 
@@ -164,14 +172,15 @@ TopBarFrame::TopBarFrame()
     brand_mark->setImageFromRes("img/opennow-logo-mark.png");
     brand->addView(brand_mark);
 
-    auto* brand_name = new brls::Label();
+    auto* brand_name = new ui::StyledLabel(ui::FontRole::Display);
     brand_name->setText("OpenNOW");
-    brand_name->setFontSize(21);
-    brand_name->setTextColor(nvgRGB(248, 248, 248));
+    brand_name->setFontSize(24);
+    brand_name->setTextColor(ui::Text());
     brand->addView(brand_name);
     header_container_->addView(brand);
 
     tabs_container_ = new brls::Box(brls::Axis::ROW);
+    tabs_container_->setId("shell-tabs");
     tabs_container_->setGrow(1.0f);
     tabs_container_->setShrink(0.0f);
     tabs_container_->setAlignItems(brls::AlignItems::CENTER);
@@ -179,7 +188,7 @@ TopBarFrame::TopBarFrame()
     header_container_->addView(tabs_container_);
 
     auto* status_container = new brls::Box(brls::Axis::ROW);
-    status_container->setWidth(500);
+    status_container->setWidth(440);
     status_container->setHeight(54);
     status_container->setShrink(0.0f);
     status_container->setAlignItems(brls::AlignItems::CENTER);
@@ -197,6 +206,7 @@ TopBarFrame::TopBarFrame()
     queue_chip_ = MakeSubscriptionChip(
         SubscriptionIcon::Queue, queue_position_label_);
     queue_chip_->setFocusable(true);
+    queue_chip_->addGestureRecognizer(new brls::TapGestureRecognizer(queue_chip_));
     queue_chip_->registerClickAction([](brls::View* v){
         if (IsQueueMinimized()) RestoreMinimizedQueueDialog();
         return true;
@@ -232,7 +242,7 @@ TopBarFrame::TopBarFrame()
     account_name_label_->setSingleLine(true);
     account_name_label_->setShrink(0.0f);
     account_name_label_->setHorizontalAlign(brls::HorizontalAlign::LEFT);
-    account_name_label_->setTextColor(nvgRGB(236, 236, 239));
+    account_name_label_->setTextColor(ui::Text());
     account_labels->addView(account_name_label_);
     account_detail_label_ = new brls::Label();
     account_detail_label_->setText("No account");
@@ -240,20 +250,32 @@ TopBarFrame::TopBarFrame()
     account_detail_label_->setSingleLine(true);
     account_detail_label_->setShrink(0.0f);
     account_detail_label_->setHorizontalAlign(brls::HorizontalAlign::LEFT);
-    account_detail_label_->setTextColor(nvgRGB(112, 119, 130));
+    account_detail_label_->setTextColor(ui::Muted());
     account_labels->addView(account_detail_label_);
     account_container_->addView(account_labels);
 
-    // Divider
-    auto* divider = new brls::Rectangle();
-    divider->setHeight(1);
-    divider->setColor(nvgRGBA(255, 255, 255, 18));
-    addView(divider);
-
     // Content container
     content_container_ = new brls::Box(brls::Axis::COLUMN);
+    content_container_->setId("shell-content");
     content_container_->setGrow(1.0f);
+    content_container_->setMinHeight(0);
     addView(content_container_);
+
+    auto* footer = new brls::Box(brls::Axis::ROW);
+    footer->setId("shell-footer");
+    footer->setHeight(60);
+    footer->setShrink(0);
+    footer->setPadding(0, 40, 0, 40);
+    footer->setAlignItems(brls::AlignItems::CENTER);
+    footer->setBackgroundColor(ui::Ground());
+    footer->setLineTop(1);
+    footer->setLineColor(ui::Rule());
+    auto* hints = new brls::Hints();
+    hints->setId("shell-hints");
+    hints->setGrow(1);
+    hints->setAllowAButtonTouch(true);
+    footer->addView(hints);
+    addView(footer);
 
     registerAction("Previous Tab", brls::BUTTON_LB, [this](brls::View* view) {
         if (tabs_.empty()) return false;
@@ -292,6 +314,33 @@ void TopBarFrame::draw(NVGcontext* vg, float x, float y, float width, float heig
         }
     }
     brls::Box::draw(vg, x, y, width, height, style, ctx);
+    if (!tabs_.empty())
+    {
+        const auto bounds = tabs_container_->getFrame();
+        const auto first = tabs_.front().tab_box->getFrame();
+        const auto last = tabs_.back().tab_box->getFrame();
+        if (first.getMinX() - bounds.getMinX() >= 32 && bounds.getMaxX() - last.getMaxX() >= 32)
+        {
+            nvgSave(vg);
+            nvgFontFaceId(vg, ui::Font(ui::FontRole::Medium));
+            nvgFontSize(vg, 16);
+            nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+            const float center_y = header_container_->getFrame().getMidY();
+            const std::array<std::pair<float, const char*>, 2> keys {{
+                {first.getMinX() - 32, "L"}, {last.getMaxX() + 8, "R"}}};
+            for (const auto& [key_x, text] : keys)
+            {
+                nvgBeginPath(vg);
+                nvgRoundedRect(vg, key_x, center_y - 13, 24, 26, 6);
+                nvgStrokeWidth(vg, 1);
+                nvgStrokeColor(vg, ui::Muted());
+                nvgStroke(vg);
+                nvgFillColor(vg, ui::Text());
+                nvgText(vg, key_x + 12, center_y, text, nullptr);
+            }
+            nvgRestore(vg);
+        }
+    }
 }
 
 TopBarFrame::~TopBarFrame()
@@ -324,12 +373,13 @@ void TopBarFrame::addTab(const std::string& label, TabViewCreator creator)
     tab_box->setCornerRadius(6);
     tab_box->setBackgroundColor(nvgRGBA(0, 0, 0, 0));
     tab_box->setFocusable(true);
+    tab_box->addGestureRecognizer(new brls::TapGestureRecognizer(tab_box));
 
-    auto* text = new brls::Label();
+    auto* text = new ui::StyledLabel(ui::FontRole::Medium);
     text->setText(Tr(label));
     text->setSingleLine(true);
     text->setFontSize(18);
-    text->setTextColor(nvgRGB(128, 133, 143));
+    text->setTextColor(ui::Muted());
 
     auto* label_container = new brls::Box(brls::Axis::ROW);
     label_container->setHeight(57);
@@ -339,13 +389,13 @@ void TopBarFrame::addTab(const std::string& label, TabViewCreator creator)
     tab_box->addView(label_container);
 
     auto* underline_container = new brls::Box(brls::Axis::ROW);
-    underline_container->setWidth(66);
+    underline_container->setWidth(28);
     underline_container->setHeight(5);
     underline_container->setAlignItems(brls::AlignItems::FLEX_END);
 
     auto* underline = new brls::Rectangle();
-    underline->setWidth(66);
-    underline->setHeight(5);
+    underline->setWidth(28);
+    underline->setHeight(3);
     underline->setColor(nvgRGBA(0, 0, 0, 0));
     underline_container->addView(underline);
 
@@ -398,11 +448,11 @@ void TopBarFrame::SelectTab(int index)
 
     for (size_t i = 0; i < tabs_.size(); ++i) {
         if ((int)i == index) {
-            tabs_[i].header_label->setTextColor(nvgRGB(255, 255, 255));
-            tabs_[i].underline->setColor(nvgRGB(77, 218, 130));
-            tabs_[i].tab_box->setBackgroundColor(nvgRGBA(77, 218, 130, 22));
+            tabs_[i].header_label->setTextColor(ui::Text());
+            tabs_[i].underline->setColor(ui::Green());
+            tabs_[i].tab_box->setBackgroundColor(nvgRGBA(0, 0, 0, 0));
         } else {
-            tabs_[i].header_label->setTextColor(nvgRGB(128, 133, 143));
+            tabs_[i].header_label->setTextColor(ui::Muted());
             tabs_[i].underline->setColor(nvgRGBA(0, 0, 0, 0));
             tabs_[i].tab_box->setBackgroundColor(nvgRGBA(0, 0, 0, 0));
         }

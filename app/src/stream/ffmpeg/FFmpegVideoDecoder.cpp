@@ -1,13 +1,13 @@
 #include "FFmpegVideoDecoder.hpp"
 #include "AVFrameHolder.hpp"
 #include "borealis.hpp"
-#include "../../stream_settings.hpp"
 #include "../../video_quality_policy.hpp"
 #include "../DecodeQueuePolicy.hpp"
 #include <cstdio>
 #include <cstring>
 #include <new>
 #include <vector>
+#include <utility>
 extern "C" {
 #include <libavutil/hwcontext.h>
 }
@@ -35,7 +35,8 @@ extern "C" {
 //}
 #endif
 
-FFmpegVideoDecoder::FFmpegVideoDecoder() {
+FFmpegVideoDecoder::FFmpegVideoDecoder(std::string image_quality_mode)
+    : image_quality_mode_(std::move(image_quality_mode)) {
 //    AVBufferRef* deviceRef = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_MEDIACODEC);
 //    AVHWDeviceContext* ctx = (AVHWDeviceContext*)deviceRef->data;
 //    AVMediaCodecDeviceContext* hwctx = (AVMediaCodecDeviceContext*)ctx->hwctx;
@@ -151,8 +152,7 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
     }
 
     if (perf_lvl & DISABLE_LOOP_FILTER) {
-        const auto settings = opennow::LoadStreamSettings();
-        const auto tuning = opennow::video::ResolveQualityTuning(settings.image_quality_mode);
+        const auto tuning = opennow::video::ResolveQualityTuning(image_quality_mode_);
         // Keep deblocking on reference pictures in enhanced modes. This removes
         // persistent block edges while still skipping work on disposable frames.
         m_decoder_context->skip_loop_filter = tuning.preserve_reference_deblocking

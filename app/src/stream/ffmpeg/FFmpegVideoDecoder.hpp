@@ -1,10 +1,11 @@
 #pragma once
 #include "IFFmpegVideoDecoder.hpp"
 #include "AVFrameHolder.hpp"
+#include <string>
 
 class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
   public:
-    FFmpegVideoDecoder();
+    explicit FFmpegVideoDecoder(std::string image_quality_mode);
     ~FFmpegVideoDecoder();
 
     int setup(int video_format, int width, int height, int redraw_rate,
@@ -17,6 +18,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     bool uses_hardware_frames() const override { return m_uses_hardware_frames; }
 
   private:
+    std::string image_quality_mode_;
     int decode();
     AVFrame* get_frame(bool native_frame, int& decode_error);
 

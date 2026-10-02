@@ -15,10 +15,11 @@
 #include <array>
 #include <memory>
 #include <vector>
+#include <string>
 
 class DKVideoRenderer : public IVideoRenderer {
 public:
-    DKVideoRenderer() = default;
+    explicit DKVideoRenderer(std::string image_quality_mode);
     ~DKVideoRenderer() override;
 
     void draw(NVGcontext* vg, int width, int height, AVFrame* frame, int imageFormat) override;
@@ -31,7 +32,8 @@ public:
 private:
     struct Configuration {
         ~Configuration();
-        bool initialize(int width, int height, AVFrame* frame, uint64_t generation);
+        bool initialize(int width, int height, AVFrame* frame, uint64_t generation,
+                        const std::string& image_quality_mode);
         bool matches(int width, int height, const AVFrame* frame) const;
         bool prepareFrame(AVFrame* frame, uint64_t generation);
         bool drawLatest(AVFrame* frame, uint64_t generation);
@@ -113,6 +115,7 @@ private:
         opennow::video::GpuFrameQueue<dk::Fence, 8> submitted_frames_;
     };
 
+    std::string image_quality_mode_;
     opennow::video::GpuConfigurationQueue<Configuration> configurations_;
     VideoRenderStats render_stats_ {};
 };

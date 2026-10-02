@@ -65,7 +65,7 @@ static void decode_stream(FFmpegVideoDecoder& decoder, const char* path,
 int main(int argc, char** argv)
 {
     assert(argc == 3);
-    FFmpegVideoDecoder decoder;
+    FFmpegVideoDecoder decoder("Adaptive");
     assert(decoder.setup(VIDEO_FORMAT_H264, 64, 32, 60, nullptr,
                          VIDEO_DECODER_FORCE_SOFTWARE) == 0);
     assert(!decoder.uses_hardware_frames());

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "stream_settings.hpp"
+#include "ui_theme.hpp"
 
 namespace opennow
 {
@@ -46,6 +47,9 @@ class SettingsTab : public brls::Box
     void BuildAppPage();
     void UpdateCategoryChrome();
     void UpdateOptionValues();
+    void ShowOptionHelp(const std::string& title, const std::string& description,
+                        std::function<std::string()> value = {});
+    void UpdateOptionHelp();
     void MarkDirty();
     bool SaveChanges(brls::View* view);
     bool RevertChanges(brls::View* view);
@@ -67,6 +71,7 @@ class SettingsTab : public brls::Box
     static brls::Label* MakeParagraph(
         const std::string& text, float bottom_margin = 16.0f);
     static std::string FormatBytes(std::uint64_t bytes);
+    static std::string BitrateValue(int kbps);
     brls::Box* MakeSection(const std::string& title, const std::string& subtitle = {});
     brls::Box* MakeOptionRow(
         const std::string& title,
@@ -100,17 +105,28 @@ class SettingsTab : public brls::Box
     brls::Label* page_title_ = nullptr;
     brls::Label* page_subtitle_ = nullptr;
     brls::Label* save_status_ = nullptr;
+    brls::Label* help_title_ = nullptr;
+    brls::Label* help_value_ = nullptr;
+    brls::Label* help_description_ = nullptr;
+    brls::Label* help_next_ = nullptr;
+    brls::Label* draft_summary_status_ = nullptr;
+    brls::Box* bitrate_meter_ = nullptr;
+    std::vector<std::pair<brls::Rectangle*, brls::Label*>> bitrate_steps_;
+    ui::NextStreamSummaryView* next_stream_summary_ = nullptr;
+    std::string help_option_;
+    std::string help_description_text_;
+    std::function<std::string()> help_value_provider_;
     brls::ScrollingFrame* scrolling_frame_ = nullptr;
+    brls::ScrollingFrame* help_scrolling_frame_ = nullptr;
     brls::Box* content_container_ = nullptr;
     struct CategoryNavItem
     {
         brls::Box* row = nullptr;
-        brls::Rectangle* marker = nullptr;
-        brls::Label* label = nullptr;
+        ui::ActionRow* action = nullptr;
     };
 
     std::vector<CategoryNavItem> category_nav_items_;
-    std::vector<std::pair<brls::Button*, std::function<std::string()>>> option_values_;
+    std::vector<std::pair<ui::ActionRow*, std::function<std::string()>>> option_values_;
     Category category_ = Category::Account;
     StreamSettings saved_settings_;
     StreamSettings draft_settings_;

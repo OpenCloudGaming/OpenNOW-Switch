@@ -2,6 +2,7 @@
 
 #include "http_client.hpp"
 #include "models.hpp"
+#include "stream_settings.hpp"
 
 #include <functional>
 #include <stdexcept>
@@ -44,6 +45,7 @@ class GfnClient
         bool force_refresh = false) const;
 
     SessionInfo StartSession(AuthSession& session, const std::string& launch_app_id,
+                             const StreamSettings& settings,
                              const std::string& launch_store = "",
                              const std::string& internal_title = "") const;
     SessionInfo PollSession(AuthSession& session, const std::string& session_id) const;

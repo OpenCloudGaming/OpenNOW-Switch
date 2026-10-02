@@ -2,6 +2,7 @@
 
 #include "localization.hpp"
 #include "ui_text_policy.hpp"
+#include "ui_theme.hpp"
 
 namespace opennow::ui
 {
@@ -30,17 +31,11 @@ brls::Box* MakeGameBrowserHeader(
     heading->setGrow(1.0f);
     heading->setAlignItems(brls::AlignItems::CENTER);
 
-    auto* accent = new brls::Rectangle();
-    accent->setWidth(4);
-    accent->setHeight(30);
-    accent->setMarginRight(12);
-    accent->setColor(nvgRGB(88, 217, 138));
-    heading->addView(accent);
-
-    auto* label = new brls::Label();
+    auto* label = new StyledLabel(FontRole::Heading);
+    label->setId("browser-heading");
     label->setText(Tr(title));
     label->setFontSize(28);
-    label->setTextColor(nvgRGB(248, 249, 251));
+    label->setTextColor(Text());
     heading->addView(label);
     header->addView(heading);
 

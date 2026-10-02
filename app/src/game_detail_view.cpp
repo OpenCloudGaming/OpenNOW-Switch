@@ -4,7 +4,6 @@
 #include "cover_image_cache.hpp"
 #include "game_detail_policy.hpp"
 #include "home_shortcut.hpp"
-#include "membership_tier_style.hpp"
 #include "nte_credentials.hpp"
 #include "ui_helpers.hpp"
 #include "localization.hpp"
@@ -23,23 +22,32 @@ namespace opennow
 namespace
 {
 
-brls::Label* MakeLabel(const std::string& text, float size, NVGcolor color, float bottom_margin = 10.0f)
+class CoverHero final : public CachedImage
 {
-    auto* label = new brls::Label();
-    label->setText(Tr(text));
-    label->setFontSize(size);
-    label->setTextColor(color);
-    label->setMarginBottom(bottom_margin);
-    return label;
-}
+  public:
+    brls::View* hitTest(brls::Point) override { return nullptr; }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+              brls::Style style, brls::FrameContext* ctx) override
+    {
+        CachedImage::draw(vg, x, y, width, height, style, ctx);
+        nvgBeginPath(vg);
+        nvgRect(vg, x, y, width, height);
+        nvgFillPaint(vg, nvgLinearGradient(vg, x + width * 0.25f, y,
+            x + width * 0.85f, y, ui::Ground(), nvgRGBA(11, 12, 14, 60)));
+        nvgFill(vg);
+        nvgBeginPath(vg);
+        nvgRect(vg, x, y, width, height);
+        nvgFillPaint(vg, nvgLinearGradient(vg, x, y + height * 0.6f,
+            x, y + height, nvgRGBA(11, 12, 14, 0), nvgRGBA(11, 12, 14, 160)));
+        nvgFill(vg);
+    }
+};
 
 std::string PrimaryStore(const GameInfo& game)
 {
     if (!game.available_stores.empty())
         return game_detail::DisplayStore(game.available_stores.front());
-
-    if (!game_detail::IsUnknownMetadata(game.publisher))
-        return game.publisher;
 
     return "GeForce NOW";
 }
@@ -119,6 +127,7 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
     : brls::Box(brls::Axis::COLUMN)
     , client_(client)
     , data_(std::move(data))
+    , account_generation_(AppState::Instance().session_generation())
 {
     const std::string saved_variant = client_.LoadLauncherPreference(ActiveUserId(), data_.game_id);
     for (size_t i = 0; i < data_.variants.size(); ++i)
@@ -133,139 +142,189 @@ GameDetailView::GameDetailView(const GfnClient& client, GameDetailData data)
             selected_variant_index_ = i;
     }
 
-    setPadding(28, 40, 28, 40);
-    setBackgroundColor(nvgRGB(16, 16, 20));
+    setId("detail");
+    setBackgroundColor(ui::Ground());
 
-    auto* header = new brls::Header();
-    header->setTitle(data_.title);
-    header->setSubtitle(data_.subtitle);
+    auto* header = new brls::Box(brls::Axis::ROW);
+    header->setId("detail/header");
+    header->setHeight(76);
+    header->setShrink(0);
+    header->setPadding(0, 48, 0, 48);
+    header->setAlignItems(brls::AlignItems::CENTER);
+    header->setBorderThickness(1);
+    header->setBorderColor(ui::Rule());
+    auto* logo = new brls::Image();
+    logo->setWidth(56);
+    logo->setHeight(32);
+    logo->setShrink(0);
+    logo->setMarginRight(28);
+    logo->setImageFromRes("img/opennow-logo-mark.png");
+    header->addView(logo);
+    auto* route = ui::MakeLabel(Tr(data_.owned ? "Library" : "Store") + "  /", 18, ui::Muted());
+    route->setSingleLine(true);
+    route->setMaxWidthPercentage(30);
+    route->setMarginRight(14);
+    header->addView(route);
+    auto* breadcrumb = ui::MakeLabel(data_.title, 18, ui::Text(), ui::FontRole::Medium);
+    breadcrumb->setSingleLine(true);
+    breadcrumb->setGrow(1);
+    breadcrumb->setShrink(1);
+    header->addView(breadcrumb);
     addView(header);
 
     auto* content = new brls::Box(brls::Axis::ROW);
-    content->setGrow(1.0f);
-    content->setMarginTop(16);
+    content->setId("detail/content");
+    content->setGrow(1);
+    content->setShrink(1);
+    content->setClipsToBounds(true);
 
-    auto* poster_column = new brls::Box(brls::Axis::COLUMN);
-    poster_column->setWidth(310);
-    poster_column->setMarginRight(28);
+    auto* hero = new CoverHero();
+    hero->setId("detail/cover");
+    hero->setPositionType(brls::PositionType::ABSOLUTE);
+    hero->setPositionTop(0);
+    hero->setPositionLeft(0);
+    hero->setWidthPercentage(100);
+    hero->setHeightPercentage(100);
+    hero->setScalingType(brls::ImageScalingType::FILL);
+    SetCachedCoverImage(hero, data_.image_url);
+    content->addView(hero);
 
-    auto* poster = new CachedImage();
-    poster->setWidth(310);
-    poster->setHeight(380);
-    poster->setCornerRadius(14);
-    poster->setScalingType(brls::ImageScalingType::FILL);
-    poster->setMarginBottom(16);
-    SetCachedCoverImage(poster, data_.image_url);
-    poster_column->addView(poster);
+    auto* left = new brls::Box(brls::Axis::COLUMN);
+    left->setWidth(640);
+    left->setShrink(0);
+    left->setPadding(28, 32, 24, 48);
 
-    auto* play_button = new brls::Button();
-    play_button->setStyle(&brls::BUTTONSTYLE_PRIMARY);
-    play_button->setText(Tr(data_.owned ? "Play on GeForce NOW" : "Play from Store"));
-    play_button->setHeight(52);
-    play_button->setCornerRadius(10);
-    play_button->registerClickAction([this](brls::View* view) {
-        (void)view;
-        Play();
-        return true;
-    });
-    poster_column->addView(play_button);
+    std::string metadata = game_detail::DisplayStore(data_.stores);
+    if (!data_.membership_tier_label.empty())
+        metadata += " · " + data_.membership_tier_label;
+    if (!game_detail::IsUnknownMetadata(data_.publisher))
+        metadata += " · " + data_.publisher;
+    auto* metadata_label = ui::MakeLabel(metadata, 14, ui::Muted());
+    metadata_label->setId("detail/metadata");
+    metadata_label->setSingleLine(true);
+    metadata_label->setShrink(0);
+    metadata_label->setMarginBottom(8);
+    left->addView(metadata_label);
 
-    store_button_ = new brls::Button();
-    store_button_->setMarginTop(10);
-    store_button_->setHeight(44);
-    store_button_->setCornerRadius(10);
-    store_button_->registerClickAction([this](brls::View*) {
+    auto* title = ui::MakeLabel(data_.title, 44, ui::Text(), ui::FontRole::Display);
+    title->setId("detail/title");
+    title->setSingleLine(true);
+    title->setShrink(0);
+    title->setMarginBottom(4);
+    left->addView(title);
+
+    auto* description = ui::MakeLabel(
+        data_.description.empty() ? Tr("No description is available yet for this title.") : data_.description,
+        18, ui::Muted());
+    description->setSingleLine(false);
+    auto* description_frame = new brls::ScrollingFrame();
+    description_frame->setId("detail/description");
+    description_frame->setHeight(76);
+    description_frame->setShrink(0);
+    description_frame->setMarginBottom(20);
+    description_frame->setContentView(description);
+    left->addView(description_frame);
+
+    auto* actions = new brls::Box(brls::Axis::COLUMN);
+    actions->setId("detail/actions");
+    actions->setGrow(1);
+    actions->setWidth(472);
+    actions->setPadding(4);
+    play_button_ = new ui::ActionRow(Tr(data_.owned ? "Play on GeForce NOW" : "Play from Store"), {},
+        [this](brls::View*) {
+            Play();
+            return true;
+        }, ui::ActionTone::Primary);
+    play_button_->setId("detail/play");
+    play_button_->setHeight(64);
+    play_button_->setMarginBottom(10);
+    play_button_->updateActionHint(brls::BUTTON_A, Tr("Play"));
+    actions->addView(play_button_);
+
+    store_button_ = new ui::ActionRow(Tr("Store"), {}, [this](brls::View*) {
         ShowStoreSelector(false);
         return true;
     });
+    store_button_->setId("detail/store");
+    store_button_->setMarginBottom(10);
+    store_button_->updateActionHint(brls::BUTTON_A, Tr("Choose game store"));
     UpdateStoreButton();
-    poster_column->addView(store_button_);
+    actions->addView(store_button_);
 
-    auto* shortcut_button = new brls::Button();
-    shortcut_button->setMarginTop(10);
-    shortcut_button->setHeight(44);
-    shortcut_button->setCornerRadius(10);
-    shortcut_button->setStyle(&brls::BUTTONSTYLE_BORDERED);
-    shortcut_button->setText(Tr("Create Switch shortcut"));
-    shortcut_button->registerClickAction([this](brls::View*) {
-        CreateSwitchShortcut();
-        return true;
-    });
-    poster_column->addView(shortcut_button);
-
-    content->addView(poster_column);
-
-    auto* info_column = new brls::Box(brls::Axis::COLUMN);
-    info_column->setGrow(1.0f);
-
-    info_column->addView(MakeLabel(data_.title, 32.0f, nvgRGB(236, 236, 239), 6.0f));
-    info_column->addView(MakeLabel(
-        game_detail::DetailSubtitle(data_.owned), 17.0f, nvgRGB(88, 217, 138), 18.0f));
-
-    auto* metadata = new brls::Box(brls::Axis::COLUMN);
-    metadata->setPadding(16, 18, 14, 18);
-    metadata->setMarginBottom(18);
-    metadata->setCornerRadius(12);
-    metadata->setBorderThickness(1);
-    metadata->setBorderColor(nvgRGB(42, 42, 48));
-    metadata->setBackgroundColor(nvgRGB(21, 21, 24));
-    metadata->addView(MakeLabel("GAME DETAILS", 12.0f, nvgRGB(112, 119, 130), 10.0f));
-    metadata->addView(MakeLabel(
-        "Store  ·  " + game_detail::DisplayStore(data_.stores),
-        17.0f, nvgRGB(220, 220, 225), 6.0f));
-    if (!data_.membership_tier_label.empty())
-    {
-        metadata->addView(MakeLabel(
-            "Membership  ·  " + data_.membership_tier_label,
-            17.0f, membership::TextColor(data_.membership_tier_label), 6.0f));
-    }
-    if (!game_detail::IsUnknownMetadata(data_.publisher))
-        metadata->addView(MakeLabel(
-            "Publisher  ·  " + data_.publisher,
-            17.0f, nvgRGB(220, 220, 225), 6.0f));
-    metadata->addView(MakeLabel(
-        "Last played  ·  " + game_detail::FormatLastPlayed(data_.last_played),
-        17.0f, nvgRGB(220, 220, 225), 0.0f));
-    info_column->addView(metadata);
+    auto* shortcut_button = new ui::ActionRow(Tr("Create Switch shortcut"), Tr("HOME screen"),
+        [this](brls::View*) {
+            CreateSwitchShortcut();
+            return true;
+        });
+    shortcut_button->setId("detail/shortcut");
+    shortcut_button->updateActionHint(brls::BUTTON_A, Tr("Create Switch shortcut"));
+    actions->addView(shortcut_button);
 
     if (IsNevernessToEverness(data_.title))
     {
-        nte_button_ = new brls::Button();
-        nte_button_->setMarginBottom(18);
-        nte_button_->registerClickAction([this](brls::View*) {
+        nte_button_ = new ui::ActionRow("NTE Auto-login", {}, [this](brls::View*) {
             OpenNteCredentialsMenu();
             return true;
         });
+        nte_button_->setId("detail/nte");
+        nte_button_->setMarginTop(10);
         UpdateNteButton();
-        info_column->addView(nte_button_);
+        actions->addView(nte_button_);
     }
+    left->addView(actions);
+    content->addView(left);
 
-    info_column->addView(MakeLabel("ABOUT", 12.0f, nvgRGB(112, 119, 130), 8.0f));
-    auto* description = MakeLabel(
-        SafeText(data_.description, "No description is available yet for this title."),
-        18.0f,
-        nvgRGB(206, 206, 214),
-        0.0f);
-    description->setSingleLine(false);
-
-    auto* description_frame = new brls::ScrollingFrame();
-    description_frame->setGrow(1.0f);
-    description_frame->setContentView(description);
-    info_column->addView(description_frame);
-
-    content->addView(info_column);
+    auto* right = new brls::Box(brls::Axis::COLUMN);
+    right->setGrow(1);
+    right->setShrink(1);
+    right->setPadding(28, 48, 24, 16);
+    right->setJustifyContent(brls::JustifyContent::FLEX_END);
+    right->setAlignItems(brls::AlignItems::FLEX_END);
+    auto* summary = new ui::NextStreamSummaryView(LoadStreamSettings());
+    summary->setId("detail/next-stream");
+    summary->setWidth(380);
+    if (!data_.last_played.empty())
+    {
+        auto* history = ui::MakeLabel(Tr("Last played") + " · " + game_detail::FormatLastPlayed(data_.last_played),
+            14, ui::Muted());
+        history->setSingleLine(true);
+        history->setMarginTop(8);
+        summary->addView(history);
+    }
+    right->addView(summary);
+    content->addView(right);
     addView(content);
 
-    registerAction("Back", brls::BUTTON_B, [](brls::View* view) {
-        (void)view;
+    registerAction(Tr("Back"), brls::BUTTON_B, [](brls::View*) {
         brls::Application::popActivity();
         return true;
     });
+    auto* footer = new brls::Box(brls::Axis::ROW);
+    footer->setId("detail/footer");
+    footer->setHeight(60);
+    footer->setShrink(0);
+    footer->setPadding(0, 32, 0, 32);
+    footer->setAlignItems(brls::AlignItems::CENTER);
+    footer->setBorderThickness(1);
+    footer->setBorderColor(ui::Rule());
+    auto* hints = new brls::Hints();
+    hints->setId("detail/hints");
+    hints->setAllowAButtonTouch(true);
+    hints->setAddUnableAButtonAction(false);
+    hints->setMaxWidthPercentage(100);
+    hints->applyXMLAttribute("forceShown", "true");
+    footer->addView(hints);
+    addView(footer);
 }
 
 GameDetailView::~GameDetailView()
 {
     alive_->store(false);
+}
+
+brls::View* GameDetailView::getDefaultFocus()
+{
+    return play_button_;
 }
 
 void GameDetailView::Play()
@@ -274,6 +333,11 @@ void GameDetailView::Play()
     if (!session)
     {
         ShowError("Not Logged In", "Sign in from Library before starting a GeForce NOW session.");
+        return;
+    }
+    if (!AppState::Instance().IsCurrentSession(account_generation_))
+    {
+        ShowError("Account Changed", "Open this game again from the current account before playing.");
         return;
     }
 
@@ -299,17 +363,17 @@ void GameDetailView::UpdateStoreButton()
     const std::string store = selected_variant_index_ < data_.variants.size()
         ? game_detail::DisplayStore(data_.variants[selected_variant_index_].store)
         : game_detail::DisplayStore(data_.stores);
-    store_button_->setText(Tr("Store") + ": " + store + (data_.variants.size() > 1 ? " (" + Tr("change") + ")" : ""));
+    store_button_->SetValue(store + (data_.variants.size() > 1 ? " · " + Tr("change") : ""));
 }
 
 void GameDetailView::UpdateNteButton()
 {
     if (!nte_button_)
         return;
-    nte_button_->setText(
+    nte_button_->SetValue(
         LoadNteCredentials().valid()
-            ? "NTE Auto-login: Ready (L + X in game)"
-            : "NTE Auto-login: Set email and password");
+            ? "Saved · L + X in game"
+            : "Set email and password");
 }
 
 void GameDetailView::ConfigureNteCredentials()
@@ -355,8 +419,16 @@ void GameDetailView::OpenNteCredentialsMenu()
         "NTE Auto-login\n\nCredentials are stored as plain text at:\n" +
         NteCredentialsPath() +
         "\n\nPress L + X on the first NTE email sign-in screen. B cancels an active sequence.");
-    dialog->addButton("Edit credentials", [this] { ConfigureNteCredentials(); });
-    dialog->addButton("Clear credentials", [this] {
+    const auto alive = alive_;
+    const auto generation = account_generation_;
+    dialog->addButton("Edit credentials", [this, alive, generation] {
+        if (!alive->load() || AppState::Instance().session_generation() != generation)
+            return;
+        ConfigureNteCredentials();
+    });
+    dialog->addButton("Clear credentials", [this, alive, generation] {
+        if (!alive->load() || AppState::Instance().session_generation() != generation)
+            return;
         ClearNteCredentials();
         UpdateNteButton();
         brls::Application::notify("NTE Auto-login credentials removed");
@@ -368,9 +440,12 @@ void GameDetailView::OpenNteCredentialsMenu()
 
 void GameDetailView::ShowStoreSelector(bool launch_after_selection)
 {
+    if (AppState::Instance().session_generation() != account_generation_)
+        return;
     if (data_.variants.empty())
     {
-        LaunchSelectedVariant();
+        if (launch_after_selection)
+            LaunchSelectedVariant();
         return;
     }
 
@@ -379,43 +454,64 @@ void GameDetailView::ShowStoreSelector(bool launch_after_selection)
     for (const auto& variant : data_.variants)
         labels.push_back(VariantLabel(variant));
 
+    const auto alive = alive_;
+    const auto generation = account_generation_;
+    const auto user_id = ActiveUserId();
     auto* dropdown = new brls::Dropdown(
         Tr("Choose game store"), labels,
-        [this](int selected) {
+        [this, alive, generation, user_id](int selected) {
+            if (!alive->load() || AppState::Instance().session_generation() != generation)
+                return;
             if (selected < 0 || static_cast<size_t>(selected) >= data_.variants.size())
                 return;
             selected_variant_index_ = static_cast<size_t>(selected);
             launcher_preference_loaded_ = true;
             const auto& variant = data_.variants[selected_variant_index_];
             data_.launch_app_id = variant.id;
-            client_.SaveLauncherPreference(ActiveUserId(), data_.game_id, variant.id);
+            client_.SaveLauncherPreference(user_id, data_.game_id, variant.id);
             UpdateStoreButton();
             brls::Application::notify("Store selected: " + SafeText(variant.store, variant.id));
         }, static_cast<int>(selected_variant_index_),
-        [this, launch_after_selection](int selected) {
-            if (launch_after_selection && selected >= 0)
-                LaunchSelectedVariant();
+        [this, alive, generation, launch_after_selection](int selected) {
+            if (!alive->load() || !AppState::Instance().IsCurrentSession(generation))
+                return;
+            if (!launch_after_selection || selected < 0 ||
+                static_cast<size_t>(selected) >= data_.variants.size() ||
+                static_cast<size_t>(selected) != selected_variant_index_)
+                return;
+            DeferredLaunchSelectedVariant(generation, data_.variants[static_cast<size_t>(selected)].id);
         });
     brls::Application::pushActivity(new brls::Activity(dropdown));
 }
 
 void GameDetailView::LaunchSelectedVariant()
 {
-    std::string launch_app_id = data_.launch_app_id;
-    std::string store = data_.stores;
-    if (selected_variant_index_ < data_.variants.size())
-    {
-        launch_app_id = data_.variants[selected_variant_index_].id;
-        store = data_.variants[selected_variant_index_].store;
-    }
+    const std::string launch_app_id = selected_variant_index_ < data_.variants.size()
+        ? data_.variants[selected_variant_index_].id : data_.launch_app_id;
+    DeferredLaunchSelectedVariant(account_generation_, launch_app_id);
+}
 
-    if (launch_app_id.empty())
+void GameDetailView::DeferredLaunchSelectedVariant(std::uint64_t generation,
+                                                  const std::string& launch_app_id)
+{
+    const auto& state = AppState::Instance();
+    if (!alive_->load() || !state.IsCurrentSession(generation) || generation != account_generation_)
+        return;
+
+    const std::string current_launch_app_id = selected_variant_index_ < data_.variants.size()
+        ? data_.variants[selected_variant_index_].id : data_.launch_app_id;
+    if (launch_app_id != current_launch_app_id)
+        return;
+
+    if (!IsNumericLaunchId(launch_app_id))
     {
-        ShowError("Launch Error", "This game has no launch App ID.");
+        ShowError("Launch Error", "This game has no valid numeric launch App ID.");
         return;
     }
 
-    LaunchSessionDialog(client_, *AppState::Instance().session(), launch_app_id,
+    const std::string store = selected_variant_index_ < data_.variants.size()
+        ? data_.variants[selected_variant_index_].store : data_.stores;
+    LaunchSessionDialog(client_, *state.session(), launch_app_id,
                         data_.title, store, data_.title, data_.game_id,
                         data_.image_url);
 }

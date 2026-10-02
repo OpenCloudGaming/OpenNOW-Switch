@@ -67,7 +67,7 @@ void failure_sweep(bool hardware)
     auto resized = hardware ? hardware_frame(32, 32) : software_frame(32, 32);
     int initialization_allocations = 0;
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         draw(renderer, resized);
         initialization_allocations = allocation;
         assert(draws == 1);
@@ -75,7 +75,7 @@ void failure_sweep(bool hardware)
     for (int failure = 1; failure <= initialization_allocations; ++failure) {
         reset();
         {
-            DKVideoRenderer renderer;
+            DKVideoRenderer renderer("Adaptive");
             fail_at = failure;
             draw(renderer, resized);
             assert(draws == 0 && submissions == 0);
@@ -89,7 +89,7 @@ void failure_sweep(bool hardware)
 
         reset();
         {
-            DKVideoRenderer renderer;
+            DKVideoRenderer renderer("Adaptive");
             draw(renderer, initial);
             const size_t active_memory = Memory::live.size();
             fail_at = allocation + failure;
@@ -115,7 +115,7 @@ void resize_retirement_and_screen()
     auto second = software_frame(32, 32, AV_PIX_FMT_NV12);
     auto third = software_frame(32, 64);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         draw(renderer, first, 0);
         draw(renderer, first, 0);
         const auto first_fence = submitted;
@@ -154,7 +154,7 @@ void backend_retirement()
     auto software = software_frame(64, 32);
     auto hardware = hardware_frame(64, 32);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         draw(renderer, hardware, 1);
         const auto hardware_fence = submitted;
         hardware.reset();
@@ -184,7 +184,7 @@ void bounded_frame_updates()
     reset();
     auto software = software_frame(64, 32);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         draw(renderer, software, 1);
         const int attempts = allocation;
         for (uint64_t generation = 2; generation <= 30; ++generation)
@@ -197,7 +197,7 @@ void bounded_frame_updates()
     }
     reset();
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         for (uint64_t generation = 1; generation <= 30; ++generation) {
             auto hardware = hardware_frame(64, 32);
             draw(renderer, hardware, generation);
@@ -220,7 +220,7 @@ void allocation_retry()
     reset();
     auto frame = software_frame(64, 32);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         fail_at = 3;
         draw(renderer, frame);
         assert(draws == 0);
@@ -246,7 +246,7 @@ void hardware_mapping_allocation_exception()
     reset();
     auto initial = hardware_frame(64, 32);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         draw(renderer, initial);
         auto next = hardware_frame(64, 32);
         fail_at = allocation + 1;

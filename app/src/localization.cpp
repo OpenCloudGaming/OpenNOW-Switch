@@ -17,6 +17,8 @@ const Dictionary& DictionaryFor(const std::string& code)
     static const Dictionary empty;
     static const std::unordered_map<std::string, Dictionary> dictionaries = {
         {"ru", {
+            {"Selected server", "Выбранный сервер"}, {"Next value", "Следующее значение"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Включите диагностические журналы для поиска проблем. Применяется после сохранения."},
             {"Store", "Магазин"}, {"Library", "Библиотека"}, {"Settings", "Настройки"},
             {"My Library", "Моя библиотека"}, {"Search", "Поиск"}, {"Close", "Закрыть"},
             {"Cancel", "Отмена"}, {"Account", "Аккаунт"}, {"Stream", "Поток"},
@@ -82,6 +84,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"SAVED NVIDIA ACCOUNT", "СОХРАНЕННЫЙ АККАУНТ NVIDIA"}
         }},
         {"uk", {
+            {"Selected server", "Вибраний сервер"}, {"Next value", "Наступне значення"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Увімкніть діагностичні журнали для пошуку проблем. Застосовується після збереження."},
             {"Store", "Магазин"}, {"Library", "Бібліотека"}, {"Settings", "Налаштування"},
             {"My Library", "Моя бібліотека"}, {"Search", "Пошук"}, {"Close", "Закрити"},
             {"Cancel", "Скасувати"}, {"Account", "Обліковий запис"}, {"Stream", "Трансляція"},
@@ -112,6 +116,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"Enter email and password", "Ввести пошту та пароль"}, {"Login failed", "Помилка входу"}
         }},
         {"es", {
+            {"Selected server", "Servidor seleccionado"}, {"Next value", "Siguiente valor"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Activa el registro de diagnóstico para resolver problemas. Se aplica al guardar."},
             {"Store", "Tienda"}, {"Library", "Biblioteca"}, {"Settings", "Ajustes"}, {"My Library", "Mi biblioteca"},
             {"Search", "Buscar"}, {"Close", "Cerrar"}, {"Cancel", "Cancelar"}, {"Account", "Cuenta"},
             {"Stream", "Transmisión"}, {"Game", "Juego"}, {"Controls", "Controles"}, {"Audio", "Audio"},
@@ -136,6 +142,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"Enter email and password", "Introducir correo y contraseña"}, {"Login failed", "Error de inicio de sesión"}
         }},
         {"it", {
+            {"Selected server", "Server selezionato"}, {"Next value", "Valore successivo"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Attiva i log diagnostici per risolvere i problemi. Si applica dopo il salvataggio."},
             {"Store", "Negozio"}, {"Library", "Libreria"}, {"Settings", "Impostazioni"}, {"My Library", "La mia libreria"},
             {"Search", "Cerca"}, {"Close", "Chiudi"}, {"Cancel", "Annulla"}, {"Account", "Account"},
             {"Stream", "Streaming"}, {"Game", "Gioco"}, {"Controls", "Comandi"}, {"Audio", "Audio"},
@@ -156,6 +164,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"Welcome back", "Bentornato"}, {"Login failed", "Accesso non riuscito"}
         }},
         {"fr", {
+            {"Selected server", "Serveur sélectionné"}, {"Next value", "Valeur suivante"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Activez les journaux de diagnostic pour résoudre les problèmes. Le changement s’applique après l’enregistrement."},
             {"Store", "Boutique"}, {"Library", "Bibliothèque"}, {"Settings", "Paramètres"}, {"My Library", "Ma bibliothèque"},
             {"Search", "Rechercher"}, {"Close", "Fermer"}, {"Cancel", "Annuler"}, {"Account", "Compte"},
             {"Stream", "Streaming"}, {"Game", "Jeu"}, {"Controls", "Commandes"}, {"Audio", "Audio"},
@@ -176,6 +186,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"Welcome back", "Bon retour"}, {"Login failed", "Échec de la connexion"}
         }},
         {"pl", {
+            {"Selected server", "Wybrany serwer"}, {"Next value", "Następna wartość"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "Włącz dzienniki diagnostyczne, aby rozwiązywać problemy. Zmiana działa po zapisaniu."},
             {"Store", "Sklep"}, {"Library", "Biblioteka"}, {"Settings", "Ustawienia"}, {"My Library", "Moja biblioteka"},
             {"Search", "Szukaj"}, {"Close", "Zamknij"}, {"Cancel", "Anuluj"}, {"Account", "Konto"},
             {"Stream", "Strumień"}, {"Game", "Gra"}, {"Controls", "Sterowanie"}, {"Audio", "Dźwięk"},
@@ -196,6 +208,8 @@ const Dictionary& DictionaryFor(const std::string& code)
             {"Welcome back", "Witaj ponownie"}, {"Login failed", "Logowanie nie powiodło się"}
         }},
         {"zh-CN", {
+            {"Selected server", "所选服务器"}, {"Next value", "下一个值"},
+            {"Enable diagnostic logging for troubleshooting. Applies after saving.", "启用诊断日志以排查问题。保存后生效。"},
             {"Store", "商店"}, {"Library", "游戏库"}, {"Settings", "设置"}, {"My Library", "我的游戏库"},
             {"Search", "搜索"}, {"Close", "关闭"}, {"Cancel", "取消"}, {"Account", "账户"},
             {"Stream", "串流"}, {"Game", "游戏"}, {"Controls", "控制"}, {"Audio", "音频"},
