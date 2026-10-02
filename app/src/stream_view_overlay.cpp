@@ -354,7 +354,7 @@ void StreamView::DrawStreamOverlay(
         sample.game_title = game_title_;
         sample.provider = auth_.provider.display_name;
         sample.codec = stream_codec_;
-        sample.location = stream_region_;
+        sample.location = opennow::ui::ConfiguredLocation(stream_region_);
         if (!network_info_.connected)
             sample.network = "Disconnected";
         else if (network_info_.type == opennow::NetworkConnectionType::Ethernet)
