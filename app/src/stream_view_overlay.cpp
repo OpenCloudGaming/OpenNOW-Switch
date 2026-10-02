@@ -1,4 +1,5 @@
 #include "StreamView.hpp"
+#include "ui_theme.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -11,7 +12,7 @@ void StreamView::DrawDebugOverlay(NVGcontext* vg, float x, float y, float width)
 
     std::string debug_text = session_->get_debug_info();
     nvgFontSize(vg, 24.0f);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgFillColor(vg, nvgRGB(255, 255, 255));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     nvgTextBox(vg, x + 50.0f, y + 50.0f, width - 100.0f, debug_text.c_str(), nullptr);
@@ -76,10 +77,10 @@ void StreamView::DrawPreparingStream(
     nvgFillColor(vg, nvgRGBA(16, 18, 22, 248));
     nvgFill(vg);
 
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgFontSize(vg, 14.0f);
-    nvgFillColor(vg, nvgRGB(77, 218, 130));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgText(vg, panel_x + 42.0f, panel_y + 45.0f, "NOW LOADING", nullptr);
     nvgFontSize(vg, 28.0f);
     nvgFillColor(vg, nvgRGB(241, 245, 247));
@@ -99,7 +100,7 @@ void StreamView::DrawPreparingStream(
     nvgFill(vg);
     nvgBeginPath(vg);
     nvgRect(vg, first_x, rail_y - 2.0f, gap * std::min(stage, 2), 4.0f);
-    nvgFillColor(vg, nvgRGB(77, 218, 130));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgFill(vg);
 
     const float pulse = 0.5f + 0.5f * static_cast<float>(std::sin(seconds * 3.1));
@@ -113,12 +114,12 @@ void StreamView::DrawPreparingStream(
         {
             nvgBeginPath(vg);
             nvgCircle(vg, cx, rail_y, 29.0f + pulse * 3.0f);
-            nvgFillColor(vg, nvgRGBA(77, 218, 130, 22 + static_cast<int>(pulse * 24.0f)));
+            nvgFillColor(vg, nvgRGBA(118, 232, 58, 22 + static_cast<int>(pulse * 24.0f)));
             nvgFill(vg);
         }
         nvgBeginPath(vg);
         nvgCircle(vg, cx, rail_y, 22.0f);
-        nvgFillColor(vg, complete || active ? nvgRGB(77, 218, 130) : nvgRGB(24, 28, 33));
+        nvgFillColor(vg, complete || active ? opennow::ui::Green() : nvgRGB(24, 28, 33));
         nvgFill(vg);
         nvgStrokeWidth(vg, 2.0f);
         nvgStrokeColor(vg, complete || active ? nvgRGB(108, 235, 153) : nvgRGB(43, 48, 55));
@@ -145,13 +146,13 @@ void StreamView::DrawPreparingStream(
     nvgArc(vg, spinner_x, spinner_y, 19.0f, angle, angle + kPi * 1.42f, NVG_CW);
     nvgStrokeWidth(vg, 5.0f);
     nvgLineCap(vg, NVG_ROUND);
-    nvgStrokeColor(vg, nvgRGB(77, 218, 130));
+    nvgStrokeColor(vg, opennow::ui::Green());
     nvgStroke(vg);
     const float head_angle = angle + kPi * 1.42f;
     nvgBeginPath(vg);
     nvgCircle(vg, spinner_x + std::cos(head_angle) * 19.0f,
               spinner_y + std::sin(head_angle) * 19.0f, 3.4f);
-    nvgFillColor(vg, nvgRGB(123, 242, 166));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgFill(vg);
 
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
@@ -219,11 +220,11 @@ void StreamView::DrawPerformanceOverlay(NVGcontext* vg, float x, float y) {
 
     nvgBeginPath(vg);
     nvgRoundedRect(vg, box_x + 6.0f, box_y + 7.0f, 4.0f, 32.0f, 2.0f);
-    nvgFillColor(vg, nvgRGB(55, 220, 125));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgFill(vg);
 
     nvgFontSize(vg, 18.0f);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgFillColor(vg, nvgRGB(245, 250, 247));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgText(vg, box_x + 20.0f, box_y + 23.0f, text, nullptr);
@@ -269,11 +270,11 @@ void StreamView::DrawControllerNotice(
 
     nvgBeginPath(vg);
     nvgRoundedRect(vg, box_x, box_y, 6.0f, box_height, 3.0f);
-    nvgFillColor(vg, nvgRGB(55, 220, 125));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgFill(vg);
 
     nvgFontSize(vg, 21.0f);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgFillColor(vg, nvgRGB(248, 252, 249));
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(
@@ -324,7 +325,7 @@ void StreamView::DrawNetworkWarning(
     nvgFillColor(vg, nvgRGB(255, 184, 58));
     nvgFill(vg);
 
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgFontSize(vg, 18.0f);
     nvgFillColor(vg, nvgRGB(252, 244, 224));
@@ -342,288 +343,55 @@ void StreamView::DrawStreamOverlay(
 {
     if (!stream_overlay_visible_)
         return;
-
-    const VideoPerformanceCounters counters = previous_video_counters_;
-    const StreamTransportHealth health =
-        session_ ? session_->get_transport_health() : StreamTransportHealth {};
-    const StreamNetworkCounters network = network_counters_;
-    const bool wifi_warning =
-        opennow::network::ShouldWarnForStreaming(network_info_.wifi_band);
-
-    nvgBeginPath(vg);
-    nvgRect(vg, x, y, width, height);
-    nvgFillColor(vg, nvgRGBA(2, 5, 7, 190));
-    nvgFill(vg);
-
-    const float margin_x = std::clamp(width * 0.0265f, 22.0f, 40.0f);
-    const float margin_y = std::clamp(height * 0.033f, 18.0f, 30.0f);
-    const float panel_x = x + margin_x;
-    const float panel_y = y + margin_y;
-    const float panel_width = width - margin_x * 2.0f;
-    const float panel_height = height - margin_y * 2.0f;
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, panel_x, panel_y, panel_width, panel_height, 18.0f);
-    nvgFillColor(vg, nvgRGBA(12, 16, 19, 248));
-    nvgFill(vg);
-    nvgStrokeWidth(vg, 1.5f);
-    nvgStrokeColor(vg, nvgRGBA(103, 118, 124, 82));
-    nvgStroke(vg);
-
-    const float padding = 30.0f;
-    const float header_bottom = panel_y + 105.0f;
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 12.0f);
-    nvgFillColor(vg, nvgRGB(77, 218, 130));
-    nvgText(vg, panel_x + padding, panel_y + 23.0f, "OPENNOW  /  STREAM STATUS", nullptr);
-    nvgFontSize(vg, 25.0f);
-    nvgFillColor(vg, nvgRGB(244, 248, 246));
-    nvgText(vg, panel_x + padding, panel_y + 54.0f,
-            game_title_.empty() ? "GeForce NOW session" : game_title_.c_str(), nullptr);
-    nvgFontSize(vg, 14.0f);
-    nvgFillColor(vg, nvgRGB(142, 153, 160));
-    const std::string provider =
-        auth_.provider.display_name.empty() ? "GeForce NOW" : auth_.provider.display_name;
-    nvgText(vg, panel_x + padding, panel_y + 80.0f,
-            (provider + " cloud session").c_str(), nullptr);
-
-    const std::string connection_status =
-        health.peer_completed ? "CONNECTED" : "CONNECTING";
-    const float status_width = health.peer_completed ? 112.0f : 122.0f;
-    const float status_x = panel_x + panel_width - padding - status_width;
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, status_x, panel_y + 24.0f, status_width, 30.0f, 15.0f);
-    nvgFillColor(vg, health.peer_completed
-        ? nvgRGBA(77, 218, 130, 25)
-        : nvgRGBA(255, 184, 58, 25));
-    nvgFill(vg);
-    nvgStrokeWidth(vg, 1.0f);
-    nvgStrokeColor(vg, health.peer_completed
-        ? nvgRGBA(77, 218, 130, 95)
-        : nvgRGBA(255, 184, 58, 95));
-    nvgStroke(vg);
-    nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 12.0f);
-    nvgFillColor(vg, health.peer_completed
-        ? nvgRGB(114, 232, 157)
-        : nvgRGB(255, 198, 91));
-    nvgText(vg, status_x + status_width * 0.5f, panel_y + 39.0f,
-            connection_status.c_str(), nullptr);
-
-    nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 13.0f);
-    nvgFillColor(vg, nvgRGB(151, 161, 166));
-    nvgText(vg, panel_x + panel_width - padding, panel_y + 79.0f,
-            "B  Close menu", nullptr);
-
-    nvgBeginPath(vg);
-    nvgRect(vg, panel_x + padding, header_bottom, panel_width - padding * 2.0f, 1.0f);
-    nvgFillColor(vg, nvgRGBA(151, 164, 170, 35));
-    nvgFill(vg);
-
-    const float content_top = header_bottom + 24.0f;
-    const float divider_x = panel_x + panel_width * 0.625f;
-    const float left_x = panel_x + padding;
-    const float left_width = divider_x - left_x - 26.0f;
-    const float right_x = divider_x + 28.0f;
-    const float right_edge = panel_x + panel_width - padding;
-
-    nvgBeginPath(vg);
-    nvgRect(vg, divider_x, content_top, 1.0f,
-            panel_y + panel_height - padding - content_top);
-    nvgFillColor(vg, nvgRGBA(151, 164, 170, 35));
-    nvgFill(vg);
-
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 13.0f);
-    nvgFillColor(vg, nvgRGB(172, 183, 187));
-    nvgText(vg, left_x, content_top, "LIVE PERFORMANCE", nullptr);
-
-    const float metric_top = content_top + 20.0f;
-    const float metric_gap = 8.0f;
-    const float metric_width = (left_width - metric_gap * 3.0f) * 0.25f;
-    const float metric_height = 76.0f;
-    auto draw_metric = [vg, metric_top, metric_width, metric_height](
-                           float metric_x, const char* label,
-                           const std::string& value, bool caution) {
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, metric_x, metric_top, metric_width, metric_height, 10.0f);
-        nvgFillColor(vg, nvgRGBA(24, 30, 33, 225));
-        nvgFill(vg);
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStrokeColor(vg, caution
-            ? nvgRGBA(255, 184, 58, 80)
-            : nvgRGBA(151, 164, 170, 28));
-        nvgStroke(vg);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(vg, 12.0f);
-        nvgFillColor(vg, nvgRGB(132, 144, 150));
-        nvgText(vg, metric_x + 13.0f, metric_top + 21.0f, label, nullptr);
-        nvgFontSize(vg, 23.0f);
-        nvgFillColor(vg, caution ? nvgRGB(255, 198, 91) : nvgRGB(240, 246, 242));
-        nvgText(vg, metric_x + 13.0f, metric_top + 51.0f, value.c_str(), nullptr);
-    };
-
-    char number[96];
-    std::snprintf(number, sizeof(number), "%.0f", presented_fps_);
-    draw_metric(left_x, "DISPLAY FPS", number, false);
-    std::snprintf(number, sizeof(number), "%.1f Mbps", stream_bitrate_mbps_);
-    draw_metric(left_x + (metric_width + metric_gap), "BITRATE", number, false);
-    const std::string ping =
-        network_rtt_ms_ >= 0 ? std::to_string(network_rtt_ms_) + " ms" : "-- ms";
-    draw_metric(left_x + (metric_width + metric_gap) * 2.0f, "PING", ping,
-                network_rtt_ms_ >= 80);
-
-    const std::uint64_t packet_total =
-        static_cast<std::uint64_t>(network.packets_received) + network.sequence_gaps;
-    const double packet_loss = packet_total > 0
-        ? static_cast<double>(network.sequence_gaps) * 100.0 /
-              static_cast<double>(packet_total)
-        : 0.0;
-    std::snprintf(number, sizeof(number), "%.2f%%", packet_loss);
-    draw_metric(left_x + (metric_width + metric_gap) * 3.0f, "PACKET LOSS", number,
-                packet_loss >= 1.0);
-
-    const float details_title_y = metric_top + metric_height + 24.0f;
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 13.0f);
-    nvgFillColor(vg, nvgRGB(172, 183, 187));
-    nvgText(vg, left_x, details_title_y, "STREAM DETAILS", nullptr);
-
-    const float details_top = details_title_y + 20.0f;
-    const float detail_gap = 26.0f;
-    const float detail_width = (left_width - detail_gap) * 0.5f;
-    auto draw_detail = [vg, details_top, detail_width](
-                           float column_x, int row, const std::string& label,
-                           const std::string& value, bool caution = false) {
-        const float row_y = details_top + row * 36.0f;
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(vg, 13.0f);
-        nvgFillColor(vg, nvgRGB(132, 144, 150));
-        nvgText(vg, column_x, row_y + 13.0f, label.c_str(), nullptr);
-        nvgTextAlign(vg, NVG_ALIGN_RIGHT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg, caution ? nvgRGB(255, 198, 91) : nvgRGB(225, 232, 228));
-        nvgText(vg, column_x + detail_width, row_y + 13.0f, value.c_str(), nullptr);
-        nvgBeginPath(vg);
-        nvgRect(vg, column_x, row_y + 30.0f, detail_width, 1.0f);
-        nvgFillColor(vg, nvgRGBA(151, 164, 170, 24));
-        nvgFill(vg);
-    };
-
-    const std::string resolution = session_
-        ? std::to_string(session_->stream_width()) + " × " +
-              std::to_string(session_->stream_height())
-        : "--";
-    draw_detail(left_x, 0, "Resolution", resolution);
-    std::snprintf(number, sizeof(number), "%.0f / %.0f / %.0f",
-                  incoming_fps_, decoded_fps_, presented_fps_);
-    draw_detail(left_x, 1, "FPS  in / decode / display", number);
-    draw_detail(left_x, 2, "Decode latency p95",
-                std::to_string(counters.decode_us_p95 / 1000) + " ms");
-    draw_detail(left_x, 3, "Render latency p95",
-                std::to_string(counters.render_us_p95 / 1000) + " ms");
-    draw_detail(left_x, 4, "Decoder queue",
-                std::to_string(counters.decode_queue_size) + " / " +
-                    std::to_string(counters.decode_queue_high_water) + " high");
-    draw_detail(left_x, 5, "Codec / location",
-                stream_codec_ + "  /  " + stream_region_);
-
-    const float second_column_x = left_x + detail_width + detail_gap;
-    std::string network_connection = "Unknown";
-    if (network_info_.type == opennow::NetworkConnectionType::Ethernet)
-        network_connection = "Ethernet";
-    else if (network_info_.type == opennow::NetworkConnectionType::Wifi)
-        network_connection = opennow::network::WifiBandLabel(network_info_.wifi_band);
-    draw_detail(second_column_x, 0, "Network", network_connection, wifi_warning);
-    std::snprintf(number, sizeof(number), "%.2f%%  ·  %u late",
-                  packet_loss, network.late_packets_dropped);
-    draw_detail(second_column_x, 1, "Packet loss", number, packet_loss >= 1.0);
-    draw_detail(second_column_x, 2, "Dropped video frames",
-                std::to_string(network.access_units_dropped),
-                network.access_units_dropped > 0);
-    draw_detail(second_column_x, 3, "NACK recovery requests",
-                std::to_string(network.nack_requests));
-    draw_detail(second_column_x, 4, "Connection",
-                health.peer_completed ? "Connected" : "Negotiating");
-    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-        now - stream_started_at_).count();
-    std::snprintf(number, sizeof(number), "%lld:%02lld",
-                  static_cast<long long>(elapsed / 60),
-                  static_cast<long long>(elapsed % 60));
-    draw_detail(second_column_x, 5, "Session time", number);
-
-    float right_y = content_top;
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 13.0f);
-    nvgFillColor(vg, nvgRGB(172, 183, 187));
-    nvgText(vg, right_x, right_y, "CONTROLLER SHORTCUTS", nullptr);
-    right_y += 27.0f;
-
-    if (wifi_warning) {
-        const float warning_height = 62.0f;
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, right_x, right_y, right_edge - right_x,
-                       warning_height, 10.0f);
-        nvgFillColor(vg, nvgRGBA(255, 184, 58, 16));
-        nvgFill(vg);
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStrokeColor(vg, nvgRGBA(255, 184, 58, 75));
-        nvgStroke(vg);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(vg, 15.0f);
-        nvgFillColor(vg, nvgRGB(255, 205, 108));
-        nvgText(vg, right_x + 14.0f, right_y + 20.0f,
-                "2.4 GHz Wi-Fi detected", nullptr);
-        nvgFontSize(vg, 12.0f);
-        nvgFillColor(vg, nvgRGB(190, 194, 196));
-        nvgText(vg, right_x + 14.0f, right_y + 43.0f,
-                "Use 5 GHz or Ethernet for smoother streaming.", nullptr);
-        right_y += warning_height + 13.0f;
+    if (!stream_overlay_view_)
+        stream_overlay_view_ = std::make_unique<opennow::StreamOverlayView>();
+    if (now >= stream_overlay_next_sample_)
+    {
+        const auto health = session_ ? session_->get_transport_health() : StreamTransportHealth {};
+        const auto& counters = previous_video_counters_;
+        const auto& network = network_counters_;
+        opennow::StreamOverlaySample sample;
+        sample.game_title = game_title_;
+        sample.provider = auth_.provider.display_name;
+        sample.codec = stream_codec_;
+        sample.location = stream_region_;
+        if (!network_info_.connected)
+            sample.network = "Disconnected";
+        else if (network_info_.type == opennow::NetworkConnectionType::Ethernet)
+            sample.network = "Ethernet";
+        else if (network_info_.type == opennow::NetworkConnectionType::Wifi)
+            sample.network = opennow::network::WifiBandLabel(network_info_.wifi_band);
+        sample.incoming_fps = incoming_fps_;
+        sample.decoded_fps = decoded_fps_;
+        sample.presented_fps = presented_fps_;
+        sample.bitrate_mbps = stream_bitrate_mbps_;
+        sample.rtt_ms = network_rtt_ms_;
+        sample.width = session_ ? session_->stream_width() : 0;
+        sample.height = session_ ? session_->stream_height() : 0;
+        sample.decode_us_p95 = counters.decode_us_p95;
+        sample.render_us_p95 = counters.render_us_p95;
+        sample.queue_size = counters.decode_queue_size;
+        sample.queue_high_water = counters.decode_queue_high_water;
+        sample.packets_received = network.packets_received;
+        sample.sequence_gaps = network.sequence_gaps;
+        sample.late_packets_dropped = network.late_packets_dropped;
+        sample.dropped_frames = network.access_units_dropped;
+        sample.nack_requests = network.nack_requests;
+        sample.peer_connected = health.peer_completed;
+        sample.signaling_connected = health.signaling_connected;
+        sample.wifi_warning = opennow::network::ShouldWarnForStreaming(network_info_.wifi_band);
+        sample.nte_session = is_nte_session_;
+        stream_overlay_view_->Update(sample);
+        stream_overlay_next_sample_ = now + std::chrono::milliseconds(750);
     }
-
-    auto draw_shortcut = [vg, right_x](
-                             float& row_y, const char* keys, const char* action,
-                             bool emphasized = false) {
-        const float key_width = 132.0f;
-        nvgBeginPath(vg);
-        nvgRoundedRect(vg, right_x, row_y, key_width, 30.0f, 7.0f);
-        nvgFillColor(vg, emphasized
-            ? nvgRGBA(77, 218, 130, 22)
-            : nvgRGBA(31, 38, 42, 230));
-        nvgFill(vg);
-        nvgStrokeWidth(vg, 1.0f);
-        nvgStrokeColor(vg, emphasized
-            ? nvgRGBA(77, 218, 130, 85)
-            : nvgRGBA(140, 154, 161, 65));
-        nvgStroke(vg);
-        nvgFontSize(vg, 12.0f);
-        nvgFillColor(vg, emphasized
-            ? nvgRGB(122, 235, 164)
-            : nvgRGB(231, 237, 233));
-        nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgText(vg, right_x + key_width * 0.5f, row_y + 15.0f, keys, nullptr);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFontSize(vg, 13.0f);
-        nvgFillColor(vg, nvgRGB(188, 198, 202));
-        nvgText(vg, right_x + key_width + 15.0f, row_y + 15.0f, action, nullptr);
-        row_y += 42.0f;
-    };
-
-    draw_shortcut(right_y, "MINUS  +  PLUS", "Open or close this menu", true);
-    draw_shortcut(right_y, "MINUS  +  Y", "Open the on-screen keyboard");
-    draw_shortcut(right_y, "KEYBOARD STRIP", "Tap Esc, Win or Windows shortcuts");
-    draw_shortcut(right_y, "B", "Close menu or keyboard");
-    draw_shortcut(right_y, "ZL + ZR + MINUS", "Exit the stream");
-    draw_shortcut(right_y, "HOLD PLUS", "Press the Xbox Guide button");
-    draw_shortcut(right_y, "TOUCH", "Move and click the remote pointer");
-    if (is_nte_session_)
-        draw_shortcut(right_y, "L + X", "Start NTE auto-login");
-
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgFontSize(vg, 12.0f);
-    nvgFillColor(vg, nvgRGB(103, 116, 122));
-    nvgText(vg, right_x, panel_y + panel_height - 26.0f,
-            "Menu controls stay on your Switch and are not sent to the game.", nullptr);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - stream_started_at_).count();
+    if (elapsed != stream_overlay_elapsed_seconds_)
+    {
+        stream_overlay_elapsed_seconds_ = elapsed;
+        stream_overlay_view_->UpdateElapsed(static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed)));
+    }
+    stream_overlay_view_->draw(vg, x, y, width, height,
+                               brls::Application::getStyle(), nullptr);
 }
 
 void StreamView::DrawNteAutoLoginStatus(
@@ -651,9 +419,9 @@ void StreamView::DrawNteAutoLoginStatus(
     nvgFill(vg);
     nvgBeginPath(vg);
     nvgRoundedRect(vg, box_x, box_y, 6.0f, box_height, 3.0f);
-    nvgFillColor(vg, nvgRGB(55, 220, 125));
+    nvgFillColor(vg, opennow::ui::Green());
     nvgFill(vg);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgFontSize(vg, 19.0f);
     nvgFillColor(vg, nvgRGB(246, 250, 248));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
@@ -814,7 +582,7 @@ void StreamView::DrawStreamEndNotice(
     nvgRoundedRect(vg, box_x, box_y, 7.0f, box_height, 3.5f);
     nvgFillColor(vg, nvgRGB(255, 91, 91));
     nvgFill(vg);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgFontSize(vg, 23.0f);
     nvgFillColor(vg, nvgRGB(252, 246, 246));
@@ -869,7 +637,7 @@ void StreamView::DrawSessionLimitNotice(
     nvgFill(vg);
 
     nvgFontSize(vg, prominent ? 22.0f : 21.0f);
-    nvgFontFaceId(vg, brls::Application::getFont(brls::FONT_REGULAR));
+    nvgFontFaceId(vg, opennow::ui::Font(opennow::ui::FontRole::Body));
     nvgFillColor(vg, nvgRGB(250, 252, 250));
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(vg, box_x + box_width * 0.5f, box_y + box_height * 0.5f, text.c_str(), nullptr);

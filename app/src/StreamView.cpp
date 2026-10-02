@@ -31,12 +31,12 @@ StreamView::StreamView(
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
-    const std::string& game_title)
+    const std::string& game_title,
+    const opennow::StreamSettings& stream_settings)
     : client_(client)
     , auth_(auth)
     , cloud_session_id_(session_id)
     , game_title_(game_title) {
-    const auto stream_settings = opennow::LoadStreamSettings();
     debug_diagnostics_ = stream_settings.debug_diagnostics;
     stats_overlay_enabled_ = stream_settings.stats_overlay_enabled;
     stream_codec_ = stream_settings.codec;
@@ -66,7 +66,8 @@ StreamView::StreamView(
         session_id,
         media_ip,
         media_port,
-        ice_servers);
+        ice_servers,
+        stream_settings);
     session_->start();
     network_monitor_.start();
     RefreshNetworkInfo(stream_started_at_);
@@ -414,7 +415,8 @@ brls::View* StreamView::create(
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
-    const std::string& game_title) {
+    const std::string& game_title,
+    const opennow::StreamSettings& settings) {
     return new StreamView(signaling_url, jwt_token, session_id, media_ip, media_port,
-                          ice_servers, client, auth, game_title);
+                          ice_servers, client, auth, game_title, settings);
 }
