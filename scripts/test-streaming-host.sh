@@ -104,6 +104,9 @@ run_c rtcp_nack extern/libpeer/src/rtcp.c
 run_c rtcp_receiver_report extern/libpeer/src/rtcp.c
 run_c sctp_socket_address -Iextern/libpeer/third_party/usrsctp/usrsctplib
 run_c sdp_sctp_message_limit extern/libpeer/src/sdp.c
+run_c peer_diagnostic_callback "${sections[@]}" -Wno-unused-but-set-variable \
+    -Iextern/libpeer/third_party/mbedtls/include \
+    -Iextern/libpeer/third_party/usrsctp/usrsctplib -pthread
 run_c peer_rtcp_receive "${sections[@]}" -Wno-unused-but-set-variable \
     -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
 run_c dtls_nonblocking_read "${sections[@]}" -Wno-unused-parameter -Wno-empty-body \
@@ -118,3 +121,7 @@ run_c agent_socket_poll "${sections[@]}"
 run_cpp peer_runtime -Iextern/libpeer/src "$out/peer_runtime.o" -lsrtp2
 SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh
 printf 'PASS sctp_reliability\n'
+SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh sctp_setup_diagnostic_test.c
+printf 'PASS sctp_setup_diagnostic\n'
+SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh sctp_diagnostic_connect_test.c
+printf 'PASS sctp_diagnostic_connect\n'

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <random>
 #include <thread>
@@ -98,6 +99,12 @@ WebRtcSession::WebRtcSession(
       peer_name_(MakePeerName()) {
     opennow::SetStreamDiagnosticsEnabled(settings_.debug_diagnostics);
 
+    peer_connection_set_diagnostic_callback([](const char* message) {
+        AppendStreamLog(message);
+        if (StartsWith(message, "SCTP ") || std::strstr(message, "sctp") ||
+            std::strstr(message, "dtls") || std::strstr(message, "transport_completed"))
+            AppendInputLog(message);
+    });
     peer_connection_set_diagnostics_enabled(settings_.debug_diagnostics ? 1 : 0);
     renderer_ = std::make_unique<DKVideoRenderer>(settings_.image_quality_mode);
     audio_ = std::make_unique<AudioPipeline>();
