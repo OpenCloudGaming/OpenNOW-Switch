@@ -62,6 +62,8 @@ run_cpp webrtc_input_handshake -Iextern/libpeer/src \
     -Iextern/borealis/library/include/borealis/extern/nanovg "${sections[@]}" \
     app/src/webrtc/input.cpp -ljansson
 run_cpp av_frame_queue -Itests/stream_stubs app/src/stream/ffmpeg/AVFrameHolder.cpp -lavcodec -lavutil
+bash tests/run_webrtc_decode_output_accounting_test.sh
+printf 'PASS webrtc_decode_output_accounting\n'
 run_cpp gpu_frame_queue -lavutil
 python3 tests/run_deko_renderer_reconfiguration_test.py
 printf 'PASS deko_renderer_reconfiguration\n'

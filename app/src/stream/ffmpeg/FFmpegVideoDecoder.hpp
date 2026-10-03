@@ -16,6 +16,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
     int capabilities() const override;
     VideoDecodeStats* video_decode_stats() override;
     bool uses_hardware_frames() const override { return m_uses_hardware_frames; }
+    uint64_t decoded_frame_count() const { return m_frames_out; }
 
   private:
     std::string image_quality_mode_;
@@ -32,7 +33,7 @@ class FFmpegVideoDecoder : public IFFmpegVideoDecoder {
 
     int m_stream_fps = 0;
     int m_frames_in = 0;
-    int m_frames_out = 0;
+    uint64_t m_frames_out = 0;
     int m_corrupt_frames_dropped = 0;
     int m_current_frame = 0, m_next_frame = 0;
     uint32_t m_last_frame = 0;
