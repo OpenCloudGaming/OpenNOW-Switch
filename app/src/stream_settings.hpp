@@ -30,6 +30,8 @@ struct StreamSettings
     bool community_proxy_enabled = false;
     std::string community_proxy_url;
     int queue_notify_threshold = 10;
+
+    bool operator==(const StreamSettings&) const = default;
 };
 
 struct GameLanguageOption

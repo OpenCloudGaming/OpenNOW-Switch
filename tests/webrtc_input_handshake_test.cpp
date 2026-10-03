@@ -67,7 +67,8 @@ uint64_t NowUs() { return 0x0102030405060708ULL; }
 }
 
 WebRtcSession::WebRtcSession(const std::string&, const std::string&, const std::string&,
-                             const std::string&, int, const std::vector<opennow::IceServerInfo>&) {}
+                             const std::string&, int, const std::vector<opennow::IceServerInfo>&,
+                             const opennow::StreamSettings&) {}
 WebRtcSession::~WebRtcSession() = default;
 SignalingClient::~SignalingClient() = default;
 WebSocketClient::~WebSocketClient() = default;
@@ -86,7 +87,7 @@ static void RunScenario(const std::string& scenario) {
     open_attempts = 0;
     input_logs.clear();
     channel_label[0] = 'i';
-    WebRtcSession session("", "", "", "", 0, {});
+    WebRtcSession session("", "", "", "", 0, {}, {});
     session.pc_ = reinterpret_cast<PeerConnection*>(&session);
     session.on_datachannel_open();
     session.datachannel_open_requested_ = true;

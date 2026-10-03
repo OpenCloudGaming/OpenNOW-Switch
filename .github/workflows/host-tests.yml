@@ -41,7 +41,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            g++ cmake ninja-build libsdl2-dev libgl1-mesa-dev libcurl4-openssl-dev xvfb xauth
+            g++ cmake ninja-build pkg-config python3 imagemagick libjansson-dev \
+            libsdl2-dev libgl1-mesa-dev libcurl4-openssl-dev xvfb xauth
 
       - name: Build native UI layout test
         run: |

@@ -1,71 +1,61 @@
 #include "game_card_view.hpp"
 
 #include "cover_image_cache.hpp"
+#include "localization.hpp"
+#include "ui_theme.hpp"
+
+#include <borealis/core/touch/tap_gesture.hpp>
 
 #include <utility>
 
 namespace opennow
 {
-namespace
-{
-
-std::string BuildSubtitle(const GameCardDisplay& display)
-{
-    if (display.badge.empty())
-        return display.subtitle;
-
-    if (display.subtitle.empty())
-        return display.badge;
-
-    return display.subtitle + "  |  " + display.badge;
-}
-
-brls::Label* MakeLabel(const std::string& text, float size, NVGcolor color)
-{
-    auto* label = new brls::Label();
-    label->setText(text);
-    label->setFontSize(size);
-    label->setTextColor(color);
-    label->setSingleLine(true);
-    return label;
-}
-
-} // namespace
-
 GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
     : brls::Box(brls::Axis::COLUMN)
     , display_(std::move(display))
     , click_handler_(std::move(click_handler))
 {
-    setWidth(224);
-    setHeight(178);
-    setPadding(6, 6, 7, 6);
-    setMarginRight(10);
-    setMarginBottom(10);
-    setCornerRadius(10);
-    setBorderThickness(2);
-    setShadowType(brls::ShadowType::GENERIC);
+    setWidth(220);
+    setHeight(210);
+    setShrink(0);
+    setPadding(8, 8, 8, 8);
+    setMarginBottom(12);
+    setCornerRadius(12);
+    setBorderThickness(1);
     setFocusable(true);
-    // Keep the card surface dark, but retain Borealis' animated focus outline.
-    // The branded border color alone is too subtle at TV viewing distance.
     setHideHighlightBackground(true);
-    setHighlightPadding(2);
-    setHighlightCornerRadius(12);
+    setHighlightPadding(3);
+    setHighlightCornerRadius(14);
 
     image_ = new CachedImage();
-    image_->setWidth(212);
-    image_->setHeight(112);
+    image_->setWidth(204);
+    image_->setHeight(114);
+    image_->setShrink(0);
     image_->setCornerRadius(7);
-    image_->setMarginBottom(6);
+    image_->setMarginBottom(10);
     image_->setScalingType(brls::ImageScalingType::FILL);
     addView(image_);
 
-    title_label_ = MakeLabel(display_.title, 16.0f, nvgRGB(245, 246, 248));
-    title_label_->setMarginBottom(3);
+    title_label_ = ui::MakeLabel(display_.title, 18, ui::Text(), ui::FontRole::Heading);
+    title_label_->setId("catalog-card-title");
+    title_label_->setWidthPercentage(100);
+    title_label_->setHeight(26);
+    title_label_->setSingleLine(true);
     addView(title_label_);
 
-    subtitle_label_ = MakeLabel(BuildSubtitle(display_), 12.0f, nvgRGB(88, 217, 138));
+    subtitle_label_ = ui::MakeLabel(display_.subtitle, 14, ui::Muted());
+    subtitle_label_->setId("catalog-card-store");
+    subtitle_label_->setWidthPercentage(100);
+    subtitle_label_->setHeight(20);
+    subtitle_label_->setSingleLine(true);
     addView(subtitle_label_);
+    auto* badge = ui::MakeLabel(display_.in_library ? "● " + Tr("In library") : display_.badge,
+        12, display_.in_library ? ui::Green() : ui::Muted());
+    badge->setId("catalog-card-badge");
+    badge->setWidthPercentage(100);
+    badge->setHeight(18);
+    badge->setSingleLine(true);
+    addView(badge);
 
     UpdateChrome(false);
     LoadImage();
@@ -77,6 +67,8 @@ GameCardView::GameCardView(GameCardDisplay display, ClickHandler click_handler)
 
         return true;
     });
+    addGestureRecognizer(new brls::TapGestureRecognizer(this));
+    updateActionHint(brls::BUTTON_A, Tr("View game"));
 }
 
 void GameCardView::onFocusGained()
@@ -93,8 +85,8 @@ void GameCardView::onFocusLost()
 
 void GameCardView::UpdateChrome(bool focused)
 {
-    setBackgroundColor(focused ? nvgRGB(26, 42, 34) : nvgRGB(21, 21, 24));
-    setBorderColor(focused ? nvgRGB(88, 217, 138) : nvgRGB(42, 42, 48));
+    setBackgroundColor(focused ? ui::Raised() : ui::Ground());
+    setBorderColor(focused ? ui::Green() : nvgRGBA(42, 45, 51, 0));
 }
 
 void GameCardView::LoadImage()

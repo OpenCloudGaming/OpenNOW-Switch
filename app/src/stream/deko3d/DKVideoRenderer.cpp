@@ -2,7 +2,6 @@
 
 #include "DKVideoRenderer.hpp"
 #include "SoftwareYuvUpload.hpp"
-#include "../../stream_settings.hpp"
 #include "../../video_quality_policy.hpp"
 
 #include <borealis/platforms/switch/switch_platform.hpp>
@@ -17,6 +16,7 @@ extern "C" {
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -121,6 +121,11 @@ void set_color_transform(Transformation& transform, AVColorSpace color_space, bo
 
 } // namespace
 
+DKVideoRenderer::DKVideoRenderer(std::string image_quality_mode)
+    : image_quality_mode_(std::move(image_quality_mode))
+{
+}
+
 DKVideoRenderer::~DKVideoRenderer()
 {
     if (auto* active = configurations_.active())
@@ -176,7 +181,8 @@ bool DKVideoRenderer::isFrameFullRange(const AVFrame* frame)
 }
 
 bool DKVideoRenderer::Configuration::initialize(
-    int width, int height, AVFrame* frame, uint64_t generation)
+    int width, int height, AVFrame* frame, uint64_t generation,
+    const std::string& image_quality_mode)
 {
     hardware_frames_ = frame->format == AV_PIX_FMT_NVTEGRA;
 
@@ -237,9 +243,8 @@ bool DKVideoRenderer::Configuration::initialize(
         transform.uv[3] = multiplier;
     }
 
-    const auto quality_settings = opennow::LoadStreamSettings();
     const auto tuning = opennow::video::ResolveQualityTuning(
-        quality_settings.image_quality_mode);
+        image_quality_mode);
     transform.quality[0] = 1.0f / static_cast<float>(frame_width_);
     transform.quality[1] = 1.0f / static_cast<float>(frame_height_);
     transform.quality[2] = tuning.denoise_strength;
@@ -330,7 +335,7 @@ bool DKVideoRenderer::Configuration::initialize(
     brls::Logger::info(
         "Deko3D {} renderer initialized {}x{} quality={}",
         hardware_frames_ ? "NVTEGRA zero-copy" : "software NV12 upload",
-        frame_width_, frame_height_, quality_settings.image_quality_mode);
+        frame_width_, frame_height_, image_quality_mode);
     return true;
 }
 
@@ -485,7 +490,7 @@ void DKVideoRenderer::drawLatest(NVGcontext* vg, int width, int height, AVFrame*
         (!active || !active->matches(width, height, frame))) {
         configurations_.replace(started, [&]() -> std::unique_ptr<Configuration> {
             auto candidate = std::make_unique<Configuration>();
-            if (!candidate->initialize(width, height, frame, generation))
+            if (!candidate->initialize(width, height, frame, generation, image_quality_mode_))
                 return nullptr;
             return candidate;
         });

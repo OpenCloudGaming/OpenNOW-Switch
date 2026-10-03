@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+python3 tests/ui_font_assets_test.py
 bash scripts/test-streaming-host.sh
 
 out="$(mktemp -d)"
@@ -22,9 +23,9 @@ run_cpp() {
 
 for name in app_launch_mode_policy atomic_file_replace auth_policy catalog_paging_policy cloud_launch_state cover_image_worker \
     community_proxy_policy device_identity_policy game_detail_policy \
-    game_grid_navigation home_shortcut_policy library_sort membership_label \
+    game_grid_navigation home_shortcut_policy library_sort library_timetable_policy membership_label \
     membership_tier_policy nro_shortcut_policy remote_candidate_policy \
-    server_location_policy session_error_policy startup_callback_policy subscription_display \
+    server_location_policy session_error_policy settings_tab_equality startup_callback_policy subscription_display \
     ui_refresh_policy ui_text_policy; do
     run_cpp "$name"
 done

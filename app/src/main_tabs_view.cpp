@@ -43,9 +43,9 @@ MainTabsView::MainTabsView()
         else
             state.MarkSessionLoaded();
     }
-    addTab(Tr("Store"), []() { return new CatalogTab(); });
-    addTab(Tr("Library"), []() { return new LibraryTab(); });
-    addTab(Tr("Settings"), []() { return new SettingsTab(); });
+    addTab("Store", []() { return new CatalogTab(); });
+    addTab("Library", []() { return new LibraryTab(); });
+    addTab("Settings", []() { return new SettingsTab(); });
     focusTab(1);
     last_auth_check_ = std::chrono::steady_clock::now();
 }

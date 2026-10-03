@@ -66,6 +66,8 @@ python3 tests/run_deko_renderer_reconfiguration_test.py
 printf 'PASS deko_renderer_reconfiguration\n'
 python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_color_range_test.cpp
 printf 'PASS deko_renderer_color_range\n'
+python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_quality_snapshot_test.cpp
+printf 'PASS deko_renderer_quality_snapshot\n'
 run_cpp audio_pipeline -Itests/stream_stubs -Iextern/libpeer/src app/src/stream/audio/AudioPipeline.cpp
 for scenario in timeline ssrc red; do
     "$out/audio_pipeline" "$scenario"

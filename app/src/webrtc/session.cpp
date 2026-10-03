@@ -86,19 +86,20 @@ WebRtcSession::WebRtcSession(
     const std::string& session_id,
     const std::string& media_ip,
     int media_port,
-    const std::vector<opennow::IceServerInfo>& ice_servers)
+    const std::vector<opennow::IceServerInfo>& ice_servers,
+    const opennow::StreamSettings& settings)
     : signaling_url_(signaling_url),
       jwt_token_(jwt_token),
       session_id_(session_id),
       media_ip_(media_ip),
       media_port_(media_port),
       ice_servers_(ice_servers),
-      settings_(opennow::LoadStreamSettings()),
+      settings_(settings),
       peer_name_(MakePeerName()) {
     opennow::SetStreamDiagnosticsEnabled(settings_.debug_diagnostics);
 
     peer_connection_set_diagnostics_enabled(settings_.debug_diagnostics ? 1 : 0);
-    renderer_ = std::make_unique<DKVideoRenderer>();
+    renderer_ = std::make_unique<DKVideoRenderer>(settings_.image_quality_mode);
     audio_ = std::make_unique<AudioPipeline>();
     audio_->configure(settings_.audio_volume, settings_.audio_buffer_ms);
 
@@ -107,14 +108,14 @@ WebRtcSession::WebRtcSession(
     auto_safe_mode_used_ = previous_nvdec_crash;
     const bool force_software = settings_.video_backend == "Software" ||
                                 previous_nvdec_crash;
-    decoder_ = std::make_unique<FFmpegVideoDecoder>();
+    decoder_ = std::make_unique<FFmpegVideoDecoder>(settings_.image_quality_mode);
     decoder_setup_result_ = decoder_->setup(
         VIDEO_FORMAT_H264, settings_.width, settings_.height, settings_.fps, nullptr,
         force_software ? VIDEO_DECODER_FORCE_SOFTWARE : VIDEO_DECODER_PREFER_HARDWARE);
 
     if (decoder_setup_result_ != 0 && !force_software) {
         decoder_->cleanup();
-        decoder_ = std::make_unique<FFmpegVideoDecoder>();
+        decoder_ = std::make_unique<FFmpegVideoDecoder>(settings_.image_quality_mode);
         decoder_setup_result_ = decoder_->setup(
             VIDEO_FORMAT_H264, settings_.width, settings_.height, settings_.fps, nullptr,
             VIDEO_DECODER_FORCE_SOFTWARE);

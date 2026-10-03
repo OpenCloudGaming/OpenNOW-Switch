@@ -126,7 +126,7 @@ int main(int argc, char** argv)
     if (scenario == "eof")
         receive_error = AVERROR_EOF;
 
-    FFmpegVideoDecoder decoder;
+    FFmpegVideoDecoder decoder("Adaptive");
     const int result = decoder.setup(
         VIDEO_FORMAT_H264, 16, 16, 60, nullptr, VIDEO_DECODER_FORCE_SOFTWARE);
     if (packet_allocation_failure || array_allocation_failure || frame_allocation_failure >= 0) {
