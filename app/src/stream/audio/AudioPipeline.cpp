@@ -804,6 +804,10 @@ void AudioPipeline::set_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_t r
                " rtp=" + std::to_string(rtp_timestamp));
 }
 
+bool AudioPipeline::is_playing() const {
+    return impl_->output_started.load(std::memory_order_acquire);
+}
+
 int64_t AudioPipeline::playback_ntp_us() const {
     if (!impl_->output_ready.load())
         return -1;

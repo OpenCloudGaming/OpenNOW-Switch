@@ -381,7 +381,7 @@ void WebRtcSession::on_rtp_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_
 
 int64_t WebRtcSession::video_target_rtp_timestamp() const {
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
-    if (!audio_ || !have_video_sender_report_)
+    if (!audio_ || !audio_->is_playing() || !have_video_sender_report_)
         return AV_NOPTS_VALUE;
     const int64_t audio_ntp = audio_->playback_ntp_us();
     if (audio_ntp < 0)
