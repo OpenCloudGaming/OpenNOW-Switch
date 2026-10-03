@@ -452,11 +452,6 @@ void SettingsTab::MarkDirty()
 bool SettingsTab::SaveChanges(brls::View* view)
 {
     (void)view;
-    if (community_proxy_provisioning_)
-    {
-        brls::Application::notify(Tr("Connecting..."));
-        return true;
-    }
     if (!settings_loaded_ || !dirty_)
     {
         brls::Application::notify("Settings are already up to date");
@@ -491,8 +486,6 @@ bool SettingsTab::SaveChanges(brls::View* view)
 bool SettingsTab::RevertChanges(brls::View* view)
 {
     (void)view;
-    ++proxy_request_generation_;
-    community_proxy_provisioning_ = false;
     draft_settings_ = saved_settings_;
     dirty_ = false;
     RefreshSummary();

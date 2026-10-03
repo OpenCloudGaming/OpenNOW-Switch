@@ -670,6 +670,8 @@ void SettingsChecks(brls::View* root, const std::string& capture)
     };
     capture_category("account");
     Activate(Required(root, "settings/category/stream"));
+    Check(root->getView("settings/option/zortos-community-proxy") == nullptr,
+        "retired community proxy is absent from the Stream settings page");
     auto* bitrate = Action(root, "Bitrate"); Activate(bitrate); Key(brls::BUTTON_X);
     Check(opennow::LoadStreamSettings().bitrate_kbps == 16000, "real A bitrate cycle and X Save persist 16 Mbps");
     Activate(bitrate); Key(brls::BUTTON_Y); Key(brls::BUTTON_X);

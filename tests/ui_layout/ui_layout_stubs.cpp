@@ -197,7 +197,6 @@ std::vector<StreamRegion> GfnClient::MeasureStreamRegionLatencies(std::vector<St
     for (auto& region : regions) region.ping_ms = 18;
     return regions;
 }
-std::string GfnClient::ProvisionCommunityProxy() const { return "https://fixture.invalid"; }
 AuthSession GfnClient::LoginWithQrCode(const LoginProvider&, const std::function<void(const QrLoginChallenge&)>&,
                                     const std::function<bool()>&) const
 { throw std::runtime_error("Native fixture does not authorize an NVIDIA account"); }

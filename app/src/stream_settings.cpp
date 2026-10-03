@@ -1,7 +1,6 @@
 #include "stream_settings.hpp"
 #include "app_paths.hpp"
 #include "atomic_file_replace.hpp"
-#include "community_proxy_policy.hpp"
 #include "localization.hpp"
 #include "server_location_policy.hpp"
 
@@ -150,14 +149,8 @@ StreamSettings Sanitize(StreamSettings settings)
     if (!IsSupportedInterfaceLanguage(settings.interface_language))
         settings.interface_language = "en";
 
-    if (!settings.community_proxy_url.empty() &&
-        !community_proxy::IsCommunityProxyUrl(settings.community_proxy_url))
-    {
-        settings.community_proxy_enabled = false;
-        settings.community_proxy_url.clear();
-    }
-    if (settings.community_proxy_enabled && settings.community_proxy_url.empty())
-        settings.community_proxy_enabled = false;
+    settings.community_proxy_enabled = false;
+    settings.community_proxy_url.clear();
 
     return settings;
 }
@@ -385,9 +378,7 @@ std::string FormatStreamSettings(const StreamSettings& settings)
            " | Controls: " + settings.controller_layout +
            " | Motion quality: " + settings.image_quality_mode +
            " | Stats overlay: " +
-           (settings.stats_overlay_enabled ? "On" : "Off") +
-           " | Community proxy: " +
-           (settings.community_proxy_enabled ? "On" : "Off");
+           (settings.stats_overlay_enabled ? "On" : "Off");
            
 }
 

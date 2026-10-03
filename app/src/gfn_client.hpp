@@ -31,7 +31,6 @@ class GfnClient
     std::vector<StreamRegion> FetchStreamRegions(AuthSession& session) const;
     std::vector<StreamRegion> MeasureStreamRegionLatencies(
         std::vector<StreamRegion> regions) const;
-    std::string ProvisionCommunityProxy() const;
 
     AuthSession LoginWithQrCode(
         const LoginProvider& provider,

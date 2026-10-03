@@ -45,7 +45,6 @@ std::string CreateNetworkTestSession(
     const HttpClient& http_client,
     const std::string& streaming_base_url,
     const std::vector<std::string>& headers,
-    const std::string& proxy_url,
     const StreamSettings& stream_settings);
 int ParseSessionStatus(json_t* status);
 

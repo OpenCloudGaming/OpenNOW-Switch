@@ -91,7 +91,6 @@ class SettingsTab : public brls::Box
     bool SwitchSavedAccount(brls::View* view);
     bool BeginLogin(brls::View* view);
     bool ClearCoverCache(brls::View* view);
-    bool ToggleCommunityProxy(brls::View* view);
     bool ChooseGameLanguage(brls::View* view);
     bool TogglePersistGameSettings(brls::View* view);
     bool ToggleControllerLayout(brls::View* view);
@@ -132,8 +131,6 @@ class SettingsTab : public brls::Box
     StreamSettings draft_settings_;
     bool settings_loaded_ = false;
     bool dirty_ = false;
-    bool community_proxy_provisioning_ = false;
-    std::uint64_t proxy_request_generation_ = 0;
     std::shared_ptr<std::atomic_bool> alive_ = std::make_shared<std::atomic_bool>(true);
     brls::Label* cover_cache_files_ = nullptr;
     brls::Label* cover_cache_bytes_ = nullptr;

@@ -122,22 +122,6 @@ void SettingsTab::BuildStreamPage()
         [this](brls::View* view) { return CycleImageQuality(view); }));
     content_container_->addView(video);
 
-    auto* connection = MakeSection(
-        "Connection",
-        "Optional routing for NVIDIA catalog, session creation and queue requests.");
-    connection->addView(MakeOptionRow(
-        "Zortos community proxy",
-        "Streaming, signaling and account authentication always stay direct.",
-        [this] {
-            if (community_proxy_provisioning_)
-                return std::string("Connecting...");
-            return draft_settings_.community_proxy_enabled
-                ? std::string("Enabled")
-                : std::string("Disabled");
-        },
-        [this](brls::View* view) { return ToggleCommunityProxy(view); }));
-    content_container_->addView(connection);
-
 }
 
 void SettingsTab::BuildPreferencesPage()
