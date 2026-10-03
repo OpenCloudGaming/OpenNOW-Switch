@@ -468,6 +468,7 @@ void StreamView::BeginStreamEnd(
         return;
 
     stream_end_reason_ = reason;
+    RecordLifecycleEvent("end");
     network_monitor_.request_stop();
     stream_end_started_at_ = now;
     stream_auto_exit_at_ = now + std::chrono::seconds(15);
@@ -519,7 +520,8 @@ void StreamView::UpdateStreamEndState(std::chrono::steady_clock::time_point now)
     signals.free_tier = free_tier_session_;
     signals.session_elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         now - stream_started_at_);
-    signals.internet_connected = internet_connected_;
+    signals.internet_connected = opennow::HasStreamNetworkConnection(
+        internet_connected_, health.video_started, health.video_idle);
     signals.peer_completed = health.peer_completed;
     signals.peer_terminal = health.peer_terminal;
     signals.signaling_connected = health.signaling_connected;

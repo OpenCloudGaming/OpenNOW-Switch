@@ -58,6 +58,7 @@ public:
 private:
     void ExitStream();
     void StopCloudSessionAsync();
+    void RecordLifecycleEvent(const char* event);
     void DrawDebugOverlay(NVGcontext* vg, float x, float y, float width);
     void DrawPreparingStream(NVGcontext* vg, float x, float y, float width, float height);
     void UpdatePerformanceCounter();

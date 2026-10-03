@@ -42,6 +42,7 @@ for name in audio_latency_policy audio_playback_timeline audio_rtp_utils control
 done
 
 run_cpp network_monitor app/src/network_monitor.cpp app/src/network_utils.cpp
+run_cpp stream_network_evidence
 run_cpp diagnostic_writer app/src/webrtc/diagnostic_writer.cpp
 crypto=()
 for name in sha1 base64 platform_util constant_time; do
