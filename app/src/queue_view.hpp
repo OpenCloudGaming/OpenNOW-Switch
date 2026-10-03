@@ -32,6 +32,8 @@ class QueueView final : public brls::Box
     brls::Label* game_;
     brls::Label* status_;
     brls::Label* position_;
+    brls::Label* position_heading_;
+    brls::Box* counter_;
     brls::Label* detail_;
     brls::Label* phase_;
     ui::ActionRow* minimize_;

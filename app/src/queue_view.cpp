@@ -101,24 +101,26 @@ QueueView::QueueView(const QueueDisplayState& state, const StreamSettings& setti
     left->setGrow(1);
     left->setShrink(1);
     left->setMarginRight(64);
-    left->addView(ui::MakeLabel(Tr("Position in queue"), 15, ui::Green(), ui::FontRole::Medium));
+    position_heading_ = ui::MakeLabel(Tr("Position in queue"), 15, ui::Green(), ui::FontRole::Medium);
+    position_heading_->setId("queue/position-heading");
+    left->addView(position_heading_);
     game_ = ui::MakeLabel(state.game_title, 29, ui::Text(), ui::FontRole::Heading);
     game_->setId("queue/game");
     game_->setSingleLine(true);
     game_->setMarginTop(6);
     game_->setMarginBottom(20);
     left->addView(game_);
-    auto* counter = new brls::Box(brls::Axis::COLUMN);
-    counter->setHeight(170);
-    counter->setWidthPercentage(100);
-    counter->setJustifyContent(brls::JustifyContent::CENTER);
+    counter_ = new brls::Box(brls::Axis::COLUMN);
+    counter_->setHeight(170);
+    counter_->setWidthPercentage(100);
+    counter_->setJustifyContent(brls::JustifyContent::CENTER);
     position_ = new QueuePositionLabel();
     position_->setWidthPercentage(100);
     position_->setHeight(170);
     position_->setId("queue/position");
     position_->setSingleLine(true);
-    counter->addView(position_);
-    left->addView(counter);
+    counter_->addView(position_);
+    left->addView(counter_);
     status_ = ui::MakeLabel("", 25, ui::Text(), ui::FontRole::Heading);
     status_->setId("queue/status");
     status_->setSingleLine(true);
@@ -212,6 +214,11 @@ QueueView::QueueView(const QueueDisplayState& state, const StreamSettings& setti
 
 void QueueView::Update(const QueueDisplayState& state)
 {
+    const bool show_position = state.stage == 1 && state.position >= 0 && !state.failed;
+    counter_->setVisibility(show_position ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+    position_heading_->setVisibility(show_position ? brls::Visibility::VISIBLE : brls::Visibility::GONE);
+    game_->setMarginTop(show_position ? 6 : 0);
+    status_->setMarginTop(show_position ? 20 : 0);
     game_->setText(state.game_title);
     phase_->setText(Tr(state.status));
     status_->setText(Tr(state.status));

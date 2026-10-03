@@ -741,6 +741,31 @@ void DetailChecks(opennow::GameDetailView* root)
 
 void QueueChecks(const opennow::AuthSession& session, const std::string& capture)
 {
+    opennow::QueueDisplayState presentation {"Queue presentation fixture", "Checking your NVIDIA account", "Waiting for authorization", 123, 0, false};
+    auto* presentation_view = new opennow::QueueView(presentation, opennow::LoadStreamSettings(), [] {}, [] {});
+    brls::Application::pushActivity(new brls::Activity(presentation_view)); Pump();
+    for (int stage : {0, 1, 2, 3})
+    {
+        presentation.stage = stage;
+        presentation.status = stage == 0 ? "Checking your NVIDIA account" : stage == 1 ? "Waiting in queue..." : stage == 2 ? "Preparing your cloud rig" : "Starting the video stream";
+        presentation_view->Update(presentation); Pump();
+        const auto expected = stage == 1 ? brls::Visibility::VISIBLE : brls::Visibility::GONE;
+        Check(Required(presentation_view, "queue/position")->getParent()->getVisibility() == expected,
+            "queue number cards only occupy space during the actual queue phase");
+        Check(Required(presentation_view, "queue/position-heading")->getVisibility() == expected,
+            "position-in-queue heading is only visible with the actual number cards");
+        CheckChildren(presentation_view, "queue-presentation-" + std::to_string(stage));
+        Screenshot(capture + ".phase-" + std::to_string(stage) + ".ppm");
+    }
+    presentation.stage = 1; presentation.position = -1;
+    presentation_view->Update(presentation); Pump();
+    Check(Required(presentation_view, "queue/position")->getParent()->getVisibility() == brls::Visibility::GONE,
+        "unknown queue position has no placeholder number card");
+    presentation.position = 123; presentation.failed = true;
+    presentation_view->Update(presentation); Pump();
+    Check(Required(presentation_view, "queue/position")->getParent()->getVisibility() == brls::Visibility::GONE,
+        "failed session hides stale queue number cards");
+    brls::Application::popActivity(brls::TransitionAnimation::NONE); Pump();
     ui_fixture::SetSessionMode(ui_fixture::SessionMode::Waiting);
     opennow::LaunchSessionDialog(opennow::GfnClient(), session, "1000", "Native queue fixture", "Steam", "Native queue fixture", "fixture-1000", "fixture://cover/1000");
     Until([] { return opennow::GetCurrentQueuePosition() == 123; }, "real queue worker publishes actual three-digit position");
@@ -789,6 +814,8 @@ void QueueChecks(const opennow::AuthSession& session, const std::string& capture
         else if (mode == ui_fixture::SessionMode::Confirmation)
             Check(Text(CurrentRoot()).find(opennow::Tr("Waiting for NVIDIA session ads or confirmation...")) != std::string::npos, "actual confirmation state takes priority over positive queue position");
         else { CheckChildren(dynamic_cast<brls::Box*>(CurrentRoot()), "queue-failure"); Check(opennow::GetCurrentQueuePosition() == -1, "actual failed queue relinquishes running ownership"); }
+        Check(Required(CurrentRoot(), "queue/position")->getParent()->getVisibility() == brls::Visibility::GONE,
+            "unknown, patching, confirmation and failure states never render queue number cards");
         Activate(Required(CurrentRoot(), "queue/cancel"));
     }
     ui_fixture::SetSessionMode(ui_fixture::SessionMode::BlockStart);

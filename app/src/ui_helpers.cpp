@@ -350,7 +350,7 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                     queue_title = info.status < 0 ? "Waiting for cloud session status" : "Preparing your cloud rig";
                     queue_detail = SessionStatusText(info);
                 }
-                post_progress(info.status == 0 ? 1 : 2, queue_title, queue_detail, info.queue_position > 0 ? info.queue_position : -1);
+                post_progress(info.status == 0 && !info.app_patching ? 1 : 2, queue_title, queue_detail, info.queue_position > 0 ? info.queue_position : -1);
 
                 std::this_thread::sleep_for(std::chrono::seconds(5));
                 if (!launch_state->launch.running()) return;
