@@ -20,6 +20,7 @@
 #include "localization.hpp"
 #include "stream_diagnostics.hpp"
 #include "stream_settings.hpp"
+#include "ui_theme.hpp"
 
 #ifdef __SWITCH__
 namespace
@@ -121,6 +122,7 @@ int main(int argc, char* argv[])
         const opennow::StreamSettings startup_settings = opennow::LoadStreamSettings();
         opennow::SetInterfaceLanguage(startup_settings.interface_language);
         brls::Application::createWindow("OpenNOW");
+        opennow::ui::InitializeThemeAndFonts();
         AppendBootLog("boot: window created");
 
         // Plus is an in-game Xbox Start/Guide input. Borealis otherwise binds

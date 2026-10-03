@@ -1,6 +1,5 @@
 #include "internal.hpp"
 
-#include "../community_proxy_policy.hpp"
 #include "../play_history.hpp"
 #include "../server_location_policy.hpp"
 #include "../stream_settings.hpp"
@@ -272,8 +271,7 @@ std::string BuildLibraryUrl(const std::string& vpc_id, bool with_library_time)
 
 std::string ResolveVpcId(
     const HttpClient& http_client,
-    const AuthSession& session,
-    const std::string& proxy_url)
+    const AuthSession& session)
 {
     const StreamSettings settings = LoadStreamSettings();
     const std::string streaming_base_url = server_location::ResolveStreamingBaseUrl(
@@ -284,8 +282,7 @@ std::string ResolveVpcId(
     const HttpResponse response = http_client.Get(
         streaming_base_url + "v2/serverInfo",
         GfnClient::kUserAgent,
-        BuildGfnLcarsHeaders(ResolveSessionJwt(session), "NATIVE", "NVIDIA-CLASSIC", true),
-        proxy_url);
+        BuildGfnLcarsHeaders(ResolveSessionJwt(session), "NATIVE", "NVIDIA-CLASSIC", true));
 
     if (response.status_code != 200)
         return "GFN-PC";
@@ -568,12 +565,10 @@ std::vector<LoginProvider> GfnClient::FetchLoginProviders() const
 
 std::vector<PublicGame> GfnClient::FetchPublicGames() const
 {
-    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     const HttpResponse response = http_client_.Get(
         kPublicCatalogEndpoint,
         kUserAgent,
-        {"Accept: application/json"},
-        proxy_url);
+        {"Accept: application/json"});
 
     if (response.status_code != 200)
     {
@@ -623,15 +618,14 @@ CatalogPage GfnClient::FetchCatalogPage(
 {
     session = RecoverSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
-    const std::string vpc_id = ResolveVpcId(http_client_, session, proxy_url);
+    const std::string vpc_id = ResolveVpcId(http_client_, session);
 
     HttpResponse response = http_client_.Post(
         kGraphQlEndpoint,
         kUserAgent,
         BuildGraphQlPostHeaders(jwt_token),
         BuildCatalogRequestBody(vpc_id, search_query, cursor),
-        proxy_url, {.max_body_bytes = kCatalogPageBytes});
+        {}, {.max_body_bytes = kCatalogPageBytes});
 
     if (response.status_code == 401)
     {
@@ -642,7 +636,7 @@ CatalogPage GfnClient::FetchCatalogPage(
             kUserAgent,
             BuildGraphQlPostHeaders(jwt_token),
             BuildCatalogRequestBody(vpc_id, search_query, cursor),
-            proxy_url, {.max_body_bytes = kCatalogPageBytes});
+            {}, {.max_body_bytes = kCatalogPageBytes});
     }
 
     if (response.status_code != 200)
@@ -658,14 +652,12 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
 {
     session = RecoverSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
-    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
-    const std::string vpc_id = ResolveVpcId(http_client_, session, proxy_url);
+    const std::string vpc_id = ResolveVpcId(http_client_, session);
 
     HttpResponse response = http_client_.Get(
         BuildLibraryUrl(vpc_id, true),
         kUserAgent,
-        BuildGraphQlHeaders(jwt_token),
-        proxy_url);
+        BuildGraphQlHeaders(jwt_token));
 
     if (response.status_code == 401)
     {
@@ -674,8 +666,7 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
         response = http_client_.Get(
             BuildLibraryUrl(vpc_id, true),
             kUserAgent,
-            BuildGraphQlHeaders(jwt_token),
-            proxy_url);
+            BuildGraphQlHeaders(jwt_token));
     }
 
     if (response.status_code != 200)
@@ -683,8 +674,7 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
         response = http_client_.Get(
             BuildLibraryUrl(vpc_id, false),
             kUserAgent,
-            BuildGraphQlHeaders(jwt_token),
-            proxy_url);
+            BuildGraphQlHeaders(jwt_token));
     }
 
     if (response.status_code != 200)

@@ -426,7 +426,6 @@ std::string CreateNetworkTestSession(
     const HttpClient& http_client,
     const std::string& streaming_base_url,
     const std::vector<std::string>& headers,
-    const std::string& proxy_url,
     const StreamSettings& stream_settings)
 {
     JsonPtr root(json_object(), &json_decref);
@@ -444,8 +443,7 @@ std::string CreateNetworkTestSession(
         streaming_base_url + "v2/nettestsession",
         GfnClient::kUserAgent,
         headers,
-        DumpJson(root.get()),
-        proxy_url);
+        DumpJson(root.get()));
     if (response.status_code < 200 || response.status_code >= 300)
         return {};
 

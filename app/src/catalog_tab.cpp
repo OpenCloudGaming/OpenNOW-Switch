@@ -3,11 +3,14 @@
 #include "app_state.hpp"
 #include "game_browser_header.hpp"
 #include "game_detail_view.hpp"
+#include "game_detail_policy.hpp"
 #include "game_card_view.hpp"
 #include "game_grid_navigation.hpp"
 #include "ui_action_guard.hpp"
 #include "ui_helpers.hpp"
 #include "localization.hpp"
+#include "ui_theme.hpp"
+#include "ui_text_policy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -26,9 +29,7 @@ constexpr std::array<const char*, 3> kCatalogSortModes = {"A-Z", "Store", "Publi
 
 brls::Label* MakeParagraph(const std::string& text, float bottom_margin = 16.0f)
 {
-    auto* label = new brls::Label();
-    label->setText(Tr(text));
-    label->setFontSize(18);
+    auto* label = ui::MakeLabel(Tr(text), 18, ui::Muted());
     label->setMarginBottom(bottom_margin);
     return label;
 }
@@ -66,16 +67,25 @@ bool MatchesStoreFilter(const PublicGame& game, size_t filter_index)
 CatalogTab::CatalogTab()
     : brls::Box(brls::Axis::COLUMN)
 {
-    setPadding(18, 32, 18, 32);
-    setBackgroundColor(nvgRGB(16, 16, 20));
+    setId("catalog");
+    setPadding(10, 36, 10, 36);
+    setBackgroundColor(ui::Ground());
+    interface_language_ = GetInterfaceLanguage();
 
     search_button_ = ui::MakeGameBrowserActionButton("Y  Search");
     filter_button_ = ui::MakeGameBrowserActionButton("ZL  All stores");
     sort_button_   = ui::MakeGameBrowserActionButton("ZR  A-Z");
     more_button_   = ui::MakeGameBrowserActionButton("X  More / Refresh");
+    search_button_->setId("catalog-search");
+    filter_button_->setId("catalog-filter");
+    sort_button_->setId("catalog-sort");
+    more_button_->setId("catalog-more");
     search_button_->setStyle(&brls::BUTTONSTYLE_HIGHLIGHT);
     toolbar_buttons_ = {search_button_, filter_button_, sort_button_, more_button_};
-    addView(ui::MakeGameBrowserHeader("Store", toolbar_buttons_));
+    auto* header = ui::MakeGameBrowserHeader("Store", toolbar_buttons_);
+    header->setMarginLeft(4);
+    header->setMarginRight(4);
+    addView(header);
 
     search_button_->registerClickAction([this](brls::View*) {
         return RunUiAction("catalog.search.button", [this]() { BeginSearch(); });
@@ -91,16 +101,22 @@ CatalogTab::CatalogTab()
     });
 
     status_label_ = MakeParagraph("Loading the supported GeForce NOW catalog...", 8.0f);
+    status_label_->setId("catalog-status");
     status_label_->setFontSize(14);
-    status_label_->setTextColor(nvgRGB(132, 139, 151));
+    status_label_->setWidthPercentage(100);
+    status_label_->setMaxHeight(64);
+    status_label_->setMarginLeft(4);
+    status_label_->setMarginRight(4);
     addView(status_label_);
 
-    scrolling_frame_ = new brls::ScrollingFrame();
+    scrolling_frame_ = new ui::FadingScrollFrame();
     scrolling_frame_->setGrow(1.0f);
+    scrolling_frame_->setScrollingIndicatorVisible(false);
     scrolling_frame_->setScrollingBehavior(brls::ScrollingBehavior::CENTERED);
 
     list_container_ = new brls::Box(brls::Axis::COLUMN);
-    list_container_->setPadding(0, 0, 32, 0);
+    list_container_->setId("catalog-list");
+    list_container_->setPadding(4, 4, 32, 4);
     scrolling_frame_->setContentView(list_container_);
 
     addView(scrolling_frame_);
@@ -137,10 +153,11 @@ void CatalogTab::BeginSearch()
     if (loading_)
         return;
     const auto alive = alive_;
+    const auto generation = AppState::Instance().session_generation();
     brls::Application::giveFocus(search_button_);
     brls::Application::getImeManager()->openForText(
-        [this, alive](std::string text) {
-            if (!alive->load())
+        [this, alive, generation](std::string text) {
+            if (!alive->load() || AppState::Instance().session_generation() != generation)
                 return;
             RunUiAction("catalog.search.result", [this, text = std::move(text)]() mutable {
                 if (loading_)
@@ -160,6 +177,18 @@ void CatalogTab::BeginSearch()
 void CatalogTab::willAppear(bool resetState)
 {
     brls::Box::willAppear(resetState);
+
+    if (interface_language_ != GetInterfaceLanguage())
+    {
+        interface_language_ = GetInterfaceLanguage();
+        if (auto* heading = dynamic_cast<brls::Label*>(getView("browser-heading")))
+            heading->setText(Tr("Store"));
+        search_button_->setText("Y  " + Tr("Search"));
+        more_button_->setText("X  " + Tr("More / Refresh"));
+        search_button_->setWidth(ui::ToolbarButtonWidth(search_button_->getText()));
+        more_button_->setWidth(ui::ToolbarButtonWidth(more_button_->getText()));
+        RebuildList();
+    }
 
     const auto& state = AppState::Instance();
     if (state.session_generation() != catalog_session_generation_)
@@ -187,6 +216,12 @@ void CatalogTab::ReloadCatalog(bool append)
 {
     if (loading_)
         return;
+    const auto& auth_state = AppState::Instance();
+    if (auth_state.HasSession() && auth_state.session()->reauthentication_required)
+    {
+        status_label_->setText(Tr("Reconnect this account from Settings > Account before refreshing the catalog."));
+        return;
+    }
 
     if (AppState::Instance().session_generation() != catalog_session_generation_)
     {
@@ -286,6 +321,10 @@ void CatalogTab::RebuildList()
         current_focus == previous_page_button_;
 
     MoveFocusBeforeDestroy(list_container_, search_button_);
+    setLastFocusedView(search_button_);
+    WireVerticalGridNavigation({toolbar_buttons_});
+    if (paging_container_)
+        WireVerticalGridNavigation({{previous_page_button_, load_more_button_}});
     DetachPagingButton();
     list_container_->clearViews();
     card_rows_.clear();
@@ -326,27 +365,29 @@ void CatalogTab::RebuildList()
         page_index_ = total_pages - 1;
     const size_t page_start = std::min(filtered_count_, page_index_ * kInitialVisibleGameLimit);
     const size_t page_end = std::min(filtered_count_, page_start + kInitialVisibleGameLimit);
-    std::string status = "Loaded " + std::to_string(games_.size());
+    std::string status = Tr("Loaded") + " " + std::to_string(games_.size());
     if (catalog_.page().total_count)
-        status += " of " + std::to_string(*catalog_.page().total_count);
-    status += " supported games.";
+        status += " " + Tr("of") + " " + std::to_string(*catalog_.page().total_count);
+    status += " " + Tr("supported games") + ".";
     if (catalog_.page().next_cursor)
-        status += " More available online. Filters and sorting apply to loaded games.";
-    status += " Filter: " + std::string(kStoreFilters[store_filter_index_]) + ".";
-    status += " Sort: " + std::string(kCatalogSortModes[sort_mode_index_]) + ".";
+        status += " " + Tr("More available online. Filters and sorting apply to loaded games.");
     if (!search_query_.empty())
-        status += " Found " + std::to_string(filtered_count_) + " matches.";
+        status += " " + TrFormat("Found {0} matches.", {std::to_string(filtered_count_)});
     if (filtered_count_ > 0)
-        status += " Showing " + std::to_string(page_start + 1) + "-" +
-            std::to_string(page_end) + " of " + std::to_string(filtered_count_) +
-            " (page " + std::to_string(page_index_ + 1) + "/" +
-            std::to_string(total_pages) + ").";
+        status += " " + TrFormat("Showing {0}-{1} of {2} (page {3}/{4}).", {
+            std::to_string(page_start + 1), std::to_string(page_end), std::to_string(filtered_count_),
+            std::to_string(page_index_ + 1), std::to_string(total_pages)});
     else
-        status += " Press X to refresh.";
+        status += " " + Tr("Press X to refresh.");
 
     status_label_->setText(status);
+    const auto& state = AppState::Instance();
+    if (state.HasSession() && state.session()->reauthentication_required)
+        status_label_->setText(Tr("Reconnect this account from Settings > Account before refreshing the catalog."));
     filter_button_->setText("ZL  " + Tr(kStoreFilters[store_filter_index_]));
     sort_button_->setText("ZR  " + Tr(kCatalogSortModes[sort_mode_index_]));
+    filter_button_->setWidth(ui::ToolbarButtonWidth(filter_button_->getText()));
+    sort_button_->setWidth(ui::ToolbarButtonWidth(sort_button_->getText()));
 
     if (filtered_indices.empty())
     {
@@ -362,6 +403,9 @@ void CatalogTab::RebuildList()
     for (size_t start = page_start; start < page_end; start += kCardsPerRow)
     {
         auto* row = new brls::Box(brls::Axis::ROW);
+        row->setId("catalog-row-" + std::to_string((start - page_start) / kCardsPerRow));
+        row->setWidth(1200);
+        row->setShrink(0);
         std::vector<brls::View*> card_row;
         const size_t end = std::min(start + kCardsPerRow, page_end);
 
@@ -372,16 +416,16 @@ void CatalogTab::RebuildList()
 
             GameCardDisplay display;
             display.title     = game.title;
-            display.subtitle  = game.store;
-            display.badge     = game.is_in_library
-                ? "In library"
-                : (game.publisher.empty() ? "GFN catalog" : game.publisher);
+            display.subtitle  = game_detail::IsUnknownMetadata(game.store) ? "" : game.store;
+            display.badge     = game_detail::IsUnknownMetadata(game.publisher) ? "" : game.publisher;
+            display.in_library = game.is_in_library;
             display.image_url = game.image_url;
 
             auto* card = new GameCardView(display, [this, index]() {
                 OpenGameDialog(nullptr, index);
             });
-            card->setMarginRight(i + 1 < end ? 24.0f : 0.0f);
+            card->setId("catalog-card-" + game.id);
+            card->setMarginRight(i + 1 < end ? 25.0f : 0.0f);
 
             if (!first_card_)
                 first_card_ = card;
@@ -404,6 +448,8 @@ void CatalogTab::RebuildList()
         brls::Application::giveFocus(first_card_);
     else if (first_card_ && !brls::Application::getCurrentFocus())
         brls::Application::giveFocus(first_card_);
+    if (first_card_)
+        setLastFocusedView(first_card_);
 }
 
 void CatalogTab::EnsurePagingButton()
@@ -416,6 +462,7 @@ void CatalogTab::EnsurePagingButton()
     paging_container_->setMarginBottom(24);
 
     previous_page_button_ = new brls::Button();
+    previous_page_button_->setId("catalog-previous");
     previous_page_button_->setStyle(&brls::BUTTONSTYLE_BORDERED);
     previous_page_button_->setMarginRight(12);
     previous_page_button_->setGrow(1.0f);
@@ -427,6 +474,7 @@ void CatalogTab::EnsurePagingButton()
     paging_container_->addView(previous_page_button_);
 
     load_more_button_ = new brls::Button();
+    load_more_button_->setId("catalog-next");
     load_more_button_->setStyle(&brls::BUTTONSTYLE_PRIMARY);
     load_more_button_->setGrow(1.0f);
     load_more_button_->registerClickAction([this](brls::View*) {
@@ -482,9 +530,15 @@ void CatalogTab::HandlePagingButton()
     load_more_pending_ = true;
     brls::Application::giveFocus(more_button_);
     const auto alive = alive_;
-    brls::sync([this, alive]() {
+    const auto generation = AppState::Instance().session_generation();
+    brls::sync([this, alive, generation]() {
         if (!alive->load())
             return;
+        if (AppState::Instance().session_generation() != generation)
+        {
+            load_more_pending_ = false;
+            return;
+        }
 
         const std::string before = "page=" + std::to_string(page_index_ + 1) +
             " filtered=" + std::to_string(filtered_count_);
@@ -523,9 +577,15 @@ void CatalogTab::HandlePreviousPage()
     load_more_pending_ = true;
     brls::Application::giveFocus(more_button_);
     const auto alive = alive_;
-    brls::sync([this, alive]() {
+    const auto generation = AppState::Instance().session_generation();
+    brls::sync([this, alive, generation]() {
         if (!alive->load())
             return;
+        if (AppState::Instance().session_generation() != generation)
+        {
+            load_more_pending_ = false;
+            return;
+        }
         --page_index_;
         RebuildList();
         if (first_card_)
@@ -538,6 +598,8 @@ void CatalogTab::HandlePreviousPage()
 
 void CatalogTab::CycleStoreFilter()
 {
+    if (load_more_pending_)
+        return;
     MoveFocusBeforeDestroy(list_container_, filter_button_);
     store_filter_index_ = (store_filter_index_ + 1) % kStoreFilters.size();
     page_index_         = 0;
@@ -547,6 +609,8 @@ void CatalogTab::CycleStoreFilter()
 
 void CatalogTab::CycleSortMode()
 {
+    if (load_more_pending_)
+        return;
     MoveFocusBeforeDestroy(list_container_, sort_button_);
     sort_mode_index_ = (sort_mode_index_ + 1) % kCatalogSortModes.size();
     page_index_      = 0;
@@ -560,6 +624,8 @@ bool CatalogTab::OpenGameDialog(brls::View* view, size_t index)
     (void)view;
 
     if (index >= games_.size())
+        return false;
+    if (AppState::Instance().session_generation() != catalog_session_generation_)
         return false;
 
     brls::Application::pushActivity(new brls::Activity(new GameDetailView(

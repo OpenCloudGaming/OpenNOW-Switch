@@ -18,6 +18,11 @@ for name in ("user_malloc.h", "user_socketvar.h"):
 PY
 
 flags=(-g -fno-omit-frame-pointer)
+test_source="${1:-sctp_reliability_test.c}"
+link_flags=()
+if [[ "$test_source" == sctp_setup_diagnostic_test.c ]]; then
+  link_flags+=(-Wl,--wrap=usrsctp_setsockopt,--wrap=usrsctp_connect)
+fi
 if [[ -n "${SCTP_TEST_SANITIZERS:-}" ]]; then
   flags+=("-fsanitize=$SCTP_TEST_SANITIZERS")
 fi
@@ -30,7 +35,7 @@ cmake --build "$work/build" -j "${SCTP_TEST_JOBS:-4}"
 "${CC:-cc}" -std=gnu11 -Wall -Wextra -Werror "${flags[@]}" \
   -DCONFIG_USE_USRSCTP=1 \
   -I"$root/extern/libpeer/src" -I"$work/usrsctp/usrsctplib" \
-  "$root/tests/sctp_reliability_test.c" "$root/extern/libpeer/src/sctp.c" \
-  "$work/build/usrsctplib/libusrsctp.a" -pthread -Wl,--wrap=gettimeofday \
+  "$root/tests/$test_source" "$root/extern/libpeer/src/sctp.c" \
+  "$work/build/usrsctplib/libusrsctp.a" -pthread -Wl,--wrap=gettimeofday "${link_flags[@]}" \
   -o "$work/sctp_reliability_test"
 "$work/sctp_reliability_test"

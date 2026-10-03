@@ -42,6 +42,7 @@ for name in audio_latency_policy audio_playback_timeline audio_rtp_utils control
 done
 
 run_cpp network_monitor app/src/network_monitor.cpp app/src/network_utils.cpp
+run_cpp stream_network_evidence
 run_cpp diagnostic_writer app/src/webrtc/diagnostic_writer.cpp
 crypto=()
 for name in sha1 base64 platform_util constant_time; do
@@ -61,12 +62,18 @@ run_cpp webrtc_input_handshake -Iextern/libpeer/src \
     -Iextern/borealis/library/include/borealis/extern/nanovg "${sections[@]}" \
     app/src/webrtc/input.cpp -ljansson
 run_cpp av_frame_queue -Itests/stream_stubs app/src/stream/ffmpeg/AVFrameHolder.cpp -lavcodec -lavutil
+bash tests/run_webrtc_decode_output_accounting_test.sh
+printf 'PASS webrtc_decode_output_accounting\n'
 run_cpp gpu_frame_queue -lavutil
 python3 tests/run_deko_renderer_reconfiguration_test.py
 printf 'PASS deko_renderer_reconfiguration\n'
 python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_color_range_test.cpp
 printf 'PASS deko_renderer_color_range\n'
+python3 tests/run_deko_renderer_reconfiguration_test.py deko_renderer_quality_snapshot_test.cpp
+printf 'PASS deko_renderer_quality_snapshot\n'
 run_cpp audio_pipeline -Itests/stream_stubs -Iextern/libpeer/src app/src/stream/audio/AudioPipeline.cpp
+bash tests/run_audio_video_underrun_test.sh
+printf 'PASS audio_video_underrun\n'
 for scenario in timeline ssrc red; do
     "$out/audio_pipeline" "$scenario"
     printf 'PASS audio_pipeline/%s\n' "$scenario"
@@ -96,6 +103,10 @@ run_c rtp_reorder extern/libpeer/src/rtp.c
 run_c rtcp_nack extern/libpeer/src/rtcp.c
 run_c rtcp_receiver_report extern/libpeer/src/rtcp.c
 run_c sctp_socket_address -Iextern/libpeer/third_party/usrsctp/usrsctplib
+run_c sdp_sctp_message_limit extern/libpeer/src/sdp.c
+run_c peer_diagnostic_callback "${sections[@]}" -Wno-unused-but-set-variable \
+    -Iextern/libpeer/third_party/mbedtls/include \
+    -Iextern/libpeer/third_party/usrsctp/usrsctplib -pthread
 run_c peer_rtcp_receive "${sections[@]}" -Wno-unused-but-set-variable \
     -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
 run_c dtls_nonblocking_read "${sections[@]}" -Wno-unused-parameter -Wno-empty-body \
@@ -110,3 +121,7 @@ run_c agent_socket_poll "${sections[@]}"
 run_cpp peer_runtime -Iextern/libpeer/src "$out/peer_runtime.o" -lsrtp2
 SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh
 printf 'PASS sctp_reliability\n'
+SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh sctp_setup_diagnostic_test.c
+printf 'PASS sctp_setup_diagnostic\n'
+SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh sctp_diagnostic_connect_test.c
+printf 'PASS sctp_diagnostic_connect\n'

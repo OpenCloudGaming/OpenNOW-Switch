@@ -1,6 +1,8 @@
+#include <errno.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -78,7 +80,14 @@ struct PeerConnection {
 static int peer_connection_send_rtcp_nack(PeerConnection* pc, uint32_t ssrc,
                                           uint16_t packet_id, uint16_t bitmask);
 
-static int peer_connection_diagnostics_enabled;
+static atomic_int peer_connection_diagnostics_enabled;
+typedef void (*PeerDiagnosticCallback)(const char*);
+static _Atomic(PeerDiagnosticCallback) peer_diagnostic_callback;
+
+void peer_connection_set_diagnostic_callback(void (*callback)(const char*)) {
+  atomic_store(&peer_diagnostic_callback, callback);
+  sctp_set_diagnostic_callback(callback);
+}
 
 void peer_connection_set_diagnostics_enabled(int enabled) {
   peer_connection_diagnostics_enabled = enabled != 0;
@@ -88,54 +97,17 @@ void peer_connection_set_diagnostics_enabled(int enabled) {
 static void peer_connection_diag_log(const char* fmt, ...) {
   if (!peer_connection_diagnostics_enabled)
     return;
-  FILE* file = fopen("sdmc:/switch/OpenNOWSwitch/signaling.log", "a");
-  FILE* trace = fopen("sdmc:/switch/OpenNOWSwitch/stream_trace.log", "a");
-  const int input_relevant = strstr(fmt, "sctp") != NULL ||
-                             strstr(fmt, "dtls") != NULL ||
-                             strstr(fmt, "transport_completed") != NULL;
-  FILE* input = input_relevant ? fopen("sdmc:/switch/OpenNOWSwitch/input.log", "a") : NULL;
-
-  if (file) {
-    fputs("LIBPEER ", file);
-  }
-  if (trace) {
-    fputs("LIBPEER ", trace);
-  }
-  if (input) {
-    fputs("LIBPEER ", input);
-  }
-
+  PeerDiagnosticCallback callback = atomic_load(&peer_diagnostic_callback);
+  if (!callback)
+    return;
+  const int saved_errno = errno;
+  char message[2048] = "LIBPEER ";
   va_list args;
   va_start(args, fmt);
-  if (file) {
-    va_list copy;
-    va_copy(copy, args);
-    vfprintf(file, fmt, copy);
-    va_end(copy);
-  }
-  if (trace) {
-    va_list copy;
-    va_copy(copy, args);
-    vfprintf(trace, fmt, copy);
-    va_end(copy);
-  }
-  if (input) {
-    vfprintf(input, fmt, args);
-  }
+  vsnprintf(message + 8, sizeof(message) - 8, fmt, args);
   va_end(args);
-
-  if (file) {
-    fputc('\n', file);
-    fclose(file);
-  }
-  if (trace) {
-    fputc('\n', trace);
-    fclose(trace);
-  }
-  if (input) {
-    fputc('\n', input);
-    fclose(input);
-  }
+  callback(message);
+  errno = saved_errno;
 }
 
 static int peer_connection_video_packet_buffered(const RtpDecoder* decoder,

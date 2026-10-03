@@ -68,7 +68,8 @@ public:
         const std::string& session_id,
         const std::string& media_ip,
         int media_port,
-        const std::vector<opennow::IceServerInfo>& ice_servers);
+        const std::vector<opennow::IceServerInfo>& ice_servers,
+        const opennow::StreamSettings& settings);
     ~WebRtcSession();
 
     void start();

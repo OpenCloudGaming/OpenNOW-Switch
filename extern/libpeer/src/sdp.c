@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "sdp.h"
+#include "sctp.h"
 
 int sdp_append(char* sdp, const char* format, ...) {
   va_list argptr;
@@ -74,7 +75,7 @@ void sdp_append_datachannel(char* sdp) {
   sdp_append(sdp, "c=IN IP4 0.0.0.0");
   sdp_append(sdp, "a=mid:datachannel");
   sdp_append(sdp, "a=sctp-port:5000");
-  sdp_append(sdp, "a=max-message-size:262144");
+  sdp_append(sdp, "a=max-message-size:%u", (unsigned)SCTP_MAX_MESSAGE_SIZE);
 }
 
 void sdp_create(char* sdp, int b_video, int b_audio, int b_datachannel) {

@@ -31,12 +31,12 @@ StreamView::StreamView(
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
-    const std::string& game_title)
+    const std::string& game_title,
+    const opennow::StreamSettings& stream_settings)
     : client_(client)
     , auth_(auth)
     , cloud_session_id_(session_id)
     , game_title_(game_title) {
-    const auto stream_settings = opennow::LoadStreamSettings();
     debug_diagnostics_ = stream_settings.debug_diagnostics;
     stats_overlay_enabled_ = stream_settings.stats_overlay_enabled;
     stream_codec_ = stream_settings.codec;
@@ -66,7 +66,8 @@ StreamView::StreamView(
         session_id,
         media_ip,
         media_port,
-        ice_servers);
+        ice_servers,
+        stream_settings);
     session_->start();
     network_monitor_.start();
     RefreshNetworkInfo(stream_started_at_);
@@ -82,6 +83,7 @@ StreamView::StreamView(
 }
 
 StreamView::~StreamView() {
+    RecordLifecycleEvent("destroy");
     network_monitor_.request_stop();
     opennow::SetSensitiveInputLoggingSuppressed(false);
     std::fill(nte_credentials_.password.begin(), nte_credentials_.password.end(), '\0');
@@ -123,6 +125,7 @@ void StreamView::onFocusLost() {
 void StreamView::ExitStream() {
     if (exit_requested_)
         return;
+    RecordLifecycleEvent("exit");
     exit_requested_ = true;
     network_monitor_.request_stop();
     if (session_)
@@ -137,6 +140,30 @@ void StreamView::ExitStream() {
         })) {
         exit_requested_ = false;
     }
+}
+
+void StreamView::RecordLifecycleEvent(const char* event) {
+    if (!debug_diagnostics_ || !session_)
+        return;
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - stream_started_at_).count();
+    const auto network = network_monitor_.snapshot();
+    const auto health = session_->get_transport_health();
+    const auto video = session_->get_video_performance();
+    session_->record_ui_event(
+        std::string("stream_lifecycle event=") + event +
+        " reason=" + std::to_string(static_cast<int>(stream_end_reason_)) +
+        " elapsedMs=" + std::to_string(elapsed) +
+        " internetConnected=" + std::to_string(network.internet_connected) +
+        " peerCompleted=" + std::to_string(health.peer_completed) +
+        " peerTerminal=" + std::to_string(static_cast<int>(health.peer_terminal)) +
+        " signalingConnected=" + std::to_string(health.signaling_connected) +
+        " videoStarted=" + std::to_string(health.video_started) +
+        " accessUnitIdleMs=" + std::to_string(health.video_idle.count()) +
+        " accessUnits=" + std::to_string(video.access_units) +
+        " decodedFrames=" + std::to_string(video.decoded_frames) +
+        " presentedFrames=" + std::to_string(video.presented_frames));
 }
 
 void StreamView::StopCloudSessionAsync() {
@@ -414,7 +441,8 @@ brls::View* StreamView::create(
     const std::vector<opennow::IceServerInfo>& ice_servers,
     const opennow::GfnClient& client,
     const opennow::AuthSession& auth,
-    const std::string& game_title) {
+    const std::string& game_title,
+    const opennow::StreamSettings& settings) {
     return new StreamView(signaling_url, jwt_token, session_id, media_ip, media_port,
-                          ice_servers, client, auth, game_title);
+                          ice_servers, client, auth, game_title, settings);
 }

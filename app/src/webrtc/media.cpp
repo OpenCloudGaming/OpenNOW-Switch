@@ -53,15 +53,18 @@ void WebRtcSession::decoder_loop() {
         if (reset_decoder && decoder_ && !decoder_->uses_hardware_frames())
             decoder_->reset_stream();
 
-        const int decoded = decoder_
+        const uint64_t frames_before = decoder_ ? decoder_->decoded_frame_count() : 0;
+        const int decode_result = decoder_
             ? decoder_->submit_decode_unit(unit.data.data(), static_cast<int>(unit.data.size()), unit.rtp_timestamp)
             : -1;
+        const int decoded_frames = decoder_
+            ? static_cast<int>(decoder_->decoded_frame_count() - frames_before) : 0;
         const uint64_t decode_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - decode_started_at).count());
         {
             std::lock_guard<std::mutex> lock(decoder_queue_mutex_);
-            if (decoder_recovery_.complete(unit.generation, decoded >= 0) ==
+            if (decoder_recovery_.complete(unit.generation, decode_result >= 0) ==
                 opennow::webrtc::DecodeRecoveryState::Completion::Failed) {
                 decoder_queue_drops_ += static_cast<int>(decoder_queue_.size());
                 clear_decoder_queue_locked();
@@ -72,9 +75,9 @@ void WebRtcSession::decoder_loop() {
         AtomicMax(decode_us_max_, decode_us);
 
         const int access_unit_count = packets_received_.load();
-        if (decoded > 0) {
+        if (decoded_frames > 0) {
             last_decoded_frame_at_us_.store(NowUs(), std::memory_order_release);
-            const int frame_count = frames_decoded_.fetch_add(decoded) + decoded;
+            const int frame_count = frames_decoded_.fetch_add(decoded_frames) + decoded_frames;
             if (!first_decoded_frame_logged_) {
                 first_decoded_frame_logged_ = true;
                 AppendStreamLog("DECODE first_frame frames=" + std::to_string(frame_count) +
@@ -84,7 +87,8 @@ void WebRtcSession::decoder_loop() {
                                 " accessUnits=" + std::to_string(access_unit_count));
                 last_logged_frame_count_.store(frame_count, std::memory_order_relaxed);
             }
-        } else if (decoded < 0) {
+        }
+        if (decode_result < 0) {
             const int error_count = decode_errors_.fetch_add(1) + 1;
             if (error_count <= 5 ||
                 error_count - last_logged_decode_error_count_.load(std::memory_order_relaxed) >= 20) {
@@ -377,7 +381,7 @@ void WebRtcSession::on_rtp_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_
 
 int64_t WebRtcSession::video_target_rtp_timestamp() const {
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
-    if (!audio_ || !have_video_sender_report_)
+    if (!audio_ || !audio_->is_playing() || !have_video_sender_report_)
         return AV_NOPTS_VALUE;
     const int64_t audio_ntp = audio_->playback_ntp_us();
     if (audio_ntp < 0)

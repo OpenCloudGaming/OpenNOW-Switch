@@ -44,6 +44,7 @@ class TopBarFrame : public brls::Box
     brls::Label* account_detail_label_;
     std::string displayed_avatar_url_;
     std::string displayed_status_;
+    std::string displayed_language_;
     std::chrono::steady_clock::time_point last_status_update_ {};
 
     struct TabInfo {

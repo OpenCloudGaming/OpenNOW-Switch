@@ -19,6 +19,7 @@ public:
     void submit(const PeerAudioPacket& packet);
     void set_sender_report(uint32_t ssrc, uint64_t ntp_us, uint32_t rtp_timestamp);
     std::string debug_info() const;
+    bool is_playing() const;
     int64_t playback_ntp_us() const;
 
 private:

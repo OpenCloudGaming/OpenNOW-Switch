@@ -60,7 +60,7 @@ int __wrap_avcodec_receive_frame(AVCodecContext*, AVFrame*)
 
 int main()
 {
-    FFmpegVideoDecoder decoder;
+    FFmpegVideoDecoder decoder("Adaptive");
     assert(decoder.setup(VIDEO_FORMAT_H264, 16, 16, 60, nullptr,
                          VIDEO_DECODER_FORCE_SOFTWARE) == 0);
     uint8_t input[] = {0x55};

@@ -1,6 +1,5 @@
 #include "cloud_session_internal.hpp"
 
-#include "../community_proxy_policy.hpp"
 #include "../server_location_policy.hpp"
 
 #include <algorithm>
@@ -14,6 +13,7 @@ using namespace gfn::detail;
 using namespace gfn::cloud_session;
 
 SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& launch_app_id,
+                                    const StreamSettings& stream_settings,
                                     const std::string& launch_store,
                                     const std::string& internal_title) const
 {
@@ -22,8 +22,6 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     const std::string device_id = GenerateDeviceId();
     const std::string sub_session_id = GenerateUuid();
 
-    const StreamSettings stream_settings = LoadStreamSettings();
-    const std::string proxy_url = community_proxy::EnabledUrl(stream_settings);
     std::string automatic_region_url;
     std::string automatic_region_trace;
     if (server_location::IsAutomatic(stream_settings.region))
@@ -95,7 +93,6 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
             http_client_,
             streaming_base_url,
             headers,
-            proxy_url,
             stream_settings);
         network_test_trace = network_test_session_id.empty()
             ? "unavailable; launch will use regional endpoint without a test ID"
@@ -132,14 +129,14 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     AppendSessionTraceLog("START headers:\n" + HeadersForTrace(headers));
     AppendSessionTraceLog("START request body:\n" + JsonForTrace(body));
 
-    HttpResponse response = http_client_.Post(url, kUserAgent, headers, body, proxy_url);
+    HttpResponse response = http_client_.Post(url, kUserAgent, headers, body);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
         jwt_token = ResolveSessionJwt(session);
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("START authorization rejected; refreshed token and retrying once");
-        response = http_client_.Post(url, kUserAgent, headers, body, proxy_url);
+        response = http_client_.Post(url, kUserAgent, headers, body);
     }
     AppendSessionTraceLog("START response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("START response body:\n" + JsonForTrace(response.body));
@@ -223,7 +220,6 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
-    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     std::string streaming_base_url =
         LoadActiveCloudSessionStreamingBaseUrl(session, session_id);
     if (streaming_base_url.empty())
@@ -247,14 +243,14 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
 
     AppendSessionTraceLog("POLL url=" + url);
     AppendSessionTraceLog("POLL headers:\n" + HeadersForTrace(headers));
-    HttpResponse response = http_client_.Get(url, kUserAgent, headers, proxy_url);
+    HttpResponse response = http_client_.Get(url, kUserAgent, headers);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
         jwt_token = ResolveSessionJwt(session);
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("POLL authorization rejected; refreshed token and retrying once");
-        response = http_client_.Get(url, kUserAgent, headers, proxy_url);
+        response = http_client_.Get(url, kUserAgent, headers);
     }
     AppendSessionTraceLog("POLL response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("POLL response body:\n" + JsonForTrace(response.body));
@@ -336,7 +332,6 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
     session = EnsureFreshSavedSession(session);
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string device_id = GenerateDeviceId();
-    const std::string proxy_url = community_proxy::EnabledUrl(LoadStreamSettings());
     std::string streaming_base_url =
         LoadActiveCloudSessionStreamingBaseUrl(session, session_id);
     if (streaming_base_url.empty())
@@ -361,7 +356,7 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
     AppendSessionTraceLog("STOP url=" + url);
     AppendSessionTraceLog("STOP headers:\n" + HeadersForTrace(headers));
     HttpResponse response = http_client_.Request(
-        "DELETE", url, kUserAgent, headers, {}, proxy_url);
+        "DELETE", url, kUserAgent, headers);
     if (response.status_code == 401)
     {
         session = ForceRefreshSavedSession(session);
@@ -369,7 +364,7 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
         headers[0] = "Authorization: GFNJWT " + jwt_token;
         AppendSessionTraceLog("STOP authorization rejected; refreshed token and retrying once");
         response = http_client_.Request(
-            "DELETE", url, kUserAgent, headers, {}, proxy_url);
+            "DELETE", url, kUserAgent, headers);
     }
     AppendSessionTraceLog("STOP response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("STOP response body:\n" + JsonForTrace(response.body));

@@ -374,69 +374,6 @@ bool SettingsTab::RefreshServerLocations(brls::View* view)
     return true;
 }
 
-bool SettingsTab::ToggleCommunityProxy(brls::View* view)
-{
-    (void)view;
-    if (community_proxy_provisioning_)
-        return true;
-
-    if (draft_settings_.community_proxy_enabled)
-    {
-        draft_settings_.community_proxy_enabled = false;
-        MarkDirty();
-        return true;
-    }
-
-    const auto alive = alive_;
-    auto* dialog = new brls::Dialog(
-        "The Zortos community proxy is optional, shared and may be rate-limited or "
-        "unavailable. It only routes NVIDIA catalog and session requests; streaming "
-        "traffic stays direct.");
-    dialog->addButton("Enable proxy", [this, alive]() {
-        if (!alive->load())
-            return;
-        const auto generation = ++proxy_request_generation_;
-        community_proxy_provisioning_ = true;
-        UpdateOptionValues();
-        brls::Application::notify("Activating community proxy...");
-
-        GfnClient client = client_;
-        brls::async([this, alive, generation, client]() mutable {
-            if (!alive->load())
-                return;
-            try
-            {
-                std::string proxy_url = client.ProvisionCommunityProxy();
-                brls::sync([this, alive, generation, proxy_url = std::move(proxy_url)]() mutable {
-                    if (!alive->load() || generation != proxy_request_generation_)
-                        return;
-                    draft_settings_.community_proxy_url = std::move(proxy_url);
-                    draft_settings_.community_proxy_enabled = true;
-                    community_proxy_provisioning_ = false;
-                    MarkDirty();
-                    UpdateOptionValues();
-                    brls::Application::notify(
-                        "Community proxy ready; press X to save");
-                });
-            }
-            catch (const std::exception& ex)
-            {
-                const std::string message = ex.what();
-                brls::sync([this, alive, generation, message] {
-                    if (!alive->load() || generation != proxy_request_generation_)
-                        return;
-                    community_proxy_provisioning_ = false;
-                    UpdateOptionValues();
-                    ShowError("Community Proxy Failed", message);
-                });
-            }
-        }, false);
-    });
-    dialog->addButton("Cancel", [] {});
-    dialog->open();
-    return true;
-}
-
 bool SettingsTab::CycleImageQuality(brls::View* view)
 {
     (void)view;

@@ -24,6 +24,12 @@ _Static_assert(sizeof(((struct sockaddr_conn*)0)->sconn_family) ==
 #endif
 
 static atomic_int sctp_diagnostics_enabled;
+typedef void (*SctpDiagnosticCallback)(const char*);
+static _Atomic(SctpDiagnosticCallback) sctp_diagnostic_callback;
+
+void sctp_set_diagnostic_callback(void (*callback)(const char*)) {
+  atomic_store(&sctp_diagnostic_callback, callback);
+}
 #if CONFIG_USE_USRSCTP
 static unsigned sctp_runtime_users;
 static int sctp_runtime_initialized;
@@ -62,36 +68,17 @@ void sctp_set_diagnostics_enabled(int enabled) {
 static void sctp_diag_log(const char* fmt, ...) {
   if (!sctp_diagnostics_enabled)
     return;
-  FILE* file = fopen("sdmc:/switch/OpenNOWSwitch/signaling.log", "a");
-  FILE* trace = fopen("sdmc:/switch/OpenNOWSwitch/stream_trace.log", "a");
-  FILE* input = fopen("sdmc:/switch/OpenNOWSwitch/input.log", "a");
+  SctpDiagnosticCallback callback = atomic_load(&sctp_diagnostic_callback);
+  if (!callback)
+    return;
+  const int saved_errno = errno;
+  char message[2048] = "SCTP ";
   va_list args;
   va_start(args, fmt);
-  if (file) {
-    fputs("SCTP ", file);
-    va_list copy;
-    va_copy(copy, args);
-    vfprintf(file, fmt, copy);
-    va_end(copy);
-    fputc('\n', file);
-    fclose(file);
-  }
-  if (input) {
-    fputs("SCTP ", input);
-    va_list copy;
-    va_copy(copy, args);
-    vfprintf(input, fmt, copy);
-    va_end(copy);
-    fputc('\n', input);
-    fclose(input);
-  }
-  if (trace) {
-    fputs("SCTP ", trace);
-    vfprintf(trace, fmt, args);
-    fputc('\n', trace);
-    fclose(trace);
-  }
+  vsnprintf(message + 5, sizeof(message) - 5, fmt, args);
   va_end(args);
+  callback(message);
+  errno = saved_errno;
 }
 
 #if CONFIG_USE_USRSCTP
@@ -916,7 +903,11 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
 #if CONFIG_USE_USRSCTP
   pthread_mutex_lock(&sctp_runtime_mutex);
   if (!sctp || !dtls_srtp || !sctp_runtime_initialized || sctp->sock) {
+    const int initialized = sctp_runtime_initialized;
+    const int socket_present = sctp && sctp->sock != NULL;
     pthread_mutex_unlock(&sctp_runtime_mutex);
+    sctp_diag_log("create_failed step=runtime initialized=%d context=%d dtls=%d socket=%d errno=%d",
+                  initialized, sctp != NULL, dtls_srtp != NULL, socket_present, EINVAL);
     errno = EINVAL;
     return -1;
   }
@@ -928,6 +919,8 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     sctp->message_buf = NULL;
     sctp->transport = NULL;
     pthread_mutex_unlock(&sctp_runtime_mutex);
+    sctp_diag_log("create_failed step=allocation errno=%d", ENOMEM);
+    errno = ENOMEM;
     return -1;
   }
   sctp->message_len = 0;
@@ -949,6 +942,8 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
                                        sctp_incoming_data_cb, NULL, 0, sctp);
 
   if (!sock) {
+    const int socket_errno = errno;
+    sctp_diag_log("create_failed step=socket errno=%d", socket_errno);
     LOGE("usrsctp_socket failed");
     usrsctp_deregister_address(sctp);
     free(sctp->message_buf);
@@ -957,10 +952,12 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     sctp->transport = NULL;
     sctp->dtls_srtp = NULL;
     pthread_mutex_unlock(&sctp_runtime_mutex);
+    errno = socket_errno;
     return -1;
   }
   sctp->sock = sock;
 
+  const char* setup_step = "nonblocking";
   do {
     if (usrsctp_set_non_blocking(sock, 1) < 0) {
       LOGE("usrsctp_set_non_blocking failed");
@@ -970,20 +967,27 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     struct linger lopt;
     lopt.l_onoff = 1;
     lopt.l_linger = 0;
+    setup_step = "linger";
     if (usrsctp_setsockopt(sock, SOL_SOCKET, SO_LINGER, &lopt, sizeof(lopt)) < 0)
       break;
     const int send_buffer = SCTP_SEND_BUFFER_SIZE;
     const int receive_buffer = SCTP_RECEIVE_BUFFER_SIZE;
     const int interleave = 0;
-    if (usrsctp_setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof(send_buffer)) < 0 ||
-        usrsctp_setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer)) < 0 ||
-        usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_FRAGMENT_INTERLEAVE, &interleave, sizeof(interleave)) < 0)
+    setup_step = "send_buffer";
+    if (usrsctp_setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &send_buffer, sizeof(send_buffer)) < 0)
+      break;
+    setup_step = "receive_buffer";
+    if (usrsctp_setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &receive_buffer, sizeof(receive_buffer)) < 0)
+      break;
+    setup_step = "fragment_interleave";
+    if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_FRAGMENT_INTERLEAVE, &interleave, sizeof(interleave)) < 0)
       break;
 
     struct sctp_paddrparams peer_param = {0};
     peer_param.spp_address.ss_family = AF_CONN;
     peer_param.spp_flags = SPP_PMTUD_DISABLE;
     peer_param.spp_pathmtu = SCTP_MTU - 12;
+    setup_step = "path_mtu";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_PEER_ADDR_PARAMS, &peer_param, sizeof(peer_param)) < 0)
       break;
 
@@ -991,16 +995,19 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     rto.srto_initial = 200;
     rto.srto_min = 100;
     rto.srto_max = 1000;
+    setup_step = "retransmission_timeout";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_RTOINFO, &rto, sizeof(rto)) < 0)
       break;
 
     struct sctp_assoc_value av;
     av.assoc_id = SCTP_ALL_ASSOC;
     av.assoc_value = SCTP_ENABLE_RESET_STREAM_REQ | SCTP_ENABLE_CHANGE_ASSOC_REQ;
+    setup_step = "stream_reset";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_ENABLE_STREAM_RESET, &av, sizeof(av)) < 0)
       break;
 
     uint32_t nodelay = 1;
+    setup_step = "nodelay";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_NODELAY, &nodelay, sizeof(nodelay)) < 0)
       break;
 
@@ -1009,6 +1016,7 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     event.se_assoc_id = SCTP_ALL_ASSOC;
     event.se_on = 1;
     event.se_type = SCTP_ASSOC_CHANGE;
+    setup_step = "association_events";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_EVENT, &event, sizeof(event)) < 0)
       break;
 
@@ -1016,6 +1024,7 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     memset(&init_msg, 0, sizeof init_msg);
     init_msg.sinit_num_ostreams = 300;
     init_msg.sinit_max_instreams = 300;
+    setup_step = "initial_streams";
     if (usrsctp_setsockopt(sock, IPPROTO_SCTP, SCTP_INITMSG, &init_msg, sizeof init_msg) < 0)
       break;
 
@@ -1027,6 +1036,7 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     sconn.sconn_family = AF_CONN;
     sconn.sconn_port = htons(sctp->local_port);
     sconn.sconn_addr = (void*)sctp;
+    setup_step = "bind";
     ret = usrsctp_bind(sock, (struct sockaddr*)&sconn, sizeof(sconn));
     sctp_diag_log("bind ret=%d errno=%d localPort=%d", ret, ret < 0 ? errno : 0, sctp->local_port);
     if (ret < 0)
@@ -1041,11 +1051,14 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
     rconn.sconn_family = AF_CONN;
     rconn.sconn_port = htons(sctp->remote_port);
     rconn.sconn_addr = (void*)sctp;
+    setup_step = "connect";
     ret = usrsctp_connect(sock, (struct sockaddr*)&rconn, sizeof(struct sockaddr_conn));
-    sctp_diag_log("connect ret=%d errno=%d remotePort=%d", ret, ret < 0 ? errno : 0, sctp->remote_port);
+    const int connect_errno = errno;
+    sctp_diag_log("connect ret=%d errno=%d remotePort=%d", ret, ret < 0 ? connect_errno : 0, sctp->remote_port);
 
-    if (ret < 0 && errno != EINPROGRESS) {
+    if (ret < 0 && connect_errno != EINPROGRESS) {
       LOGE("connect error");
+      errno = connect_errno;
       break;
     }
 
@@ -1053,9 +1066,12 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
 
   } while (0);
 
+  const int setup_errno = errno;
   pthread_mutex_unlock(&sctp_runtime_mutex);
   if (ret < 0) {
+    sctp_diag_log("create_failed step=%s errno=%d", setup_step, setup_errno);
     sctp_destroy_association(sctp);
+    errno = setup_errno;
     return -1;
   }
 

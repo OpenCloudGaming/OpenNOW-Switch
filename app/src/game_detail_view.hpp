@@ -2,10 +2,12 @@
 
 #include "gfn_client.hpp"
 #include "models.hpp"
+#include "ui_theme.hpp"
 
 #include <borealis.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -34,11 +36,14 @@ class GameDetailView : public brls::Box
   public:
     GameDetailView(const GfnClient& client, GameDetailData data);
     ~GameDetailView() override;
+    brls::View* getDefaultFocus() override;
 
   private:
     void Play();
     void ShowStoreSelector(bool launch_after_selection);
     void LaunchSelectedVariant();
+    void DeferredLaunchSelectedVariant(std::uint64_t generation,
+                                      const std::string& launch_app_id);
     void CreateSwitchShortcut();
     void UpdateStoreButton();
     void OpenNteCredentialsMenu();
@@ -48,12 +53,14 @@ class GameDetailView : public brls::Box
 
     GfnClient client_;
     GameDetailData data_;
-    brls::Button* store_button_ = nullptr;
-    brls::Button* nte_button_ = nullptr;
+    ui::ActionRow* play_button_ = nullptr;
+    ui::ActionRow* store_button_ = nullptr;
+    ui::ActionRow* nte_button_ = nullptr;
     std::shared_ptr<std::atomic_bool> alive_ =
         std::make_shared<std::atomic_bool>(true);
     size_t selected_variant_index_ = 0;
     bool launcher_preference_loaded_ = false;
+    std::uint64_t account_generation_ = 0;
 };
 
 GameDetailData MakeLibraryGameDetail(const GameInfo& game);

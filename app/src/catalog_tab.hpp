@@ -57,6 +57,7 @@ class CatalogTab : public brls::Box
     bool paging_button_attached_               = false;
     std::shared_ptr<std::atomic_bool> alive_   = std::make_shared<std::atomic_bool>(true);
     std::string search_query_                  = "";
+    std::string interface_language_;
     size_t filtered_count_                     = 0;
     size_t page_index_                         = 0;
     size_t store_filter_index_                 = 0;

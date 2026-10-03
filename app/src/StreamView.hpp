@@ -8,6 +8,8 @@
 #include "nte_credentials.hpp"
 #include "stream_end_policy.hpp"
 #include "stream_overlay_policy.hpp"
+#include "stream_overlay_view.hpp"
+#include "stream_settings.hpp"
 #include "webrtc_session.hpp"
 
 #include <array>
@@ -33,7 +35,8 @@ public:
         const std::vector<opennow::IceServerInfo>& ice_servers,
         const opennow::GfnClient& client,
         const opennow::AuthSession& auth,
-        const std::string& game_title);
+        const std::string& game_title,
+        const opennow::StreamSettings& settings);
     ~StreamView() override;
 
     void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style, brls::FrameContext* ctx) override;
@@ -49,11 +52,13 @@ public:
         const std::vector<opennow::IceServerInfo>& ice_servers,
         const opennow::GfnClient& client,
         const opennow::AuthSession& auth,
-        const std::string& game_title);
+        const std::string& game_title,
+        const opennow::StreamSettings& settings);
 
 private:
     void ExitStream();
     void StopCloudSessionAsync();
+    void RecordLifecycleEvent(const char* event);
     void DrawDebugOverlay(NVGcontext* vg, float x, float y, float width);
     void DrawPreparingStream(NVGcontext* vg, float x, float y, float width, float height);
     void UpdatePerformanceCounter();
@@ -141,6 +146,9 @@ private:
     bool debug_diagnostics_ = false;
     bool stats_overlay_enabled_ = false;
     bool stream_overlay_visible_ = false;
+    std::unique_ptr<opennow::StreamOverlayView> stream_overlay_view_;
+    std::chrono::steady_clock::time_point stream_overlay_next_sample_ {};
+    std::int64_t stream_overlay_elapsed_seconds_ = -1;
     bool stream_overlay_b_was_down_ = false;
     bool overlay_chord_latched_ = false;
     opennow::input::OverlayChordState overlay_chord_state_;

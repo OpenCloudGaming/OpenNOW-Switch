@@ -13,7 +13,7 @@ int main()
     frame->colorspace = AVCOL_SPC_BT709;
     assert(av_frame_get_buffer(frame, 32) == 0);
     {
-        DKVideoRenderer renderer;
+        DKVideoRenderer renderer("Adaptive");
         for (const auto range : {AVCOL_RANGE_MPEG, AVCOL_RANGE_JPEG, AVCOL_RANGE_MPEG}) {
             frame->color_range = range;
             deko_test::completed = deko_test::submitted;

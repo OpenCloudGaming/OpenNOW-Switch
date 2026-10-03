@@ -16,6 +16,7 @@ struct GameCardDisplay
     std::string subtitle;
     std::string badge;
     std::string image_url;
+    bool in_library = false;
 };
 
 class GameCardView : public brls::Box

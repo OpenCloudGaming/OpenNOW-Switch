@@ -74,7 +74,7 @@ void SettingsTab::BuildStreamPage()
         "Use automatic routing or choose a specific GeForce NOW data center.");
     location->addView(MakeOptionRow(
         "Location",
-        "Locations are ranked by direct latency from this console.",
+        "Use automatic routing or choose a specific GeForce NOW data center.",
         [this] { return ServerLocationValue(); },
         [this](brls::View* view) { return ChooseServerLocation(view); }));
     location->addView(MakeActionRow(
@@ -101,10 +101,10 @@ void SettingsTab::BuildStreamPage()
     video->addView(MakeOptionRow(
         "Bitrate", "Higher values improve motion detail but need stronger Wi-Fi.",
         [this] {
-            return std::to_string(draft_settings_.bitrate_kbps / 1000) + " Mbps";
+            return BitrateValue(draft_settings_.bitrate_kbps);
         },
         [this](brls::View* view) { return CycleBitrate(view); }));
-    AddInfoLine(video, "Encoder", "H.264");
+    AddInfoLine(video, "Encoder", draft_settings_.codec);
     video->addView(MakeOptionRow(
         "Decoder", "Choose automatic fallback, hardware-only or software-only decode.",
         [this] {
@@ -122,24 +122,6 @@ void SettingsTab::BuildStreamPage()
         [this](brls::View* view) { return CycleImageQuality(view); }));
     content_container_->addView(video);
 
-    auto* connection = MakeSection(
-        "Connection",
-        "Optional routing for NVIDIA catalog, session creation and queue requests.");
-    connection->addView(MakeOptionRow(
-        "Zortos community proxy",
-        "Streaming, signaling and account authentication always stay direct.",
-        [this] {
-            if (community_proxy_provisioning_)
-                return std::string("Connecting...");
-            return draft_settings_.community_proxy_enabled
-                ? std::string("Enabled")
-                : std::string("Disabled");
-        },
-        [this](brls::View* view) { return ToggleCommunityProxy(view); }));
-    content_container_->addView(connection);
-
-    if (!server_locations_loaded_ && !server_locations_loading_)
-        BeginServerLocationLoad(false, false);
 }
 
 void SettingsTab::BuildPreferencesPage()
@@ -205,6 +187,18 @@ void SettingsTab::BuildAppPage()
         "When minimized, pop a reminder when queue drops to this position. Choose 5, 10, 20 or 50.",
         [this] { return std::to_string(draft_settings_.queue_notify_threshold); },
         [this](brls::View* view) { return CycleQueueNotifyThreshold(view); }));
+    interface->addView(MakeOptionRow(
+        "Debug diagnostics",
+        "Enable diagnostic logging for troubleshooting. Applies after saving.",
+        [this] {
+            return draft_settings_.debug_diagnostics
+                ? std::string("Enabled") : std::string("Disabled");
+        },
+        [this](brls::View*) {
+            draft_settings_.debug_diagnostics = !draft_settings_.debug_diagnostics;
+            MarkDirty();
+            return true;
+        }));
     content_container_->addView(interface);
 
     auto* shortcuts = MakeSection(

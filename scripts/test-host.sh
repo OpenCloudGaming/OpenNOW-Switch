@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+python3 tests/ui_font_assets_test.py
 bash scripts/test-streaming-host.sh
 
 out="$(mktemp -d)"
@@ -22,9 +23,9 @@ run_cpp() {
 
 for name in app_launch_mode_policy atomic_file_replace auth_policy catalog_paging_policy cloud_launch_state cover_image_worker \
     community_proxy_policy device_identity_policy game_detail_policy \
-    game_grid_navigation home_shortcut_policy library_sort membership_label \
+    game_grid_navigation home_shortcut_policy library_sort library_timetable_policy membership_label \
     membership_tier_policy nro_shortcut_policy remote_candidate_policy \
-    server_location_policy session_error_policy startup_callback_policy subscription_display \
+    server_location_policy session_error_policy settings_tab_equality startup_callback_policy subscription_display \
     ui_refresh_policy ui_text_policy; do
     run_cpp "$name"
 done
@@ -34,6 +35,7 @@ run_cpp localization app/src/localization.cpp
 run_cpp nte_credentials app/src/nte_credentials.cpp
 run_cpp play_history_policy app/src/play_history.cpp -ljansson
 run_cpp stream_settings_persistence app/src/stream_settings.cpp app/src/localization.cpp -ljansson
+run_cpp community_proxy_retirement app/src/stream_settings.cpp app/src/localization.cpp -ljansson
 run_cpp queue_notify_settings app/src/stream_settings.cpp app/src/localization.cpp -ljansson
 run_cpp app_state_session_generation app/src/app_state.cpp
 run_cpp auth_client_token_refresh -ffunction-sections -fdata-sections -Wl,--gc-sections \
