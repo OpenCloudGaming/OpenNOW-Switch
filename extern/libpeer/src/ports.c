@@ -169,6 +169,17 @@ uint32_t ports_get_monotonic_time(void) {
 #endif
 }
 
+uint64_t ports_get_monotonic_time_us(void) {
+#if CONFIG_USE_LWIP
+  return (uint64_t)sys_now() * 1000;
+#else
+  struct timespec time;
+  if (clock_gettime(CLOCK_MONOTONIC, &time) != 0)
+    return 0;
+  return (uint64_t)time.tv_sec * 1000000 + (uint64_t)(time.tv_nsec / 1000);
+#endif
+}
+
 void ports_sleep_ms(int ms) {
 #if CONFIG_USE_LWIP
   sys_msleep(ms);

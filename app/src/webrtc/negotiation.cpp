@@ -142,10 +142,25 @@ std::vector<std::string> FindRtcpFbForPayload(const std::vector<std::string>& li
     std::vector<std::string> feedback;
     const std::string prefix = "a=rtcp-fb:" + std::to_string(payload_type) + " ";
     for (const auto& line : lines) {
-        if (line == prefix + "nack" || line == prefix + "nack pli")
+        if (line == prefix + "nack" || line == prefix + "nack pli" || line == prefix + "transport-cc")
             feedback.push_back(line);
     }
     return feedback;
+}
+
+std::string FindTransportCcExtmap(const std::vector<std::string>& lines)
+{
+    static const std::string kUri =
+        "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01";
+    for (const auto& line : lines) {
+        if (!StartsWithString(line, "a=extmap:") || line.find(kUri) == std::string::npos)
+            continue;
+        const size_t id_end = line.find_first_of(" /", 9);
+        if (id_end == std::string::npos || id_end == 9)
+            continue;
+        return line.substr(0, id_end) + " " + kUri;
+    }
+    return "";
 }
 
 int SelectOfferH264PayloadType(const std::string& offer_sdp)
@@ -345,6 +360,7 @@ std::string AdaptAnswerSdpToOffer(
     const std::vector<std::string> offer_lines = SplitSdpLines(offer_sdp);
     const std::string offer_h264_fmtp = FindFmtpForPayload(offer_lines, h264_payload_type);
     const std::vector<std::string> offer_h264_feedback = FindRtcpFbForPayload(offer_lines, h264_payload_type);
+    const std::string offer_transport_cc_extmap = FindTransportCcExtmap(offer_lines);
     std::string offer_audio_red_rtpmap;
     std::string offer_audio_red_fmtp;
     bool offer_in_audio = false;
@@ -398,6 +414,14 @@ std::string AdaptAnswerSdpToOffer(
                 if (!offer_audio_red_fmtp.empty())
                     out.push_back(offer_audio_red_fmtp);
             }
+            std::vector<std::string> audio_payloads{"111"};
+            if (!offer_audio_red_rtpmap.empty())
+                audio_payloads.push_back("63");
+            for (const auto& audio_payload : audio_payloads) {
+                const std::string feedback = "a=rtcp-fb:" + audio_payload + " transport-cc";
+                if (std::find(offer_lines.begin(), offer_lines.end(), feedback) != offer_lines.end())
+                    out.push_back(feedback);
+            }
             audio_red_added = true;
             continue;
         }
@@ -443,6 +467,9 @@ std::string AdaptAnswerSdpToOffer(
             out.push_back("a=recvonly");
             continue;
         }
+
+        if ((in_video || in_audio) && line == "a=rtcp-mux" && !offer_transport_cc_extmap.empty())
+            out.push_back(offer_transport_cc_extmap);
 
         out.push_back(line);
     }

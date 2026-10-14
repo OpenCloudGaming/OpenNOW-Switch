@@ -14,6 +14,8 @@ uint32_t ports_get_epoch_time();
 
 uint32_t ports_get_monotonic_time(void);
 
+uint64_t ports_get_monotonic_time_us(void);
+
 void ports_sleep_ms(int ms);
 
 #endif  // PORTS_H_

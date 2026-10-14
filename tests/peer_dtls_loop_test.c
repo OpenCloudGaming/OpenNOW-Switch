@@ -91,6 +91,7 @@ void sctp_onmessage(Sctp* sctp, void (*callback)(char*, size_t, void*, uint16_t)
 int sctp_is_connected(Sctp* sctp) { (void)sctp; return 1; }
 uint32_t ports_get_epoch_time(void) { return 1; }
 uint32_t ports_get_monotonic_time(void) { return 1; }
+uint64_t ports_get_monotonic_time_us(void) { return 1; }
 int addr_to_string(const Address* address, char* buffer, size_t size) {
   (void)address;
   if (size) buffer[0] = 0;

@@ -3,6 +3,7 @@
 #include "../extern/libpeer/src/peer_connection.c"
 
 static uint32_t now_ms;
+static uint64_t now_us;
 static int sender_reports;
 static int keyframe_requests;
 static int protect_calls;
@@ -14,6 +15,10 @@ static int sent_size;
 
 uint32_t ports_get_monotonic_time(void) {
   return now_ms;
+}
+
+uint64_t ports_get_monotonic_time_us(void) {
+  return now_us;
 }
 
 int dtls_srtp_encrypt_rctp_packet(DtlsSrtp* dtls, uint8_t* packet, int* bytes) {
@@ -128,6 +133,52 @@ static void sending_reports(PeerConnection* pc) {
   assert(protect_calls == 4 && send_calls == 3);
 }
 
+static void transport_feedback(PeerConnection* pc) {
+  pc->state = PEER_CONNECTION_COMPLETED;
+  protect_result = 0;
+  send_result = 0;
+  const int sends = send_calls;
+  now_us = 1000000;
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends);
+
+  twcc_receiver_init(&pc->twcc, 3);
+  uint8_t rtp[20] = {0x90, 96, 0, 1, 0, 0, 0, 0, 0, 0, 0, 42,
+                     0xBE, 0xDE, 0, 1, 0x31, 0x00, 0x07, 0};
+  assert(twcc_receiver_record(&pc->twcc, rtp, sizeof(rtp), now_us));
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 1);
+  assert(sent_size == 24 + 4);
+  assert(sent_packet[0] == 0xaf && sent_packet[1] == RTCP_RTPFB);
+  assert(sent_packet[7] == 1 && sent_packet[11] == 42);
+  assert(sent_packet[12] == 0 && sent_packet[13] == 7);
+  assert(sent_packet[14] == 0 && sent_packet[15] == 1);
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 1);
+
+  rtp[18] = 8;
+  now_us += 10000;
+  assert(twcc_receiver_record(&pc->twcc, rtp, sizeof(rtp), now_us));
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 1);
+  now_us += TWCC_FEEDBACK_INTERVAL_US;
+  send_result = -1;
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 2 && pc->twcc_send_failures == 1);
+  assert(sent_packet[13] == 8);
+
+  send_result = 0;
+  rtp[18] = 9;
+  now_us += TWCC_FEEDBACK_INTERVAL_US;
+  assert(twcc_receiver_record(&pc->twcc, rtp, sizeof(rtp), now_us));
+  pc->state = PEER_CONNECTION_DISCONNECTED;
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 2);
+  pc->state = PEER_CONNECTION_COMPLETED;
+  peer_connection_maybe_send_transport_feedback(pc);
+  assert(send_calls == sends + 3 && sent_packet[13] == 9);
+}
+
 int main(void) {
   PeerConnection pc = {0};
   pc.remote_vssrc = 42;
@@ -137,5 +188,6 @@ int main(void) {
   pc.config.on_request_keyframe = on_keyframe_request;
   incoming_validation(&pc);
   sending_reports(&pc);
+  transport_feedback(&pc);
   return 0;
 }
