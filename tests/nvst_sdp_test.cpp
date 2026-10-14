@@ -37,8 +37,8 @@ int main()
 
     for (const auto& line : {
         "a=video.maxFPS:60",
-        "a=video.initialBitrateKbps:4000",
-        "a=video.initialPeakBitrateKbps:4000",
+        "a=video.initialBitrateKbps:12000",
+        "a=video.initialPeakBitrateKbps:12000",
         "a=vqos.bw.maximumBitrateKbps:12000",
         "a=vqos.bw.minimumBitrateKbps:4000",
         "a=vqos.dynamicStreamingMode:0",
@@ -67,7 +67,7 @@ int main()
     settings.bitrate_kbps = 20000;
     const std::string quality_sdp = opennow::webrtc::BuildNvstSdp(
         answer, settings, opennow::webrtc::RiInputCapabilities {});
-    assert(HasLine(quality_sdp, "a=video.initialBitrateKbps:5000"));
+    assert(HasLine(quality_sdp, "a=video.initialBitrateKbps:20000"));
     assert(HasLine(quality_sdp, "a=vqos.bw.maximumBitrateKbps:20000"));
     return 0;
 }

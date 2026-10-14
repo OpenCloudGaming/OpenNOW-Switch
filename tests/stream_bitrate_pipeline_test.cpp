@@ -43,7 +43,7 @@ void CheckNegotiatedSettings(const opennow::StreamSettings& settings)
     };
     assert(has_line("a=vqos.bw.maximumBitrateKbps:" + std::to_string(settings.bitrate_kbps)));
     assert(has_line("a=vqos.bw.minimumBitrateKbps:4000"));
-    const std::string startup = std::to_string(std::max(4000, settings.bitrate_kbps / 4));
+    const std::string startup = std::to_string(std::max(4000, settings.bitrate_kbps));
     assert(has_line("a=video.initialBitrateKbps:" + startup));
     assert(has_line("a=video.initialPeakBitrateKbps:" + startup));
     assert(has_line("a=video.maxFPS:" + std::to_string(settings.fps)));

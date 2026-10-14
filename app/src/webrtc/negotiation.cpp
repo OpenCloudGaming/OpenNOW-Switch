@@ -722,6 +722,25 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
                             nvst_offer && json_is_string(nvst_offer) ? json_string_value(nvst_offer) : "";
                         if (!nvst_offer_sdp.empty())
                             AppendSdpSummary("OFFER NVST SDP", nvst_offer_sdp);
+                        if (settings_.debug_diagnostics) {
+                            int logged_attributes = 0;
+                            for (const auto& line : SplitSdpLines(offer_sdp)) {
+                                if (logged_attributes < 24 &&
+                                    (StartsWith(line, "a=rtcp-fb:") || StartsWith(line, "a=extmap:"))) {
+                                    AppendStreamLog("SDP offer_feedback " + line);
+                                    logged_attributes++;
+                                }
+                            }
+                            for (const auto& line : SplitSdpLines(nvst_offer_sdp)) {
+                                if (logged_attributes < 72 &&
+                                    (line.find("itrate") != std::string::npos ||
+                                     StartsWith(line, "a=bwe.") ||
+                                     line.find("drc.") != std::string::npos)) {
+                                    AppendStreamLog("SDP offer_nvst " + line);
+                                    logged_attributes++;
+                                }
+                            }
+                        }
                         server_ice_ufrag_ = ExtractSdpValue(offer_sdp, "a=ice-ufrag:");
                         const opennow::webrtc::RiInputCapabilities ri_caps =
                             ParseRiInputCapabilities(offer_sdp);

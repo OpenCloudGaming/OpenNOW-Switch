@@ -194,7 +194,7 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
             char error[512];
             av_strerror(err, error, sizeof(error));
             brls::Logger::error("FFmpeg: Error initializing hardware decoder - {}", error);
-            return -1;
+            return err;
         }
         m_decoder_context->hw_device_ctx = av_buffer_ref(hw_device_ctx);
     } else {

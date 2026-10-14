@@ -42,7 +42,6 @@ std::string BuildNvstSdp(
     const std::string fingerprint = ExtractSdpValue(answer_sdp, "a=fingerprint:sha-256 ");
     const auto tuning = video::ResolveQualityTuning(settings.image_quality_mode);
     const int max_bitrate = std::max(kOfficialMinimumBitrateKbps, settings.bitrate_kbps);
-    const int initial_bitrate = std::max(kOfficialMinimumBitrateKbps, max_bitrate / 4);
 
     const std::vector<std::string> lines = {
         "v=0",
@@ -90,8 +89,8 @@ std::string BuildNvstSdp(
         "a=video.clientViewportWd:" + std::to_string(settings.width),
         "a=video.clientViewportHt:" + std::to_string(settings.height),
         "a=video.maxFPS:" + std::to_string(settings.fps),
-        "a=video.initialBitrateKbps:" + std::to_string(initial_bitrate),
-        "a=video.initialPeakBitrateKbps:" + std::to_string(initial_bitrate),
+        "a=video.initialBitrateKbps:" + std::to_string(max_bitrate),
+        "a=video.initialPeakBitrateKbps:" + std::to_string(max_bitrate),
         "a=vqos.bw.maximumBitrateKbps:" + std::to_string(max_bitrate),
         "a=vqos.bw.minimumBitrateKbps:" + std::to_string(kOfficialMinimumBitrateKbps),
         "a=video.maxNumReferenceFrames:4",
