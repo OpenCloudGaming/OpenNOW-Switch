@@ -56,6 +56,16 @@ __FBSDID("$FreeBSD$");
 #include <netinet/sctp_pcb.h>
 #endif
 
+#if !defined(BYTE_ORDER) && defined(__BYTE_ORDER__)
+#define BYTE_ORDER __BYTE_ORDER__
+#endif
+#if !defined(BIG_ENDIAN) && defined(__ORDER_BIG_ENDIAN__)
+#define BIG_ENDIAN __ORDER_BIG_ENDIAN__
+#endif
+#if !defined(BYTE_ORDER) || !defined(BIG_ENDIAN)
+#error "SCTP CRC32c requires BYTE_ORDER and BIG_ENDIAN"
+#endif
+
 #if !(defined(__FreeBSD__) && !defined(__Userspace__))
 /**
  *

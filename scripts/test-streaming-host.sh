@@ -127,6 +127,8 @@ run_c agent_consent "${sections[@]}" -Iextern/libpeer/third_party/mbedtls/includ
 "$cc" "${cflags[@]}" -Iextern/libpeer/third_party/mbedtls/include \
     -c extern/libpeer/src/peer.c -o "$out/peer_runtime.o"
 run_cpp peer_runtime -Iextern/libpeer/src "$out/peer_runtime.o" -lsrtp2
+SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_usrsctp_crc32c_test.sh
+printf 'PASS usrsctp_crc32c\n'
 SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh
 printf 'PASS sctp_reliability\n'
 SCTP_TEST_SANITIZERS="${OPENNOW_SANITIZERS:-}" bash tests/run_sctp_reliability_test.sh sctp_setup_diagnostic_test.c
