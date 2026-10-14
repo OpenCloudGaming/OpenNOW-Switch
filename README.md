@@ -39,6 +39,16 @@
 <table>
   <tr>
     <td width="50%">
+      <img src="docs/screenshots/gameplay.png" alt="Fortnite streaming at 60 FPS through OpenNOW on Nintendo Switch">
+      <br><sub><strong>In game: 60 FPS at 14.7 Mbps</strong></sub>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/gameplay-stats.png" alt="OpenNOW stream statistics overlay during gameplay on Nintendo Switch">
+      <br><sub><strong>Stream statistics overlay</strong></sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
       <img src="docs/screenshots/store.png" alt="OpenNOW Store on Nintendo Switch">
       <br><sub><strong>Store</strong></sub>
     </td>
