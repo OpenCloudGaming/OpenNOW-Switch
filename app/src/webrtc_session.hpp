@@ -144,6 +144,7 @@ private:
     std::atomic<int> rendered_video_height_ {0};
     std::unique_ptr<AudioPipeline> audio_;
     int decoder_setup_result_ = -1;
+    int hardware_decoder_setup_result_ = 0;
     bool decoder_fallback_used_ = false;
     bool auto_safe_mode_used_ = false;
     bool nvdec_marker_owned_ = false;

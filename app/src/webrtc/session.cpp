@@ -121,6 +121,7 @@ WebRtcSession::WebRtcSession(
         force_software ? VIDEO_DECODER_FORCE_SOFTWARE : VIDEO_DECODER_PREFER_HARDWARE);
 
     if (decoder_setup_result_ != 0 && !force_software) {
+        hardware_decoder_setup_result_ = decoder_setup_result_;
         decoder_->cleanup();
         decoder_ = std::make_unique<FFmpegVideoDecoder>(settings_.image_quality_mode);
         decoder_setup_result_ = decoder_->setup(
@@ -204,6 +205,7 @@ void WebRtcSession::start() {
                     " fallback=" + std::to_string(decoder_fallback_used_ ? 1 : 0) +
                     " crashSafeMode=" + std::to_string(auto_safe_mode_used_ ? 1 : 0) +
                     " decoderSetup=" + std::to_string(decoder_setup_result_) +
+                    " hardwareSetup=" + std::to_string(hardware_decoder_setup_result_) +
                     " expectedFormat=" +
                     std::string(decoder_ && decoder_->uses_hardware_frames()
                         ? "NVTEGRA" : "YUV420P/NV12"));

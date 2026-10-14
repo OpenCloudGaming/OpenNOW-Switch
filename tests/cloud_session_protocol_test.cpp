@@ -28,7 +28,7 @@ int main()
     assert(json_integer_value(json_object_get(features, "maxBitrateKbps")) == 12000);
     assert(json_integer_value(json_object_get(features, "codec")) == 1);
     assert(json_is_false(json_object_get(features, "vsync")));
-    assert(json_integer_value(json_object_get(features, "dynamicStreamingMode")) == 3);
+    assert(json_object_get(features, "dynamicStreamingMode") == nullptr);
     assert(json_integer_value(json_object_get(features, "audioChannelCount")) == 2);
     return 0;
 }

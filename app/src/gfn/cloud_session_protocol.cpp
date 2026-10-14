@@ -393,7 +393,6 @@ std::string BuildSessionBody(
     json_object_set_new(features, "maxBitrateKbps", json_integer(stream_settings.bitrate_kbps));
     json_object_set_new(features, "codec", json_integer(1));
     json_object_set_new(features, "vsync", json_false());
-    json_object_set_new(features, "dynamicStreamingMode", json_integer(3));
     json_object_set_new(features, "audioChannelCount", json_integer(2));
     json_object_set_new(req, "requestedStreamingFeatures", features);
 
