@@ -87,6 +87,10 @@ Install and setup guidance lives in the
 [OpenNOW documentation](https://opennow.zortos.me). Nintendo Switch installation
 requires custom firmware and Homebrew Menu.
 
+> [!IMPORTANT]
+> Overclock the Switch for the best streaming performance. At stock clocks the
+> stream hovers between 45 and 50 FPS instead of a steady 60 FPS.
+
 > [!NOTE]
 > The application currently retains the inherited `SwitchNOW.nro` filename and
 > `sdmc:/switch/SwitchNOW/` data directory for compatibility. Renaming either
