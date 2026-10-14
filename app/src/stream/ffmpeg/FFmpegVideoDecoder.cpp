@@ -125,14 +125,10 @@ int FFmpegVideoDecoder::setup(int video_format, int width, int height,
     }
 #else
     if (video_format & VIDEO_FORMAT_MASK_H264) {
-#if defined(OPENNOW_ENABLE_NVDEC)
-        m_decoder = m_uses_hardware_frames
-            ? avcodec_find_decoder_by_name("h264_nvtegra")
-            : avcodec_find_decoder(AV_CODEC_ID_H264);
-#else
+#if !defined(OPENNOW_ENABLE_NVDEC)
         m_uses_hardware_frames = false;
-        m_decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
 #endif
+        m_decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
     } else if (video_format & VIDEO_FORMAT_MASK_H265) {
         m_decoder = avcodec_find_decoder(AV_CODEC_ID_HEVC);
     } else {
