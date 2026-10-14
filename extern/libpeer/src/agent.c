@@ -27,6 +27,10 @@ void agent_clear_candidates(Agent* agent) {
   agent->nominated_pair = NULL;
   agent->last_binding_request_sent_ms = 0;
   agent->smoothed_binding_rtt_ms = 0;
+  agent->last_consent_request_ms = 0;
+  agent->consent_attempts = 0;
+  agent->consent_requests_sent = 0;
+  agent->binding_responses_received = 0;
 }
 
 int agent_create(Agent* agent) {
@@ -327,17 +331,20 @@ static void agent_create_binding_response(Agent* agent, StunMessage* msg, Addres
   stun_msg_finish(msg, STUN_CREDENTIAL_SHORT_TERM, agent->local_upwd, strlen(agent->local_upwd));
 }
 
-static void agent_create_binding_request(Agent* agent, StunMessage* msg) {
+static void agent_create_binding_request(Agent* agent, StunMessage* msg, int nominate, uint32_t sequence) {
   uint64_t tie_breaker = 0;  // always be controlled
   // send binding request
   stun_msg_create(msg, STUN_CLASS_REQUEST | STUN_METHOD_BINDING);
+  if (sequence != 0)
+    ((StunHeader*)msg->buf)->transaction_id[2] = htonl(sequence);
   char username[584];
   memset(username, 0, sizeof(username));
   snprintf(username, sizeof(username), "%s:%s", agent->remote_ufrag, agent->local_ufrag);
   stun_msg_write_attr(msg, STUN_ATTR_TYPE_USERNAME, strlen(username), username);
   stun_msg_write_attr(msg, STUN_ATTR_TYPE_PRIORITY, 4, (char*)&agent->nominated_pair->priority);
   if (agent->mode == AGENT_MODE_CONTROLLING) {
-    stun_msg_write_attr(msg, STUN_ATTR_TYPE_USE_CANDIDATE, 0, NULL);
+    if (nominate)
+      stun_msg_write_attr(msg, STUN_ATTR_TYPE_USE_CANDIDATE, 0, NULL);
     stun_msg_write_attr(msg, STUN_ATTR_TYPE_ICE_CONTROLLING, 8, (char*)&tie_breaker);
   } else {
     stun_msg_write_attr(msg, STUN_ATTR_TYPE_ICE_CONTROLLED, 8, (char*)&tie_breaker);
@@ -379,6 +386,7 @@ void agent_process_stun_response(Agent* agent, StunMessage* stun_msg) {
           }
           agent->last_binding_request_sent_ms = 0;
         }
+        agent->binding_responses_received++;
         agent->nominated_pair->state = ICE_CANDIDATE_STATE_SUCCEEDED;
         agent->binding_request_time = now_ms;
       }
@@ -533,7 +541,7 @@ int agent_connectivity_check(Agent* agent) {
   if (agent->nominated_pair->conncheck % AGENT_CONNCHECK_PERIOD == 0) {
     addr_to_string(&agent->nominated_pair->remote->addr, addr_string, sizeof(addr_string));
     LOGD("send binding request to remote ip: %s, port: %d", addr_string, agent->nominated_pair->remote->addr.port);
-    agent_create_binding_request(agent, &msg);
+    agent_create_binding_request(agent, &msg, 1, 0);
     if (agent_socket_send(
             agent, &agent->nominated_pair->remote->addr, msg.buf, msg.size) >= 0) {
       agent->last_binding_request_sent_ms = ports_get_epoch_time();
@@ -548,6 +556,26 @@ int agent_connectivity_check(Agent* agent) {
   }
 
   return -1;
+}
+
+int agent_maybe_send_consent_request(Agent* agent, uint32_t now_ms) {
+  StunMessage msg;
+
+  if (!agent->selected_pair || !agent->selected_pair->remote)
+    return 0;
+  if (agent->consent_attempts > 0 &&
+      (uint32_t)(now_ms - agent->last_consent_request_ms) < CONFIG_ICE_CONSENT_INTERVAL_MS)
+    return 0;
+
+  agent->consent_attempts++;
+  agent->last_consent_request_ms = now_ms;
+  memset(&msg, 0, sizeof(msg));
+  agent_create_binding_request(agent, &msg, 0, agent->consent_attempts);
+  if (agent_socket_send(agent, &agent->selected_pair->remote->addr, msg.buf, msg.size) < 0)
+    return -1;
+  agent->consent_requests_sent++;
+  agent->last_binding_request_sent_ms = now_ms;
+  return 1;
 }
 
 int agent_select_candidate_pair(Agent* agent) {

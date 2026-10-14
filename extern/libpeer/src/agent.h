@@ -61,6 +61,10 @@ struct Agent {
   uint64_t binding_request_time;
   uint32_t last_binding_request_sent_ms;
   uint32_t smoothed_binding_rtt_ms;
+  uint32_t last_consent_request_ms;
+  uint32_t consent_attempts;
+  uint32_t consent_requests_sent;
+  uint32_t binding_responses_received;
   AgentState state;
 
   AgentMode mode;
@@ -101,6 +105,8 @@ int agent_select_candidate_pair(Agent* agent);
 int agent_fail_nominated_remote(Agent* agent);
 
 int agent_connectivity_check(Agent* agent);
+
+int agent_maybe_send_consent_request(Agent* agent, uint32_t now_ms);
 
 void agent_clear_candidates(Agent* agent);
 

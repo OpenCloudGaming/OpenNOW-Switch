@@ -839,6 +839,16 @@ int peer_connection_loop(PeerConnection* pc) {
         LOGI("binding request timeout; keeping completed transport alive");
         pc->agent.binding_request_time = ports_get_epoch_time();
       }
+      int consent_ret = agent_maybe_send_consent_request(&pc->agent, ports_get_epoch_time());
+      if (consent_ret != 0 &&
+          (pc->agent.consent_attempts <= 3 || pc->agent.consent_attempts % 24 == 0 || consent_ret < 0)) {
+        peer_connection_diag_log("ice_consent ret=%d attempts=%" PRIu32 " sent=%" PRIu32 " responses=%" PRIu32 " rttMs=%" PRIu32,
+                                 consent_ret,
+                                 pc->agent.consent_attempts,
+                                 pc->agent.consent_requests_sent,
+                                 pc->agent.binding_responses_received,
+                                 pc->agent.smoothed_binding_rtt_ms);
+      }
       rtp_decoder_poll(&pc->vrtp_decoder);
       peer_connection_maybe_send_receiver_report(pc);
 

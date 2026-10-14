@@ -116,6 +116,14 @@ run_c peer_dtls_receive "${sections[@]}" -Wno-unused-but-set-variable \
 run_c peer_dtls_loop "${sections[@]}" -Wno-unused-but-set-variable \
     -Iextern/libpeer/third_party/mbedtls/include extern/libpeer/src/rtcp.c
 run_c agent_socket_poll "${sections[@]}"
+stun_deps=()
+for source in extern/libpeer/src/{stun,utils,address}.c \
+    extern/libpeer/third_party/mbedtls/library/{md,md5,sha1,sha256,sha512,ripemd160,platform_util,constant_time}.c; do
+    object="$out/stun_dep_$(basename "$source" .c).o"
+    "$cc" "${cflags[@]}" -w -Iextern/libpeer/third_party/mbedtls/include "${sections[@]}" -c "$source" -o "$object"
+    stun_deps+=("$object")
+done
+run_c agent_consent "${sections[@]}" -Iextern/libpeer/third_party/mbedtls/include "${stun_deps[@]}"
 "$cc" "${cflags[@]}" -Iextern/libpeer/third_party/mbedtls/include \
     -c extern/libpeer/src/peer.c -o "$out/peer_runtime.o"
 run_cpp peer_runtime -Iextern/libpeer/src "$out/peer_runtime.o" -lsrtp2
