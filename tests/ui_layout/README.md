@@ -44,6 +44,10 @@ For parallel isolated output directories, `--screens-only` before scenario names
 omits only separately assigned guest/empty cases. Run one group without that
 flag so all eight extra cases remain covered. Each attempted case gets a log;
 failures do not stop subsequent cases, and any failure makes the runner nonzero.
+Each case renders on Mesa's software rasterizer, so set `OPENNOW_UI_JOBS` to run
+that many cases at once on separate Xvfb displays. With `LP_NUM_THREADS=1`, one
+case per CPU gives the best throughput. CI splits the matrix into six groups and
+runs `OPENNOW_UI_JOBS=$(nproc)` on each 8-vCPU Blacksmith runner.
 
 ## Assertions
 

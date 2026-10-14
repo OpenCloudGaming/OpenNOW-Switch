@@ -31,8 +31,24 @@ jobs:
         run: bash scripts/test-host.sh
 
   ui-layout:
-    name: Native UI layout
-    runs-on: ubuntu-24.04
+    name: Native UI layout (${{ matrix.group }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: library
+            args: --screens-only library
+          - group: store
+            args: --screens-only store
+          - group: settings
+            args: --screens-only settings
+          - group: detail
+            args: --screens-only detail
+          - group: queue
+            args: --screens-only queue
+          - group: overlay and guest/empty
+            args: overlay
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -47,16 +63,18 @@ jobs:
       - name: Build native UI layout test
         run: |
           cmake -S tests/ui_layout -B build/ui-layout -G Ninja -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build/ui-layout -j4
+          cmake --build build/ui-layout -j"$(nproc)"
 
       - name: Check native UI layout
-        run: bash tests/ui_layout/run.sh build/ui-layout/ui_layout build/ui-evidence
+        env:
+          LP_NUM_THREADS: "1"
+        run: OPENNOW_UI_JOBS="$(nproc)" bash tests/ui_layout/run.sh build/ui-layout/ui_layout build/ui-evidence ${{ matrix.args }}
 
       - name: Upload native UI evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: native-ui-evidence
+          name: native-ui-evidence-${{ strategy.job-index }}
           path: build/ui-evidence
           if-no-files-found: ignore
           retention-days: 7
