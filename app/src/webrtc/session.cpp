@@ -365,6 +365,16 @@ void WebRtcSession::poll() {
 
     if (signaling_client_) {
         signaling_client_->poll();
+        if (signaling_ready_ && !signaling_loss_logged_ && !signaling_client_->is_connected()) {
+            signaling_loss_logged_ = true;
+            const auto since_start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - session_started_at_).count();
+            AppendStreamLog("SIGNAL disconnected reason=" + signaling_client_->get_last_error() +
+                            " sinceStartMs=" + std::to_string(since_start_ms) +
+                            " rx=" + std::to_string(signaling_rx_count_) +
+                            " answerSent=" + std::to_string(answer_sent_ ? 1 : 0) +
+                            " remoteTrickle=" + std::to_string(remote_trickle_received_ ? 1 : 0));
+        }
     }
 
     maybe_send_keepalive();

@@ -136,6 +136,7 @@ private:
     bool manual_candidate_added_ = false;
     bool remote_trickle_received_ = false;
     bool answer_sent_ = false;
+    bool signaling_loss_logged_ = false;
     std::unique_ptr<SignalingClient> signaling_client_;
     struct PeerConnection* pc_ = nullptr;
     std::unique_ptr<FFmpegVideoDecoder> decoder_;
