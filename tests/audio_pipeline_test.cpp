@@ -26,6 +26,7 @@ int starts = 0;
 int stops = 0;
 u64 played_samples = 0;
 bool release_output = false;
+bool played_counter_stuck = false;
 
 template <typename Predicate>
 void await(Predicate predicate)
@@ -85,7 +86,7 @@ PcmFormat audoutGetPcmFormat() { return PcmFormat_Int16; }
 Result audoutGetAudioOutPlayedSampleCount(u64* samples)
 {
     std::lock_guard lock(mutex);
-    *samples = played_samples;
+    *samples = played_counter_stuck ? 0 : played_samples;
     return 0;
 }
 Result audoutGetReleasedAudioOutBuffer(AudioOutBuffer** buffer, u32* count)
@@ -263,6 +264,46 @@ static void check_red_recovery()
     pipeline.stop();
 }
 
+static void check_stuck_played_counter()
+{
+    {
+        std::lock_guard lock(mutex);
+        played_counter_stuck = true;
+        release_output = true;
+    }
+    AudioPipeline pipeline;
+    pipeline.configure(1000, 30);
+    assert(pipeline.start());
+    constexpr uint16_t kPackets = 120;
+    for (uint16_t sequence = 0; sequence < kPackets; ++sequence) {
+        uint8_t payload[] = {0xf0, static_cast<uint8_t>(sequence)};
+        PeerAudioPacket packet {};
+        packet.data = payload;
+        packet.size = sizeof(payload);
+        packet.timestamp = 480u * sequence;
+        packet.ssrc = 1;
+        packet.sequence = sequence;
+        packet.payload_type = 111;
+        pipeline.submit(packet);
+        if (sequence >= 8)
+            await([sequence] { return decoded_sequences.size() + 8 > sequence; });
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pipeline.debug_info().find("Audio rx/decoded/errors: 120/120/0") == std::string::npos) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    {
+        std::lock_guard lock(mutex);
+        std::printf("Stuck audout played counter: %zu decoded, %zu appended\n",
+                    decoded_sequences.size(), reclaim_queries_at_append.size());
+        std::fflush(stdout);
+        assert(reclaim_queries_at_append.size() == kPackets);
+    }
+    assert(pipeline.debug_info().find("gaps/late/drop: 0/0/0") != std::string::npos);
+    pipeline.stop();
+}
+
 int main(int argc, char** argv)
 {
     if (argc > 1) {
@@ -270,6 +311,8 @@ int main(int argc, char** argv)
             check_output_timeline();
         else if (std::string(argv[1]) == "red")
             check_red_recovery();
+        else if (std::string(argv[1]) == "stuck_counter")
+            check_stuck_played_counter();
         else {
             assert(std::string(argv[1]) == "ssrc");
             check_ssrc_timeline();

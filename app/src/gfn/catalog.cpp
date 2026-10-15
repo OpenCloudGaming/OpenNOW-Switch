@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -26,12 +27,11 @@ constexpr const char* kGraphQlEndpoint     = "https://games.geforce.com/graphql"
 constexpr const char* kClientVersion       = "2.0.80.173";
 constexpr const char* kLcarsClientId       = "ec7e38d4-03af-4b58-b131-cfb0495903ab";
 constexpr const char* kDefaultLocale       = "en_US";
-constexpr const char* kPanelsQueryHash = "f8e26265a5db5c20e1334a6872cf04b6e3970507697f6ae55a6ddefa5420daf0";
-constexpr const char* kLibraryWithTimeQueryHash = "039e8c0d553972975485fee56e59f2549d2fdb518e247a42ab5022056a74406f";
 constexpr const char* kPlayOrigin          = "https://play.geforcenow.com";
 constexpr const char* kPlayReferer         = "https://play.geforcenow.com/";
 constexpr std::size_t kCatalogPageSize = 60;
 constexpr std::size_t kCatalogPageBytes = 4 * 1024 * 1024;
+constexpr std::size_t kMaxLibraryPages = 50;
 
 std::vector<std::string> BuildGfnLcarsHeaders(
     const std::string& token,
@@ -251,24 +251,6 @@ void ThrowIfGraphQlFailed(json_t* root)
     throw std::runtime_error(message);
 }
 
-std::string BuildLibraryUrl(const std::string& vpc_id, bool with_library_time)
-{
-    const std::string variables =
-        std::string("{\"vpcId\":\"") + vpc_id + "\",\"locale\":\"" + kDefaultLocale +
-        "\",\"panelNames\":[\"LIBRARY\"]}";
-
-    const std::string extensions =
-        std::string("{\"persistedQuery\":{\"sha256Hash\":\"") +
-        (with_library_time ? kLibraryWithTimeQueryHash : kPanelsQueryHash) + "\"}}";
-
-    std::string url = std::string(kGraphQlEndpoint) + "?";
-    url += "requestType=" + UrlEncode("panels/Library");
-    url += "&extensions=" + UrlEncode(extensions);
-    url += "&huId=" + UrlEncode(HexEncode(GenerateRandomBytes(8).data(), 8));
-    url += "&variables=" + UrlEncode(variables);
-    return url;
-}
-
 std::string ResolveVpcId(
     const HttpClient& http_client,
     const AuthSession& session)
@@ -293,66 +275,6 @@ std::string ResolveVpcId(
     return server_id.empty() ? std::string("GFN-PC") : server_id;
 }
 
-std::vector<GameInfo> ParseLibraryGames(JsonPtr& root)
-{
-    ThrowIfGraphQlFailed(root.get());
-
-    std::unordered_map<std::string, size_t> index_by_id;
-    std::vector<GameInfo> games;
-
-    json_t* data   = json_object_get(root.get(), "data");
-    json_t* panels = data ? json_object_get(data, "panels") : nullptr;
-    if (!json_is_array(panels))
-        return {};
-
-    size_t panel_index = 0;
-    json_t* panel      = nullptr;
-    json_array_foreach(panels, panel_index, panel)
-    {
-        json_t* sections = json_object_get(panel, "sections");
-        if (!json_is_array(sections))
-            continue;
-
-        size_t section_index = 0;
-        json_t* section      = nullptr;
-        json_array_foreach(sections, section_index, section)
-        {
-            json_t* items = json_object_get(section, "items");
-            if (!json_is_array(items))
-                continue;
-
-            size_t item_index = 0;
-            json_t* item      = nullptr;
-            json_array_foreach(items, item_index, item)
-            {
-                if (GetString(item, "__typename") != "GameItem")
-                    continue;
-
-                json_t* app = json_object_get(item, "app");
-                if (!json_is_object(app))
-                    continue;
-
-                GameInfo game = ParseApp(app);
-                if (game.id.empty() || game.title.empty())
-                    continue;
-
-                const auto existing = index_by_id.find(game.id);
-                if (existing == index_by_id.end())
-                {
-                    index_by_id.emplace(game.id, games.size());
-                    games.push_back(std::move(game));
-                }
-                else
-                {
-                    MergeGame(games[existing->second], game);
-                }
-            }
-        }
-    }
-
-    return games;
-}
-
 PublicGame ToPublicGame(const GameInfo& source)
 {
     PublicGame game;
@@ -375,10 +297,17 @@ PublicGame ToPublicGame(const GameInfo& source)
     return game;
 }
 
-CatalogPage ParseCatalogPage(JsonPtr& root, const std::string& cursor)
+struct AppsPage
+{
+    std::vector<GameInfo> games;
+    std::optional<std::string> next_cursor;
+    std::optional<std::size_t> total_count;
+};
+
+AppsPage ParseAppsPage(JsonPtr& root, const std::string& cursor)
 {
     ThrowIfGraphQlFailed(root.get());
-    CatalogPage page;
+    AppsPage page;
 
     json_t* data = json_object_get(root.get(), "data");
     json_t* apps = data ? json_object_get(data, "apps") : nullptr;
@@ -409,8 +338,19 @@ CatalogPage ParseCatalogPage(JsonPtr& root, const std::string& cursor)
     {
         GameInfo parsed = ParseApp(app);
         if (!parsed.id.empty() && !parsed.title.empty())
-            page.games.push_back(ToPublicGame(parsed));
+            page.games.push_back(std::move(parsed));
     }
+    return page;
+}
+
+CatalogPage ParseCatalogPage(JsonPtr& root, const std::string& cursor)
+{
+    AppsPage apps = ParseAppsPage(root, cursor);
+    CatalogPage page;
+    page.next_cursor = std::move(apps.next_cursor);
+    page.total_count = apps.total_count;
+    for (const GameInfo& game : apps.games)
+        page.games.push_back(ToPublicGame(game));
     return page;
 }
 
@@ -458,6 +398,39 @@ query GetSearchFilterResults($vpcId: String!, $locale: String!, $sortString: Str
     json_object_set_new(variables.get(), "filters", json_object());
     if (!search_query.empty())
         json_object_set_new(variables.get(), "searchString", json_string(search_query.c_str()));
+    json_object_set_new(body.get(), "variables", json_incref(variables.get()));
+    return DumpJson(body.get());
+}
+
+std::string BuildLibraryRequestBody(const std::string& vpc_id, const std::string& cursor)
+{
+    static const char* kLibraryQuery = R"GRAPHQL(
+query GetLibraryApps($vpcId: String!, $locale: String!, $sortString: String!, $fetchCount: Int!, $cursor: String!, $filters: AppFilterFields!) {
+  apps(vpcId: $vpcId, language: $locale, orderBy: $sortString, first: $fetchCount, after: $cursor, filters: $filters) {
+    numberReturned numberSupported
+    pageInfo { hasNextPage endCursor totalCount }
+    items {
+      id title longDescription shortDescription publisherName
+      images { KEY_ART GAME_BOX_ART TV_BANNER HERO_IMAGE }
+      variants { id appStore gfn { status library { status selected lastPlayedDate } } }
+      gfn { playabilityState minimumMembershipTierLabel }
+    }
+  }
+})GRAPHQL";
+
+    JsonPtr body(json_object(), &json_decref);
+    JsonPtr variables(json_object(), &json_decref);
+    json_object_set_new(body.get(), "query", json_string(kLibraryQuery));
+    json_object_set_new(variables.get(), "vpcId", json_string(vpc_id.c_str()));
+    json_object_set_new(variables.get(), "locale", json_string(kDefaultLocale));
+    json_object_set_new(
+        variables.get(), "sortString",
+        json_string("variants.gfn.library.lastPlayedDate:DESC,computedValues.libraryAddedDate:DESC,sortName:ASC"));
+    json_object_set_new(variables.get(), "fetchCount", json_integer(kCatalogPageSize));
+    json_object_set_new(variables.get(), "cursor", json_string(cursor.c_str()));
+    json_t* filters = json_pack(
+        "{s:{s:{s:{s:{s:s}}}}}", "variants", "gfn", "library", "status", "notEquals", "NOT_OWNED");
+    json_object_set_new(variables.get(), "filters", filters);
     json_object_set_new(body.get(), "variables", json_incref(variables.get()));
     return DumpJson(body.get());
 }
@@ -654,37 +627,54 @@ std::vector<GameInfo> GfnClient::FetchLibraryGames(AuthSession& session) const
     std::string jwt_token = ResolveSessionJwt(session);
     const std::string vpc_id = ResolveVpcId(http_client_, session);
 
-    HttpResponse response = http_client_.Get(
-        BuildLibraryUrl(vpc_id, true),
-        kUserAgent,
-        BuildGraphQlHeaders(jwt_token));
-
-    if (response.status_code == 401)
+    std::vector<GameInfo> games;
+    std::unordered_map<std::string, size_t> index_by_id;
+    std::string cursor;
+    for (std::size_t page_index = 0; page_index < kMaxLibraryPages; ++page_index)
     {
-        session = RecoverSavedSession(session, true);
-        jwt_token = ResolveSessionJwt(session);
-        response = http_client_.Get(
-            BuildLibraryUrl(vpc_id, true),
+        HttpResponse response = http_client_.Post(
+            kGraphQlEndpoint,
             kUserAgent,
-            BuildGraphQlHeaders(jwt_token));
+            BuildGraphQlPostHeaders(jwt_token),
+            BuildLibraryRequestBody(vpc_id, cursor),
+            {}, {.max_body_bytes = kCatalogPageBytes});
+
+        if (response.status_code == 401)
+        {
+            session = RecoverSavedSession(session, true);
+            jwt_token = ResolveSessionJwt(session);
+            response = http_client_.Post(
+                kGraphQlEndpoint,
+                kUserAgent,
+                BuildGraphQlPostHeaders(jwt_token),
+                BuildLibraryRequestBody(vpc_id, cursor),
+                {}, {.max_body_bytes = kCatalogPageBytes});
+        }
+
+        if (response.status_code != 200)
+        {
+            throw std::runtime_error(
+                "Library fetch failed with HTTP " + std::to_string(response.status_code));
+        }
+
+        JsonPtr root = LoadJson(response.body);
+        AppsPage page = ParseAppsPage(root, cursor);
+        for (GameInfo& game : page.games)
+        {
+            const auto existing = index_by_id.find(game.id);
+            if (existing != index_by_id.end())
+            {
+                MergeGame(games[existing->second], game);
+                continue;
+            }
+            index_by_id.emplace(game.id, games.size());
+            games.push_back(std::move(game));
+        }
+        if (!page.next_cursor)
+            break;
+        cursor = std::move(*page.next_cursor);
     }
 
-    if (response.status_code != 200)
-    {
-        response = http_client_.Get(
-            BuildLibraryUrl(vpc_id, false),
-            kUserAgent,
-            BuildGraphQlHeaders(jwt_token));
-    }
-
-    if (response.status_code != 200)
-    {
-        throw std::runtime_error(
-            "Library fetch failed with HTTP " + std::to_string(response.status_code));
-    }
-
-    JsonPtr root = LoadJson(response.body);
-    std::vector<GameInfo> games = ParseLibraryGames(root);
     ApplyPlayHistory(games, LoadPlayHistory());
     return games;
 }

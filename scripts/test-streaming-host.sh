@@ -74,7 +74,7 @@ printf 'PASS deko_renderer_quality_snapshot\n'
 run_cpp audio_pipeline -Itests/stream_stubs -Iextern/libpeer/src app/src/stream/audio/AudioPipeline.cpp
 bash tests/run_audio_video_underrun_test.sh
 printf 'PASS audio_video_underrun\n'
-for scenario in timeline ssrc red; do
+for scenario in timeline ssrc red stuck_counter; do
     "$out/audio_pipeline" "$scenario"
     printf 'PASS audio_pipeline/%s\n' "$scenario"
 done

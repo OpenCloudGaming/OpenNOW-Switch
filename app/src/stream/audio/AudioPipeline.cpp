@@ -95,7 +95,7 @@ struct AudioPipeline::Impl {
     std::atomic<bool> output_ready {false};
     std::atomic<bool> output_started {false};
     size_t queued_output_buffers = 0;
-    uint64_t played_sample_base = 0;
+    uint64_t released_samples = 0;
     std::atomic<uint64_t> submitted_samples {0};
     std::atomic<uint64_t> played_samples {0};
     std::atomic<uint64_t> played_samples_observed_at_us {0};
@@ -175,9 +175,7 @@ struct AudioPipeline::Impl {
             slot.buffer.data_offset = 0;
             slot.free = true;
         }
-        u64 raw_played = 0;
-        if (R_SUCCEEDED(audoutGetAudioOutPlayedSampleCount(&raw_played)))
-            played_sample_base = raw_played;
+        released_samples = 0;
         output_ready.store(true);
         log("INIT ok backend=audout rate=48000 channels=2 frameSamples=480 prebuffer=" +
             std::to_string(prime_packets) + " buffers=24 outputLimit=" +
@@ -216,12 +214,8 @@ struct AudioPipeline::Impl {
     }
 
     void refresh_played_samples() {
-        u64 raw_played = 0;
-        if (R_FAILED(audoutGetAudioOutPlayedSampleCount(&raw_played)))
-            return;
-        const uint64_t relative = raw_played >= played_sample_base ? raw_played - played_sample_base : raw_played;
         std::lock_guard<std::mutex> lock(sender_report_mutex);
-        played_samples.store(std::min(relative, submitted_samples.load()),
+        played_samples.store(std::min(released_samples, submitted_samples.load()),
                              std::memory_order_relaxed);
         played_samples_observed_at_us.store(monotonic_us(), std::memory_order_release);
         playback_timeline.discardBefore(played_samples.load(std::memory_order_relaxed));
@@ -234,8 +228,11 @@ struct AudioPipeline::Impl {
                released && released_count > 0) {
             for (auto& slot : output_slots) {
                 if (&slot.buffer == released) {
-                    if (!slot.free && queued_output_buffers > 0)
-                        --queued_output_buffers;
+                    if (!slot.free) {
+                        released_samples += slot.buffer.data_size / (kChannels * sizeof(int16_t));
+                        if (queued_output_buffers > 0)
+                            --queued_output_buffers;
+                    }
                     slot.free = true;
                     break;
                 }
@@ -679,7 +676,6 @@ bool AudioPipeline::start() {
     impl_->submitted_samples.store(0);
     impl_->played_samples.store(0);
     impl_->played_samples_observed_at_us.store(0);
-    impl_->played_sample_base = 0;
     {
         std::lock_guard<std::mutex> lock(impl_->sender_report_mutex);
         impl_->playback_timeline.clear();
