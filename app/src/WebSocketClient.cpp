@@ -330,7 +330,7 @@ bool WebSocketClient::send_frame(uint8_t opcode, const uint8_t* payload, size_t 
         frame.push_back(payload[i] ^ mask_key[i % 4]);
     }
 
-    return tx_queue_.enqueue(std::move(frame), opennow::websocket::WriteQueue::Clock::now());
+    return tx_queue_.enqueue(std::move(frame));
 }
 
 void WebSocketClient::send_message(const std::string& msg) {

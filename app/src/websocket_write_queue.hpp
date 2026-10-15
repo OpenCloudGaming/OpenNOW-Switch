@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -35,12 +36,12 @@ public:
                bytes <= MaximumBytes - queued_bytes_;
     }
 
-    bool enqueue(std::vector<uint8_t>&& bytes, Clock::time_point now)
+    bool enqueue(std::vector<uint8_t>&& bytes)
     {
         if (!can_enqueue(bytes.size()))
             return false;
         queued_bytes_ += bytes.size();
-        frames_.push_back({std::move(bytes), 0, now + SendTimeout});
+        frames_.push_back({std::move(bytes), 0, std::nullopt});
         return true;
     }
 
@@ -55,7 +56,9 @@ public:
     {
         for (size_t writes = 0; writes < MaximumWritesPerPoll && !frames_.empty(); ++writes) {
             Frame& frame = frames_.front();
-            if (now() >= frame.deadline)
+            if (!frame.deadline)
+                frame.deadline = now() + SendTimeout;
+            if (now() >= *frame.deadline)
                 return DrainResult::TimedOut;
             const size_t length = std::min(MaximumWriteBytes, frame.bytes.size() - frame.offset);
             const WriteResult result = writer(frame.bytes.data() + frame.offset, length);
@@ -79,7 +82,7 @@ private:
     {
         std::vector<uint8_t> bytes;
         size_t offset;
-        Clock::time_point deadline;
+        std::optional<Clock::time_point> deadline;
     };
 
     std::deque<Frame> frames_;

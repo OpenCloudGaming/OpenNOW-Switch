@@ -44,8 +44,8 @@ int main()
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1, 2, 3, 4}, time));
-        assert(queue.enqueue({5, 6}, time));
+        assert(queue.enqueue({1, 2, 3, 4}));
+        assert(queue.enqueue({5, 6}));
         writer.results = {{Status::Progress, 2}, {Status::Again, 0}};
         assert(queue.drain(writer, now) == Result::Pending);
         assert(writer.calls == 2);
@@ -53,7 +53,7 @@ int main()
         writer.results = {{Status::Again, 0}};
         assert(queue.drain(writer, now) == Result::Pending);
         assert(writer.calls == 3);
-        assert(queue.enqueue({7, 8}, time));
+        assert(queue.enqueue({7, 8}));
         assert(queue.drain(writer, now) == Result::Complete);
         assert((writer.output == std::vector<uint8_t>{1, 2, 3, 4, 5, 6, 7, 8}));
     }
@@ -61,9 +61,9 @@ int main()
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue(std::vector<uint8_t>(Queue::MaximumBytes, 9), time));
+        assert(queue.enqueue(std::vector<uint8_t>(Queue::MaximumBytes, 9)));
         assert(!queue.can_enqueue(1));
-        assert(!queue.enqueue({1}, time));
+        assert(!queue.enqueue({1}));
         assert(queue.drain(writer, now) == Result::Pending);
         assert(writer.calls == Queue::MaximumWritesPerPoll);
         assert(writer.output.size() == Queue::MaximumWritesPerPoll * Queue::MaximumWriteBytes);
@@ -85,19 +85,19 @@ int main()
         Queue queue;
         FakeWriter writer;
         for (size_t i = 0; i < Queue::MaximumFrames; ++i)
-            assert(queue.enqueue({static_cast<uint8_t>(i)}, time));
-        assert(!queue.enqueue({65}, time));
+            assert(queue.enqueue({static_cast<uint8_t>(i)}));
+        assert(!queue.enqueue({65}));
         assert(queue.drain(writer, now) == Result::Pending);
         assert(writer.calls == Queue::MaximumWritesPerPoll);
         assert(queue.can_enqueue(1));
         assert(!queue.can_enqueue(0));
-        assert(!queue.enqueue({}, time));
+        assert(!queue.enqueue({}));
     }
 
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1, 2, 3}, time));
+        assert(queue.enqueue({1, 2, 3}));
         writer.results = {{Status::Progress, 1}, {Status::Again, 0}};
         assert(queue.drain(writer, now) == Result::Pending);
         time += std::chrono::milliseconds(999);
@@ -110,7 +110,7 @@ int main()
         assert((writer.output == std::vector<uint8_t>{1, 2}));
         queue.reset();
         writer = {};
-        assert(queue.enqueue({4, 5}, time));
+        assert(queue.enqueue({4, 5}));
         assert(queue.drain(writer, now) == Result::Complete);
         assert((writer.output == std::vector<uint8_t>{4, 5}));
     }
@@ -118,33 +118,37 @@ int main()
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1}, time));
-        assert(queue.enqueue({2}, time));
-        time += Queue::SendTimeout - std::chrono::milliseconds(1);
+        assert(queue.enqueue({1}));
+        assert(queue.enqueue({2}));
+        time += Queue::SendTimeout * 3;
         auto advancing_writer = [&](const uint8_t* data, size_t length) {
             const auto result = writer(data, length);
-            time += std::chrono::milliseconds(1);
+            time += Queue::SendTimeout - std::chrono::milliseconds(1);
             return result;
         };
-        assert(queue.drain(advancing_writer, now) == Result::TimedOut);
-        assert(writer.calls == 1);
-        assert((writer.output == std::vector<uint8_t>{1}));
+        assert(queue.drain(advancing_writer, now) == Result::Complete);
+        assert(writer.calls == 2);
+        assert((writer.output == std::vector<uint8_t>{1, 2}));
     }
 
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1}, time));
+        assert(queue.enqueue({1}));
+        assert(queue.enqueue({2}));
+        writer.results = {{Status::Again, 0}};
+        assert(queue.drain(writer, now) == Result::Pending);
         time += Queue::SendTimeout;
         assert(queue.drain(writer, now) == Result::TimedOut);
-        assert(writer.calls == 0);
+        assert(writer.calls == 1);
+        assert(writer.output.empty());
     }
 
     for (const auto status : {Status::Error, Status::Progress}) {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1, 2}, time));
-        assert(queue.enqueue({3}, time));
+        assert(queue.enqueue({1, 2}));
+        assert(queue.enqueue({3}));
         writer.results = {{status, 0}};
         assert(queue.drain(writer, now) ==
                (status == Status::Error ? Result::WriteError : Result::Stalled));
@@ -159,7 +163,7 @@ int main()
     {
         Queue queue;
         FakeWriter writer;
-        assert(queue.enqueue({1}, time));
+        assert(queue.enqueue({1}));
         writer.results = {{Status::Progress, 2}};
         assert(queue.drain(writer, now) == Result::WriteError);
     }
