@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <cmath>
 
 namespace
 {
@@ -289,11 +288,7 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
                 state.buttons[brls::BUTTON_LB] || state.buttons[brls::BUTTON_RB] ||
                 state.buttons[brls::BUTTON_LT] || state.buttons[brls::BUTTON_RT] ||
                 state.buttons[brls::BUTTON_LSB] || state.buttons[brls::BUTTON_RSB] ||
-                state.buttons[brls::BUTTON_START] || state.buttons[brls::BUTTON_BACK] ||
-                std::fabs(state.axes[brls::LEFT_X]) > 0.15f ||
-                std::fabs(state.axes[brls::LEFT_Y]) > 0.15f ||
-                std::fabs(state.axes[brls::RIGHT_X]) > 0.15f ||
-                std::fabs(state.axes[brls::RIGHT_Y]) > 0.15f;
+                state.buttons[brls::BUTTON_START] || state.buttons[brls::BUTTON_BACK];
             if (controller_active || touch_active)
                 keyboard_owned_input = true;
             else
