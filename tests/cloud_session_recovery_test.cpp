@@ -239,6 +239,19 @@ int main(int argc, char** argv)
         }
         opennow::gfn::cloud_session::ForgetActiveCloudSession("seat");
     }
+    if (selected < 0 || selected == 11) {
+        expect("GET", initial + "v2/session/seat", 200,
+            R"({"requestStatus":{"statusCode":41,"statusDescription":"APP_PATCHING_STATUS"}})");
+        const auto info = client.PollSession(auth, "seat");
+        assert(info.session_id == "seat" && info.app_patching && info.status == 1);
+        assert(!info.ready_for_stream() && info.signaling_url.empty());
+    }
+    if (selected < 0 || selected == 12) {
+        opennow::gfn::cloud_session::RememberActiveCloudSession(auth, "seat", "123", initial);
+        expect("DELETE", initial + "v2/session/seat", 200, "{}");
+        client.StopSession(auth, "seat");
+        assert(opennow::gfn::cloud_session::LoadActiveCloudSessionId(auth).empty());
+    }
     assert(replies.empty());
     std::filesystem::current_path(cwd);
     std::filesystem::remove_all(directory);

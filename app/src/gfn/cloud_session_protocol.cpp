@@ -415,8 +415,8 @@ bool CloudMatchResponseSucceeded(const HttpResponse& response)
         return true;
     try {
         JsonPtr root = LoadJson(response.body);
-        return json_is_object(root.get()) && WireInteger(json_object_get(
-            json_object_get(root.get(), "requestStatus"), "statusCode"), -1) == 1;
+        return json_is_object(root.get()) && (json_object_size(root.get()) == 0 ||
+            WireInteger(json_object_get(json_object_get(root.get(), "requestStatus"), "statusCode"), -1) == 1);
     } catch (...) {
         return false;
     }
@@ -436,6 +436,8 @@ SessionInfo ParseSessionResponse(const HttpResponse& response, const std::string
     json_t* sess = json_object_get(root.get(), "session");
     SessionInfo info;
     info.session_id = GetString(sess, "sessionId");
+    if (patching && !json_object_get(sess, "sessionId"))
+        info.session_id = expected_id;
     if (info.session_id.empty() || info.session_id.find_first_of("/?#\\\r\n") != std::string::npos ||
         (!expected_id.empty() && expected_id != info.session_id))
         throw std::runtime_error(stage + " returned an invalid or different session ID.");
