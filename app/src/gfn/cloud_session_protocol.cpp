@@ -169,20 +169,35 @@ int GetConnectionPort(json_t* connection)
     return ParseEndpoint(resource).port;
 }
 
-std::string BuildSignalingUrlFromConnection(json_t* connection)
+std::string BuildSignalingUrlFromConnection(json_t* connection, bool allow_legacy = false)
 {
-    if (IsNativeConnection(connection) || WireInteger(json_object_get(connection, "usage")) != 14)
+    const int usage = WireInteger(json_object_get(connection, "usage"));
+    const bool legacy = IsNativeConnection(connection);
+    if ((usage != 14 && usage != 16) || (legacy && !allow_legacy))
         return {};
     const std::string resource_path = GetString(connection, "resourcePath");
-    if (resource_path.find("://") != std::string::npos)
+    if (HasPrefix(resource_path, "wss://") || HasPrefix(resource_path, "https://"))
         return ValidSignalingUrl(resource_path);
-    if (!resource_path.empty() && resource_path.front() != '/')
+    if (!resource_path.empty() && resource_path.front() != '/' &&
+        !(legacy && (HasPrefix(resource_path, "rtsp://") || HasPrefix(resource_path, "rtsps://"))))
         return {};
-    const std::string ip = GetConnectionIp(connection);
+    const bool legacy_resource = legacy &&
+        (HasPrefix(resource_path, "rtsp://") || HasPrefix(resource_path, "rtsps://"));
+    const std::string ip = legacy_resource ? ParseEndpoint(resource_path).host : GetConnectionIp(connection);
     if (ip.empty())
         return {};
     const std::string host = ip.find(':') == std::string::npos ? ip : "[" + ip + "]";
-    return ValidSignalingUrl("wss://" + host + ":443" + (resource_path.empty() ? "/nvst/" : resource_path));
+    if (legacy)
+        return ValidSignalingUrl("wss://" + host + "/nvst/");
+    int port = 443;
+    if (WireInteger(json_object_get(connection, "appLevelProtocol")) == 4 &&
+        json_object_get(connection, "port")) {
+        port = GetConnectionPort(connection);
+        if (port <= 0)
+            return {};
+    }
+    return ValidSignalingUrl("wss://" + host + ":" + std::to_string(port) +
+        (resource_path.empty() ? "/nvst/" : resource_path));
 }
 
 void AppendIceServer(SessionInfo& info, std::string url, std::string username, std::string credential)
@@ -332,18 +347,20 @@ void ApplySessionNetworkInfo(json_t* sess, SessionInfo& info)
         }
 
         if (info.signaling_url.empty()) {
-            for (bool explicit_url : {true, false}) {
-                size_t index;
-                json_t* conn_info;
-                json_array_foreach(connection_info_array, index, conn_info) {
-                    CollectIceServersFromObject(conn_info, info);
-
-                    if (WireInteger(json_object_get(conn_info, "usage")) != 14)
-                        continue;
-                    const std::string resource = GetString(conn_info, "resourcePath");
-                    if ((HasPrefix(resource, "wss://") || HasPrefix(resource, "https://")) != explicit_url)
-                        continue;
-                    info.signaling_url = BuildSignalingUrlFromConnection(conn_info);
+            for (bool legacy : {false, true}) {
+                for (bool explicit_url : {true, false}) {
+                    size_t index;
+                    json_t* conn_info;
+                    json_array_foreach(connection_info_array, index, conn_info) {
+                        if (IsNativeConnection(conn_info) != legacy)
+                            continue;
+                        const std::string resource = GetString(conn_info, "resourcePath");
+                        if ((HasPrefix(resource, "wss://") || HasPrefix(resource, "https://")) != explicit_url)
+                            continue;
+                        info.signaling_url = BuildSignalingUrlFromConnection(conn_info, legacy);
+                        if (!info.signaling_url.empty())
+                            break;
+                    }
                     if (!info.signaling_url.empty())
                         break;
                 }
@@ -379,7 +396,7 @@ std::string ResolveSessionControlBaseUrl(json_t* session, const std::string& fal
         return fallback;
     const Endpoint origin = ParseEndpoint(fallback);
     if (host == Lowercase(origin.host))
-        return "https://" + (host.find(':') == std::string::npos ? host : "[" + host + "]") + "/";
+        return fallback;
     const auto nvidia_host = [](const std::string& value) {
         return value.ends_with(".cloudmatchbeta.nvidiagrid.net") ||
             value.ends_with(".cloudmatch.nvidiagrid.net") ||

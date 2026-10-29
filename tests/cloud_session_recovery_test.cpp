@@ -170,6 +170,7 @@ int main(int argc, char** argv)
         }
         auto root = opennow::gfn::detail::LoadJson(R"({"sessionControlInfo":{"ip":"seat.partner.example","port":443}})");
         assert(opennow::gfn::cloud_session::ResolveSessionControlBaseUrl(root.get(), "https://seat.partner.example/") == "https://seat.partner.example/");
+        assert(opennow::gfn::cloud_session::ResolveSessionControlBaseUrl(root.get(), "https://seat.partner.example:8443/") == "https://seat.partner.example:8443/");
         assert(opennow::gfn::cloud_session::ResolveSessionControlBaseUrl(root.get(), initial) == initial);
         auto nvidia = opennow::gfn::detail::LoadJson(R"({"sessionControlInfo":{"ip":"NP-PAR-01.cloudmatchbeta.nvidiagrid.net","port":"443"}})");
         assert(opennow::gfn::cloud_session::ResolveSessionControlBaseUrl(nvidia.get(), initial) == assigned);
