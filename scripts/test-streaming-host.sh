@@ -56,6 +56,18 @@ run_cpp websocket_client -DFMT_HEADER_ONLY -isystem extern/ffmpeg/include \
     -Iextern/libpeer/third_party/mbedtls/include "${sections[@]}" \
     app/src/WebSocketClient.cpp app/src/signaling_client.cpp app/src/http_client.cpp "${crypto[@]}"
 run_cpp websocket_handshake -Iextern/libpeer/third_party/mbedtls/include -Wl,--gc-sections "${crypto[@]}"
+run_cpp webrtc_signaling -DFMT_HEADER_ONLY -Iextern/libpeer/src \
+    -Iextern/borealis/library/include/borealis/extern/nanovg \
+    -isystem extern/ffmpeg/include -isystem extern/borealis/library/include \
+    -isystem extern/borealis/library/lib/extern/fmt/include \
+    -Iextern/libpeer/third_party/mbedtls/include "${sections[@]}" \
+    app/src/webrtc/signaling.cpp app/src/webrtc/negotiation.cpp app/src/webrtc/input.cpp \
+    app/src/webrtc/nvst_sdp.cpp app/src/WebSocketClient.cpp app/src/signaling_client.cpp \
+    app/src/http_client.cpp "${crypto[@]}" -ljansson
+for scenario in url rejected closed initial-transient terminal retry-limit deadline post-offer; do
+    "$out/webrtc_signaling" "$scenario"
+    printf 'PASS webrtc_signaling/%s\n' "$scenario"
+done
 run_cpp signaling_diagnostics -ljansson
 run_cpp webrtc_input_handshake -Iextern/libpeer/src \
     -Iextern/libpeer/third_party/mbedtls/include \

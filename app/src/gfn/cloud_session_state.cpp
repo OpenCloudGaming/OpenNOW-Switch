@@ -139,7 +139,7 @@ std::string BuildCloudMatchErrorMessage(const std::string& stage, int http_statu
     const std::string details = CloudMatchErrorDetails(http_status, root);
     std::string message = stage + " failed: " + details;
     json_t* request_status = root ? json_object_get(root, "requestStatus") : nullptr;
-    if (request_status && GetInteger(request_status, "statusCode") == 81) {
+    if (request_status && WireInteger(json_object_get(request_status, "statusCode")) == 81) {
         message += "\nThis game is not available with the current GeForce NOW membership. "
                    "If the game page says Premium, upgrade the membership to play it.";
     }
@@ -149,7 +149,7 @@ std::string BuildCloudMatchErrorMessage(const std::string& stage, int http_statu
 bool IsAppPatchingResponse(json_t* root)
 {
     json_t* request_status = root ? json_object_get(root, "requestStatus") : nullptr;
-    if (!request_status || GetInteger(request_status, "statusCode") != 41)
+    if (!request_status || WireInteger(json_object_get(request_status, "statusCode")) != 41)
         return false;
 
     return GetString(request_status, "statusDescription").find("APP_PATCHING_STATUS") != std::string::npos;
@@ -172,6 +172,19 @@ namespace
 std::string GetActiveCloudSessionPath()
 {
     return GetAppHome() + "/active_cloud_session.json";
+}
+
+JsonPtr LoadActiveCloudSession()
+{
+    for (const std::string& suffix : {std::string(), std::string(".bak")}) {
+        try {
+            JsonPtr root = LoadJson(ReadTextFile(GetActiveCloudSessionPath() + suffix));
+            if (json_is_object(root.get()) && !GetString(root.get(), "session_id").empty() &&
+                !GetString(root.get(), "user_id").empty())
+                return root;
+        } catch (...) {}
+    }
+    return JsonPtr(nullptr, &json_decref);
 }
 
 } // namespace
@@ -206,13 +219,9 @@ std::string LoadActiveCloudSessionStreamingBaseUrl(
     const AuthSession& auth,
     const std::string& session_id)
 {
-    const std::string body = ReadTextFile(GetActiveCloudSessionPath());
-    if (body.empty())
-        return {};
-
     try
     {
-        JsonPtr root = LoadJson(body);
+        JsonPtr root = LoadActiveCloudSession();
         if (GetString(root.get(), "user_id") != auth.user.user_id ||
             GetString(root.get(), "session_id") != session_id)
             return {};
@@ -223,6 +232,19 @@ std::string LoadActiveCloudSessionStreamingBaseUrl(
     {
         return {};
     }
+}
+
+void UpdateActiveCloudSessionStreamingBaseUrl(
+    const AuthSession& auth, const std::string& session_id, const std::string& base_url)
+{
+    JsonPtr root = LoadActiveCloudSession();
+    if (GetString(root.get(), "user_id") != auth.user.user_id ||
+        GetString(root.get(), "session_id") != session_id)
+        return;
+    if (GetString(root.get(), "streaming_base_url") == base_url)
+        return;
+    json_object_set_new(root.get(), "streaming_base_url", json_string(base_url.c_str()));
+    WriteJsonToFile(GetActiveCloudSessionPath(), root.get());
 }
 
 std::string ResolveConfiguredStreamingBaseUrl(const AuthSession& session)
@@ -237,13 +259,9 @@ std::string ResolveConfiguredStreamingBaseUrl(const AuthSession& session)
 
 std::string LoadActiveCloudSessionId(const AuthSession& auth)
 {
-    const std::string body = ReadTextFile(GetActiveCloudSessionPath());
-    if (body.empty())
-        return "";
-
     try
     {
-        JsonPtr root = LoadJson(body);
+        JsonPtr root = LoadActiveCloudSession();
         if (GetString(root.get(), "user_id") != auth.user.user_id)
             return "";
         return GetString(root.get(), "session_id");
@@ -256,17 +274,9 @@ std::string LoadActiveCloudSessionId(const AuthSession& auth)
 
 void ForgetActiveCloudSession(const std::string& session_id)
 {
-    const std::string body = ReadTextFile(GetActiveCloudSessionPath());
-    if (!body.empty())
-    {
-        try
-        {
-            JsonPtr root = LoadJson(body);
-            if (!session_id.empty() && GetString(root.get(), "session_id") != session_id)
-                return;
-        }
-        catch (...) {}
-    }
+    JsonPtr root = LoadActiveCloudSession();
+    if (root && !session_id.empty() && GetString(root.get(), "session_id") != session_id)
+        return;
 
     std::remove(GetActiveCloudSessionPath().c_str());
     std::remove((GetActiveCloudSessionPath() + ".bak").c_str());

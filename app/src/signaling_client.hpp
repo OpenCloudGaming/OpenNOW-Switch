@@ -9,7 +9,7 @@ public:
     SignalingClient(const std::string& url);
     ~SignalingClient();
 
-    bool connect();
+    bool connect(WebSocketClient::Clock::time_point deadline = WebSocketClient::Clock::time_point::max());
     void send_message(const std::string& msg);
     void set_on_message(std::function<void(const std::string&)> cb) { on_message_ = cb; }
     void poll();
@@ -20,6 +20,9 @@ public:
     }
     
     std::string get_last_error() const { return ws_ ? ws_->get_last_error() : "No WS object"; }
+    WebSocketClient::FailureKind failure_kind() const {
+        return ws_ ? ws_->failure_kind() : WebSocketClient::FailureKind::Terminal;
+    }
 
 private:
     std::string url_;

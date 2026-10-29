@@ -5,6 +5,8 @@
 namespace opennow::webrtc
 {
 
+inline constexpr auto TransportStartupTimeout = std::chrono::seconds(30);
+
 enum class StartupTimeout
 {
     None,
@@ -19,7 +21,7 @@ constexpr StartupTimeout DetectStartupTimeout(
     std::chrono::milliseconds peer_completed_elapsed)
 {
     if (!peer_completed)
-        return session_elapsed >= std::chrono::seconds(30)
+        return session_elapsed >= TransportStartupTimeout
             ? StartupTimeout::Transport : StartupTimeout::None;
     if (!frame_decoded && peer_completed_elapsed >= std::chrono::seconds(15))
         return StartupTimeout::Video;

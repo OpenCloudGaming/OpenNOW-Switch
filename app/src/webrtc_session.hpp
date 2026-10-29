@@ -131,6 +131,9 @@ private:
     int remote_peer_id_ = 1;
     int ack_counter_ = 0;
     bool signaling_ready_ = false;
+    bool signaling_server_rejected_ = false;
+    int signaling_retries_ = 0;
+    std::chrono::steady_clock::time_point signaling_retry_due_ {};
     bool remote_description_set_ = false;
     bool offer_received_ = false;
     bool manual_candidate_added_ = false;
@@ -261,6 +264,9 @@ private:
     uint32_t last_rtp_access_units_dropped_ = 0;
 
     void handle_signaling_message(const std::string& msg);
+    void connect_signaling();
+    void poll_signaling();
+    void handle_signaling_failure(WebSocketClient::FailureKind failure);
     void setup_peer_connection();
     void start_network_worker();
     void network_loop();

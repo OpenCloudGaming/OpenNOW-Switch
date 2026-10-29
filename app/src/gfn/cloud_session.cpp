@@ -141,76 +141,16 @@ SessionInfo GfnClient::StartSession(AuthSession& session, const std::string& lau
     AppendSessionTraceLog("START response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("START response body:\n" + JsonForTrace(response.body));
 
-    JsonPtr root(nullptr, &json_decref);
-    try {
-        root = LoadJson(response.body);
-    } catch (const std::exception& e) {
-        AppendSessionTraceLog(std::string("START JSON parse error: ") + e.what());
-    }
-
-    const bool app_patching = root && IsAppPatchingResponse(root.get());
-    if (root)
-    {
-        json_t* req_status = json_object_get(root.get(), "requestStatus");
-        if (req_status && GetInteger(req_status, "statusCode") != 1 && !app_patching)
-        {
-            const std::string error = BuildCloudMatchErrorMessage("StartSession", response.status_code, root.get());
-            AppendSessionTraceLog("START api error: " + error);
-            throw std::runtime_error(error);
-        }
-    }
-
-    if (response.status_code != 200 && response.status_code != 202 && !app_patching)
-    {
-        const std::string error = BuildCloudMatchErrorMessage("StartSession", response.status_code, root.get());
-        AppendSessionTraceLog("START http error: " + error);
-        throw std::runtime_error(error);
-    }
-
-    if (!root) {
-        AppendSessionTraceLog("START failed: empty or invalid JSON");
-        throw std::runtime_error("StartSession failed: Empty or invalid JSON" + SessionTraceHint());
-    }
-
-    SessionInfo info;
-    info.app_patching = app_patching;
-    CollectIceServersFromObject(root.get(), info);
-
-    json_t* sess = json_object_get(root.get(), "session");
-    if (sess)
-    {
-        json_t* s_id = json_object_get(sess, "sessionId");
-        if (s_id && json_is_string(s_id))
-            info.session_id = json_string_value(s_id);
-
-        json_t* status = json_object_get(sess, "status");
-        if (status)
-            info.status = ParseSessionStatus(status);
-
-        json_t* qp = json_object_get(sess, "queuePosition");
-        if (qp && json_is_integer(qp))
-            info.queue_position = json_integer_value(qp);
-
-        ApplySeatSetupInfo(sess, info);
-
-        ApplySessionNetworkInfo(sess, info);
-    }
-
-    // Check root for queuePosition
-    json_t* root_qp = json_object_get(root.get(), "queuePosition");
-    if (root_qp && json_is_integer(root_qp)) {
-        info.queue_position = json_integer_value(root_qp);
-    }
-
-    if (info.session_id.empty()) {
-        AppendSessionTraceLog("START failed: session ID missing after successful response");
-        throw std::runtime_error("Failed to parse session ID from response" + SessionTraceHint());
-    }
-
-    if (app_patching)
-        AppendSessionTraceLog("START pending reason=app_patching; polling created session");
+    SessionInfo info = ParseSessionResponse(response, "StartSession", {}, streaming_base_url);
     RememberActiveCloudSession(
-        session, info.session_id, launch_app_id, streaming_base_url);
+        session, info.session_id, launch_app_id, info.streaming_base_url);
+    ad_session_key_.clear();
+    try {
+        AnswerQueueAds(session, info, headers);
+    } catch (...) {
+        try { StopSession(session, info.session_id); } catch (...) {}
+        throw;
+    }
     AppendSessionTraceLog("START parsed: " + SessionInfoTraceSummary(info));
     return info;
 }
@@ -255,76 +195,77 @@ SessionInfo GfnClient::PollSession(AuthSession& session, const std::string& sess
     AppendSessionTraceLog("POLL response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("POLL response body:\n" + JsonForTrace(response.body));
 
-    JsonPtr root(nullptr, &json_decref);
-    try {
-        root = LoadJson(response.body);
-    } catch (const std::exception& e) {
-        AppendSessionTraceLog(std::string("POLL JSON parse error: ") + e.what());
-    }
-
-    const bool app_patching = root && IsAppPatchingResponse(root.get());
-    if (root)
-    {
-        json_t* req_status = json_object_get(root.get(), "requestStatus");
-        if (req_status && GetInteger(req_status, "statusCode") != 1 && !app_patching)
-        {
-            const std::string error = BuildCloudMatchErrorMessage("PollSession", response.status_code, root.get());
-            AppendSessionTraceLog("POLL api error: " + error);
-            throw std::runtime_error(error);
-        }
-    }
-
-    if (response.status_code != 200 && !app_patching)
-    {
-        const std::string error = BuildCloudMatchErrorMessage("PollSession", response.status_code, root.get());
-        AppendSessionTraceLog("POLL http error: " + error);
-        throw std::runtime_error(error);
-    }
-
-    if (!root) {
-        AppendSessionTraceLog("POLL failed: empty or invalid JSON");
-        throw std::runtime_error("PollSession failed: Empty or invalid JSON" + SessionTraceHint());
-    }
-
-    // Keep diagnostics useful without persisting session tokens returned by CloudMatch.
-    const std::string redacted_session = JsonForTrace(response.body);
-    FILE* session_dump = fopen("sdmc:/switch/SwitchNOW/switchnow_session.json", "w");
-    if (session_dump) {
-        fputs(redacted_session.c_str(), session_dump);
-        fclose(session_dump);
-    }
-
-    SessionInfo info;
-    info.session_id = session_id;
-    info.app_patching = app_patching;
-    CollectIceServersFromObject(root.get(), info);
-
-    json_t* sess = json_object_get(root.get(), "session");
-    if (sess)
-    {
-        json_t* status = json_object_get(sess, "status");
-        if (status)
-            info.status = ParseSessionStatus(status);
-
-        json_t* qp = json_object_get(sess, "queuePosition");
-        if (qp && json_is_integer(qp))
-            info.queue_position = json_integer_value(qp);
-
-        ApplySeatSetupInfo(sess, info);
-
-        ApplySessionNetworkInfo(sess, info);
-    }
-
-    // Sometimes queuePosition is at the root level!
-    json_t* root_qp = json_object_get(root.get(), "queuePosition");
-    if (root_qp && json_is_integer(root_qp)) {
-        info.queue_position = json_integer_value(root_qp);
-    }
-
-    if (app_patching)
-        AppendSessionTraceLog("POLL pending reason=app_patching");
+    SessionInfo info = ParseSessionResponse(response, "PollSession", session_id, streaming_base_url);
+    UpdateActiveCloudSessionStreamingBaseUrl(session, session_id, info.streaming_base_url);
+    AnswerQueueAds(session, info, headers);
     AppendSessionTraceLog("POLL parsed: " + SessionInfoTraceSummary(info));
     return info;
+}
+
+void GfnClient::AnswerQueueAds(AuthSession& auth, SessionInfo& info,
+                              std::vector<std::string> headers) const
+{
+    if (info.status > 3 && info.status != 6)
+        return;
+    const std::string key = auth.user.user_id + ":" + info.session_id;
+    if (ad_session_key_ != key) {
+        ad_session_key_ = key;
+        ad_attempts_.clear();
+        ad_pending_polls_ = 0;
+    }
+    for (const std::string& id : info.ad_ids) {
+        if (ad_attempts_.size() >= 32 && !ad_attempts_.contains(id))
+            throw std::runtime_error("NVIDIA returned too many queue ads.");
+        ad_attempts_.try_emplace(id, 0);
+    }
+    bool pending = info.ads_pending && ad_attempts_.empty();
+    for (auto& [id, attempts] : ad_attempts_) {
+        if (attempts < 0)
+            continue;
+        if (attempts >= 3)
+            throw std::runtime_error("Unable to report unsupported NVIDIA queue ad playback. Please try again.");
+        ++attempts;
+        HttpResponse response;
+        const std::string body = BuildQueueAdCancellationBody(id);
+        const std::string url = info.streaming_base_url + "v2/session/" + info.session_id;
+        try {
+            response = http_client_.Request("PUT", url, kCloudMatchUserAgent, headers, body);
+        } catch (const std::exception&) {
+            pending = true;
+            break;
+        }
+        if (response.status_code == 401) {
+            auth = ForceRefreshSavedSession(auth);
+            headers[0] = "Authorization: GFNJWT " + ResolveSessionJwt(auth);
+            try {
+                response = http_client_.Request("PUT", url, kCloudMatchUserAgent, headers, body);
+            } catch (const std::exception&) {
+                pending = true;
+                break;
+            }
+        }
+        if (CloudMatchResponseSucceeded(response)) {
+            attempts = -1;
+            AppendSessionTraceLog("QUEUEAD reported unsupported playback");
+            continue;
+        }
+        if (response.status_code >= 400 && response.status_code < 500 && response.status_code != 429)
+            throw std::runtime_error("NVIDIA rejected the queue ad cancellation (HTTP " +
+                                     std::to_string(response.status_code) + ").");
+        pending = true;
+        break;
+    }
+    info.ads_pending = pending || std::any_of(ad_attempts_.begin(), ad_attempts_.end(),
+        [](const auto& entry) { return entry.second >= 0; });
+    if (std::any_of(ad_attempts_.begin(), ad_attempts_.end(),
+        [](const auto& entry) { return entry.second >= 3; }))
+        throw std::runtime_error("Unable to report unsupported NVIDIA queue ad playback. Please try again.");
+    if (info.ads_pending) {
+        if (++ad_pending_polls_ >= 12)
+            throw std::runtime_error("NVIDIA queue ads did not become available for cancellation in time.");
+    } else {
+        ad_pending_polls_ = 0;
+    }
 }
 
 void GfnClient::StopSession(AuthSession& session, const std::string& session_id) const
@@ -368,9 +309,14 @@ void GfnClient::StopSession(AuthSession& session, const std::string& session_id)
     }
     AppendSessionTraceLog("STOP response HTTP " + std::to_string(response.status_code));
     AppendSessionTraceLog("STOP response body:\n" + JsonForTrace(response.body));
-    if ((response.status_code >= 200 && response.status_code < 300) || response.status_code == 404)
+    if (CloudMatchResponseSucceeded(response) || response.status_code == 404)
     {
         ForgetActiveCloudSession(session_id);
+        if (ad_session_key_ == session.user.user_id + ":" + session_id) {
+            ad_session_key_.clear();
+            ad_attempts_.clear();
+            ad_pending_polls_ = 0;
+        }
         return;
     }
 

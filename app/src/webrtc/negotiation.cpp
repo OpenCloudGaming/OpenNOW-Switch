@@ -662,6 +662,8 @@ extern "C" {
 } // namespace opennow::webrtc::internal
 
 void WebRtcSession::handle_signaling_message(const std::string& msg) {
+    if (signaling_server_rejected_)
+        return;
     signaling_rx_count_++;
     const std::string compact_message = opennow::webrtc::CompactSignalingMessage(msg);
     AppendStreamLog(compact_message);
@@ -675,6 +677,13 @@ void WebRtcSession::handle_signaling_message(const std::string& msg) {
     json_error_t error;
     json_t* root = json_loads(msg.c_str(), 0, &error);
     if (!root) return;
+
+    json_t* server_error = json_object_get(root, "error");
+    if (server_error && !json_is_null(server_error)) {
+        signaling_server_rejected_ = true;
+        json_decref(root);
+        return;
+    }
 
     json_t* peer_info = json_object_get(root, "peer_info");
     if (peer_info && json_is_object(peer_info)) {

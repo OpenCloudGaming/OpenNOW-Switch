@@ -17,6 +17,12 @@ inline constexpr const char* kCloudMatchUserAgent =
 
 void ApplySessionNetworkInfo(json_t* session, SessionInfo& info);
 void CollectIceServersFromObject(json_t* object, SessionInfo& info);
+int WireInteger(json_t* value, int fallback = -1);
+SessionInfo ParseSessionResponse(const HttpResponse& response, const std::string& stage,
+                                const std::string& expected_id, const std::string& base_url);
+std::string ResolveSessionControlBaseUrl(json_t* session, const std::string& fallback);
+bool CloudMatchResponseSucceeded(const HttpResponse& response);
+std::string BuildQueueAdCancellationBody(const std::string& id);
 
 void ResetSessionTraceLog(const std::string& reason);
 void AppendSessionTraceLog(const std::string& line);
@@ -35,6 +41,8 @@ void RememberActiveCloudSession(
     const std::string& streaming_base_url);
 std::string LoadActiveCloudSessionStreamingBaseUrl(
     const AuthSession& auth, const std::string& session_id);
+void UpdateActiveCloudSessionStreamingBaseUrl(
+    const AuthSession& auth, const std::string& session_id, const std::string& base_url);
 std::string ResolveConfiguredStreamingBaseUrl(const AuthSession& session);
 std::string LoadActiveCloudSessionId(const AuthSession& auth);
 void ForgetActiveCloudSession(const std::string& session_id);

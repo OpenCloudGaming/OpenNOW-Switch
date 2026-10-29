@@ -67,6 +67,14 @@ bool starts_with(const std::string& value, const char* prefix)
     return value.rfind(prefix, 0) == 0;
 }
 
+bool transient_curl_error(CURLcode error)
+{
+    return error == CURLE_COULDNT_RESOLVE_HOST || error == CURLE_COULDNT_CONNECT ||
+           error == CURLE_OPERATION_TIMEDOUT || error == CURLE_SEND_ERROR ||
+           error == CURLE_RECV_ERROR || error == CURLE_GOT_NOTHING ||
+           error == CURLE_SSL_CONNECT_ERROR;
+}
+
 } // namespace
 
 WebSocketClient::WebSocketClient(const std::string& url) : url_(url) {}
@@ -76,11 +84,18 @@ WebSocketClient::~WebSocketClient() {
     close_transport();
 }
 
-bool WebSocketClient::connect() {
+bool WebSocketClient::connect(Clock::time_point deadline) {
     disconnect();
     close_transport();
 
     last_error_.clear();
+    failure_kind_ = FailureKind::Terminal;
+    deadline = std::min(deadline, Clock::now() + std::chrono::seconds(21));
+    if (Clock::now() >= deadline) {
+        last_error_ = "Signaling connection deadline expired";
+        failure_kind_ = FailureKind::Transient;
+        return false;
+    }
     curl_ = curl_easy_init();
     if (!curl_) {
         last_error_ = "Could not initialize WebSocket transport";
@@ -126,11 +141,15 @@ bool WebSocketClient::connect() {
         close_transport();
         return false;
     }
-    curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT, 15L);
+    const long remaining_ms = std::max(1L, static_cast<long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count()));
+    curl_easy_setopt(curl_, CURLOPT_CONNECTTIMEOUT_MS, std::min(15000L, remaining_ms));
+    curl_easy_setopt(curl_, CURLOPT_TIMEOUT_MS, remaining_ms);
     curl_easy_setopt(curl_, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode res = curl_easy_perform(curl_);
     if (res != CURLE_OK) {
+        failure_kind_ = transient_curl_error(res) ? FailureKind::Transient : FailureKind::Terminal;
         last_error_ = "Perform Failed: " + std::string(curl_easy_strerror(res));
         brls::Logger::error("WebSocket connect failed: {}", curl_easy_strerror(res));
         close_transport();
@@ -158,7 +177,7 @@ bool WebSocketClient::connect() {
     }
     handshake += "\r\n";
 
-    if (!send_handshake(reinterpret_cast<const uint8_t*>(handshake.data()), handshake.size())) {
+    if (!send_handshake(reinterpret_cast<const uint8_t*>(handshake.data()), handshake.size(), deadline)) {
         close_transport();
         return false;
     }
@@ -168,9 +187,11 @@ bool WebSocketClient::connect() {
     size_t rcvd = 0;
     std::string response;
     
-    const auto receive_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto receive_deadline = std::min(deadline, Clock::now() + std::chrono::seconds(5));
     while (std::chrono::steady_clock::now() < receive_deadline) {
         res = curl_easy_recv(curl_, buf, sizeof(buf) - 1, &rcvd);
+        if (Clock::now() >= receive_deadline)
+            break;
         if (res == CURLE_OK && rcvd > 0) {
             response.append(buf, rcvd);
             if (response.size() > kMaximumHandshakeBytes) {
@@ -187,22 +208,37 @@ bool WebSocketClient::connect() {
                     rx_buffer_.insert(rx_buffer_.end(), response.begin() + body_start, response.end());
                 }
                 connected_ = true;
+                failure_kind_ = FailureKind::None;
                 brls::Logger::info("WebSocket connected!");
                 return true;
             } else {
                 last_error_ = "Invalid WebSocket upgrade response";
+                if ((response.starts_with("HTTP/1.1 ") || response.starts_with("HTTP/1.0 ")) &&
+                    response.size() >= 13 && (response[12] == ' ' || response[12] == '\r')) {
+                    const std::string status = response.substr(9, 3);
+                    if (status.find_first_not_of("0123456789") == std::string::npos && status != "101") {
+                        last_error_ = "WebSocket upgrade rejected http=" + status;
+                        if (status == "429" || status == "500" || status == "502" ||
+                            status == "503" || status == "504")
+                            failure_kind_ = FailureKind::Transient;
+                    }
+                }
                 brls::Logger::error("Invalid WebSocket upgrade response");
                 break;
             }
         } else if (res == CURLE_AGAIN) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_until(std::min(receive_deadline, Clock::now() + std::chrono::milliseconds(100)));
         } else {
+            failure_kind_ = FailureKind::Transient;
             last_error_ = "Recv error: " + std::string(curl_easy_strerror(res));
             brls::Logger::error("WebSocket recv error: {}", curl_easy_strerror(res));
             break;
         }
     }
-    if (last_error_.empty()) last_error_ = "Handshake timeout";
+    if (last_error_.empty()) {
+        last_error_ = "Handshake timeout";
+        failure_kind_ = FailureKind::Transient;
+    }
     close_transport();
     return false;
 }
@@ -258,33 +294,37 @@ bool WebSocketClient::drain_outgoing() {
         last_error_ = "Send stalled";
     else
         last_error_ = "Send error: " + std::string(curl_easy_strerror(error));
+    failure_kind_ = FailureKind::Transient;
     close_transport();
     return false;
 }
 
-bool WebSocketClient::send_handshake(const uint8_t* data, size_t length) {
+bool WebSocketClient::send_handshake(const uint8_t* data, size_t length, Clock::time_point deadline) {
     if (!curl_) return false;
 
     size_t total_sent = 0;
-    const auto deadline = std::chrono::steady_clock::now() + opennow::websocket::WriteQueue::SendTimeout;
+    deadline = std::min(deadline, Clock::now() + opennow::websocket::WriteQueue::SendTimeout);
     while (total_sent < length) {
         if (std::chrono::steady_clock::now() >= deadline) {
             last_error_ = "Send timeout";
+            failure_kind_ = FailureKind::Transient;
             return false;
         }
         size_t sent = 0;
         CURLcode res = curl_easy_send(curl_, data + total_sent, length - total_sent, &sent);
         if (res == CURLE_AGAIN) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_until(std::min(deadline, Clock::now() + std::chrono::milliseconds(10)));
             continue;
         }
         if (res != CURLE_OK) {
             last_error_ = "Send error: " + std::string(curl_easy_strerror(res));
+            failure_kind_ = transient_curl_error(res) ? FailureKind::Transient : FailureKind::Terminal;
             connected_ = false;
             return false;
         }
         if (sent == 0) {
             last_error_ = "Send stalled";
+            failure_kind_ = FailureKind::Transient;
             connected_ = false;
             return false;
         }
@@ -301,6 +341,7 @@ bool WebSocketClient::send_frame(uint8_t opcode, const uint8_t* payload, size_t 
     const size_t header_size = length < 126 ? 6 : (length <= 0xFFFF ? 8 : 14);
     if (length > kMaximumSignalingPayloadBytes || !tx_queue_.can_enqueue(length + header_size)) {
         last_error_ = "Outgoing WebSocket queue is full";
+        failure_kind_ = FailureKind::Terminal;
         close_transport();
         return false;
     }
@@ -359,6 +400,7 @@ void WebSocketClient::poll() {
             (control && (!final || payload_len_7 > 125)) ||
             (!control && ((opcode == 0) != (fragmented_opcode_ != 0)))) {
             last_error_ = "Invalid incoming WebSocket frame";
+            failure_kind_ = FailureKind::Terminal;
             close_transport();
             return;
         }
@@ -379,6 +421,7 @@ void WebSocketClient::poll() {
             }
             if (big_len > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
                 last_error_ = "Incoming WebSocket frame is too large";
+                failure_kind_ = FailureKind::Terminal;
                 close_transport();
                 return;
             }
@@ -389,6 +432,7 @@ void WebSocketClient::poll() {
             payload_len > std::numeric_limits<size_t>::max() - header_size ||
             (!control && payload_len > kMaximumSignalingPayloadBytes - fragmented_message_.size())) {
             last_error_ = "Incoming WebSocket frame is too large";
+            failure_kind_ = FailureKind::Terminal;
             close_transport();
             return;
         }
@@ -411,11 +455,10 @@ void WebSocketClient::poll() {
                 fragmented_opcode_ = opcode;
             fragmented_message_.append(payload.begin(), payload.end());
             if (final) {
-                const bool text = fragmented_opcode_ == 1;
                 std::string message = std::move(fragmented_message_);
                 fragmented_message_.clear();
                 fragmented_opcode_ = 0;
-                if (text && on_message_)
+                if (on_message_)
                     on_message_(message);
             }
         } else if (opcode == 0x08) { // Close frame
@@ -425,6 +468,10 @@ void WebSocketClient::poll() {
             last_error_ = "Signaling closed";
             if (close_code != 0)
                 last_error_ += " code=" + std::to_string(close_code);
+            failure_kind_ = close_code == 0 || close_code == 1000 || close_code == 1001 ||
+                            close_code == 1006 || close_code == 1011 || close_code == 1012 ||
+                            close_code == 1013 || close_code == 1014 || close_code == 4001
+                ? FailureKind::Transient : FailureKind::Terminal;
             if (!send_frame(0x88, payload.data(), payload.size()))
                 return;
             connected_ = false;
@@ -445,6 +492,7 @@ void WebSocketClient::poll() {
         if (frames_processed >= kMaximumFramesPerPoll)
             return;
         last_error_ = pending_receive_error_;
+        failure_kind_ = FailureKind::Transient;
         close_transport();
         return;
     }
@@ -460,6 +508,7 @@ void WebSocketClient::poll() {
         if (res == CURLE_OK && rcvd > 0) {
             if (rx_buffer_.size() > kMaximumSignalingPayloadBytes + 14 - rcvd) {
                 last_error_ = "Incoming WebSocket buffer is too large";
+                failure_kind_ = FailureKind::Terminal;
                 close_transport();
                 return;
             }
@@ -473,6 +522,7 @@ void WebSocketClient::poll() {
             }
             if (!pending_receive_error_.empty() && read_this_poll == 0) {
                 last_error_ = pending_receive_error_;
+                failure_kind_ = FailureKind::Transient;
                 close_transport();
             }
             break;

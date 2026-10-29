@@ -10,11 +10,13 @@
 class WebSocketClient {
 public:
     using MessageCallback = std::function<void(const std::string&)>;
+    using Clock = std::chrono::steady_clock;
+    enum class FailureKind { None, Transient, Terminal };
 
     WebSocketClient(const std::string& url);
     ~WebSocketClient();
 
-    bool connect();
+    bool connect(Clock::time_point deadline = Clock::time_point::max());
     void disconnect();
     void poll();
     void send_message(const std::string& msg);
@@ -23,6 +25,7 @@ public:
     void set_custom_headers(const std::vector<std::string>& headers) { custom_headers_ = headers; }
     bool is_connected() const { return connected_; }
     std::string get_last_error() const { return last_error_; }
+    FailureKind failure_kind() const { return failure_kind_; }
 
 private:
     std::string url_;
@@ -32,6 +35,7 @@ private:
     bool connected_ = false;
     bool closing_ = false;
     std::string last_error_;
+    FailureKind failure_kind_ = FailureKind::None;
     std::string pending_receive_error_;
     std::vector<uint8_t> rx_buffer_;
     std::string fragmented_message_;
@@ -40,6 +44,6 @@ private:
 
     void close_transport();
     bool drain_outgoing();
-    bool send_handshake(const uint8_t* data, size_t length);
+    bool send_handshake(const uint8_t* data, size_t length, Clock::time_point deadline);
     bool send_frame(uint8_t opcode, const uint8_t* payload, size_t length);
 };

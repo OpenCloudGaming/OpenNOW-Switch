@@ -49,6 +49,11 @@ for name in gfn_atomic_write gfn_device_identity gfn_trace_redaction; do
 done
 run_cpp catalog_response -ffunction-sections -fdata-sections -Wl,--gc-sections \
     app/src/gfn/shared.cpp -ljansson
+run_cpp cloud_session_allocation -ffunction-sections -fdata-sections -Wl,--gc-sections \
+    app/src/gfn/cloud_session_protocol.cpp app/src/gfn/shared.cpp -ljansson
+run_cpp cloud_session_recovery -ffunction-sections -fdata-sections -Wl,--gc-sections \
+    app/src/gfn/cloud_session.cpp app/src/gfn/cloud_session_protocol.cpp \
+    app/src/gfn/cloud_session_state.cpp app/src/gfn/shared.cpp -ljansson
 run_cpp cover_image_cache -Itests/cover_cache_stubs app/src/cover_image_cache.cpp
 run_cpp cached_image_admission -Itests/cover_cache_stubs app/src/cover_image_cache.cpp
 run_cpp http_client_error app/src/http_client.cpp -lcurl
