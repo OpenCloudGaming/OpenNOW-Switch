@@ -327,7 +327,7 @@ std::string BuildSessionBody(
     json_object_set_new(req, "clientIdentification", json_string("GFN-PC"));
     json_object_set_new(req, "deviceHashId", json_string(device_id.c_str()));
     json_object_set_new(req, "clientVersion", json_string("30.0"));
-    json_object_set_new(req, "clientPlatformName", json_string("windows"));
+    json_object_set_new(req, "clientPlatformName", json_string("browser"));
 
     json_object_set_new(req, "availableSupportedControllers", json_array());
     json_object_set_new(req, "sdkVersion", json_string("1.0"));
@@ -434,13 +434,13 @@ std::string CreateNetworkTestSession(
     json_object_set_new(profile, "heightInPixels", json_integer(stream_settings.height));
     json_object_set_new(profile, "framesPerSecond", json_integer(stream_settings.fps));
     json_object_set_new(
-        request, "clientPlatformName", json_string("windows"));
+        request, "clientPlatformName", json_string("browser"));
     json_object_set_new(request, "netTestProfile", profile);
     json_object_set_new(root.get(), "netTestRequestData", request);
 
     const HttpResponse response = http_client.Post(
         streaming_base_url + "v2/nettestsession",
-        GfnClient::kUserAgent,
+        kCloudMatchUserAgent,
         headers,
         DumpJson(root.get()));
     if (response.status_code < 200 || response.status_code >= 300)

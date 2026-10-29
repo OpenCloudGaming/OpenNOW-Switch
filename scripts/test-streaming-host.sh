@@ -96,6 +96,8 @@ bash tests/run_gl_renderer_reconfiguration_test.sh
 printf 'PASS gl_renderer_reconfiguration\n'
 run_cpp nvst_sdp app/src/webrtc/nvst_sdp.cpp
 run_cpp cloud_session_protocol "${sections[@]}" app/src/gfn/cloud_session_protocol.cpp app/src/gfn/shared.cpp -ljansson
+run_cpp cloud_session_identity "${sections[@]}" app/src/gfn/cloud_session.cpp \
+    app/src/gfn/cloud_session_protocol.cpp app/src/gfn/cloud_session_state.cpp app/src/gfn/shared.cpp -ljansson
 run_cpp stream_bitrate_pipeline "${sections[@]}" app/src/stream_settings.cpp app/src/localization.cpp \
     app/src/gfn/cloud_session_protocol.cpp app/src/gfn/shared.cpp app/src/webrtc/nvst_sdp.cpp -ljansson
 run_c rtp_h264_assembly extern/libpeer/src/rtp.c

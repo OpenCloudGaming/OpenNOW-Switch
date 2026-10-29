@@ -10,6 +10,11 @@
 namespace opennow::gfn::cloud_session
 {
 
+inline constexpr const char* kCloudMatchClientVersion = "2.0.89.154";
+inline constexpr const char* kCloudMatchUserAgent =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36";
+
 void ApplySessionNetworkInfo(json_t* session, SessionInfo& info);
 void CollectIceServersFromObject(json_t* object, SessionInfo& info);
 
