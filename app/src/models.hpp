@@ -152,7 +152,10 @@ struct SessionInfo
     int status = 0;
     int queue_position = 0;
     bool app_patching = false;
-    
+    std::string streaming_base_url;
+    std::vector<std::string> ad_ids;
+    bool ads_pending = false;
+
     // WebRTC / GFN Streaming details
     std::string session_token;
     std::string server_ip;
@@ -160,6 +163,12 @@ struct SessionInfo
     std::string media_ip;
     int media_port = 0;
     std::vector<IceServerInfo> ice_servers;
+
+    bool ready_for_stream() const
+    {
+        return (status == 2 || status == 3) && !app_patching &&
+            !ads_pending && !signaling_url.empty();
+    }
 };
 
 } // namespace opennow

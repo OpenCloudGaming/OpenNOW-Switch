@@ -310,17 +310,15 @@ void BeginLaunchSessionDialog(const GfnClient& client, const AuthSession& auth,
                 return;
             }
 
-            int unknown_status_polls = 0;
+            int incomplete_ready_polls = 0;
             
-            while (info.status != 2 && info.status != 3) {
+            while (!info.ready_for_stream()) {
+                if ((info.status == 2 || info.status == 3) && ++incomplete_ready_polls >= 12)
+                    throw std::runtime_error("NVIDIA did not return a usable streaming allocation in time.");
                 if (info.status > 3 && info.status != 6) {
                     throw std::runtime_error("Session ended or aborted by NVIDIA.");
                 }
 
-                if (info.status < 0 && ++unknown_status_polls >= 6) {
-                    throw std::runtime_error("NVIDIA returned an unknown session status for too long.");
-                }
-                
                 std::string queue_title;
                 std::string queue_detail;
                 if (info.app_patching)

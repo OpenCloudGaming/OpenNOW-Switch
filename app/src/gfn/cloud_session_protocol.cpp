@@ -2,10 +2,21 @@
 #include "app_launch_mode_policy.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cctype>
 #include <ctime>
 #include <cstdlib>
 #include <cstring>
 #include <utility>
+#include <stdexcept>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 namespace opennow
 {
@@ -21,106 +32,157 @@ bool HasPrefix(const std::string& value, const char* prefix)
     return value.rfind(prefix, 0) == 0;
 }
 
-std::string ExtractHostFromUrlLike(const std::string& value)
+bool ValidHost(const std::string& host)
 {
-    size_t start = value.find("://");
-    if (start == std::string::npos)
-        return "";
-
-    start += 3;
-    const size_t path = value.find('/', start);
-    std::string host_port = value.substr(start, path == std::string::npos ? std::string::npos : path - start);
-
-    if (!host_port.empty() && host_port.front() == '[') {
-        const size_t close = host_port.find(']');
-        return close == std::string::npos ? "" : host_port.substr(1, close - 1);
+    if (host.empty() || host.size() > 253)
+        return false;
+    std::array<unsigned char, 16> ipv6 {};
+    if (host.find(':') != std::string::npos) {
+        return inet_pton(AF_INET6, host.c_str(), ipv6.data()) == 1 &&
+            std::any_of(ipv6.begin(), ipv6.end(), [](unsigned char byte) { return byte != 0; });
     }
-
-    const size_t colon = host_port.find(':');
-    return colon == std::string::npos ? host_port : host_port.substr(0, colon);
+    in_addr ipv4 {};
+    if (inet_pton(AF_INET, host.c_str(), &ipv4) == 1)
+        return ipv4.s_addr != 0;
+    if (std::all_of(host.begin(), host.end(), [](unsigned char ch) { return std::isdigit(ch) || ch == '.'; }))
+        return false;
+    size_t start = 0;
+    while (start < host.size()) {
+        const size_t end = host.find('.', start);
+        const std::string label = host.substr(start, end - start);
+        if (label.empty() || label.size() > 63 || label.front() == '-' || label.back() == '-' ||
+            !std::all_of(label.begin(), label.end(), [](unsigned char ch) {
+                return ch < 128 && (std::isalnum(ch) || ch == '-');
+            }))
+            return false;
+        if (end == std::string::npos)
+            return true;
+        start = end + 1;
+    }
+    return false;
 }
 
-int ExtractPortFromUrlLike(const std::string& value)
+struct Endpoint
 {
-    size_t start = value.find("://");
-    if (start == std::string::npos)
-        return 0;
+    std::string host;
+    int port = 0;
+};
 
-    start += 3;
-    const size_t path = value.find('/', start);
-    const size_t host_end = path == std::string::npos ? value.size() : path;
-
-    size_t colon = std::string::npos;
-    if (start < value.size() && value[start] == '[') {
-        const size_t close = value.find(']', start);
-        if (close != std::string::npos && close + 1 < host_end && value[close + 1] == ':')
-            colon = close + 1;
+Endpoint ParseEndpoint(const std::string& value)
+{
+    const size_t scheme = value.find("://");
+    if (scheme == std::string::npos || value.find_first_of("@#\\") != std::string::npos ||
+        std::any_of(value.begin(), value.end(), [](unsigned char ch) { return ch <= 0x20 || ch >= 0x7f; }))
+        return {};
+    const size_t start = scheme + 3;
+    const size_t end = value.find_first_of("/?", start);
+    const std::string authority = value.substr(start, end - start);
+    std::string host;
+    size_t port_start = std::string::npos;
+    if (!authority.empty() && authority.front() == '[') {
+        const size_t close = authority.find(']');
+        if (close == std::string::npos)
+            return {};
+        host = authority.substr(1, close - 1);
+        if (host.find(':') == std::string::npos)
+            return {};
+        if (close + 1 < authority.size()) {
+            if (authority[close + 1] != ':')
+                return {};
+            port_start = close + 2;
+        }
     } else {
-        colon = value.find(':', start);
-        if (colon >= host_end)
-            colon = std::string::npos;
+        const size_t colon = authority.find(':');
+        host = authority.substr(0, colon);
+        if (colon != std::string::npos)
+            port_start = colon + 1;
     }
-
-    if (colon == std::string::npos || colon + 1 >= host_end)
-        return 0;
-
-    char* end = nullptr;
-    long port = std::strtol(value.c_str() + colon + 1, &end, 10);
-    if (port <= 0 || port > 65535)
-        return 0;
-
-    return static_cast<int>(port);
+    if (!ValidHost(host))
+        return {};
+    int port = 443;
+    if (port_start != std::string::npos) {
+        const char* first = authority.data() + port_start;
+        const char* last = authority.data() + authority.size();
+        const auto parsed = std::from_chars(first, last, port);
+        if (parsed.ec != std::errc() || parsed.ptr != last || port <= 0 || port > 65535)
+            return {};
+    }
+    return {host, port};
 }
 
-std::string GetConnectionIp(json_t* connection, const std::string& fallback_ip = "")
+std::string ValidSignalingUrl(std::string value)
+{
+    if (!HasPrefix(value, "wss://") && !HasPrefix(value, "https://"))
+        return {};
+    if (ParseEndpoint(value).host.empty())
+        return {};
+    if (HasPrefix(value, "https://"))
+        value.replace(0, 5, "wss");
+    return value;
+}
+
+bool IsNativeConnection(json_t* connection)
+{
+    const int protocol = WireInteger(json_object_get(connection, "appLevelProtocol"));
+    const std::string resource = GetString(connection, "resourcePath");
+    return protocol == 1 || protocol == 6 || WireInteger(json_object_get(connection, "usage")) == 16 ||
+        HasPrefix(resource, "rtsp://") || HasPrefix(resource, "rtsps://");
+}
+
+std::string GetConnectionIp(json_t* connection)
 {
     if (!connection || !json_is_object(connection))
-        return fallback_ip;
+        return {};
 
     json_t* ip = json_object_get(connection, "ip");
-    if (json_is_string(ip))
+    if (json_is_string(ip) && ValidHost(JsonString(ip)))
         return JsonString(ip);
 
-    if (json_is_array(ip) && json_array_size(ip) > 0)
-        return JsonString(json_array_get(ip, 0));
+    if (json_is_array(ip)) {
+        size_t index;
+        json_t* entry;
+        json_array_foreach(ip, index, entry) {
+            if (ValidHost(JsonString(entry)))
+                return JsonString(entry);
+        }
+    }
 
     const std::string resource_path = GetString(connection, "resourcePath");
-    const std::string host = ExtractHostFromUrlLike(resource_path);
-    return host.empty() ? fallback_ip : host;
+    const std::string host = ParseEndpoint(resource_path).host;
+    return host;
 }
 
 int GetConnectionPort(json_t* connection)
 {
-    const int direct_port = GetInteger(connection, "port");
-    if (direct_port > 0)
+    const int direct_port = WireInteger(json_object_get(connection, "port"));
+    if (direct_port > 0 && direct_port <= 65535)
         return direct_port;
-
-    return ExtractPortFromUrlLike(GetString(connection, "resourcePath"));
+    if (json_object_get(connection, "port"))
+        return 0;
+    const std::string resource = GetString(connection, "resourcePath");
+    const size_t scheme = resource.find("://");
+    if (scheme == std::string::npos)
+        return 0;
+    const std::string authority = resource.substr(scheme + 3, resource.find_first_of("/?", scheme + 3) - scheme - 3);
+    if (authority.find(':', authority.empty() || authority.front() != '[' ? 0 : authority.find(']')) == std::string::npos)
+        return 0;
+    return ParseEndpoint(resource).port;
 }
 
-std::string BuildSignalingUrlFromConnection(json_t* connection, const std::string& fallback_ip)
+std::string BuildSignalingUrlFromConnection(json_t* connection)
 {
+    if (IsNativeConnection(connection) || WireInteger(json_object_get(connection, "usage")) != 14)
+        return {};
     const std::string resource_path = GetString(connection, "resourcePath");
-    const std::string ip = GetConnectionIp(connection, fallback_ip);
-    int port = GetConnectionPort(connection);
-    if (port <= 0)
-        port = 443;
-
-    if (HasPrefix(resource_path, "wss://"))
-        return resource_path;
-
-    if (HasPrefix(resource_path, "https://"))
-        return "wss://" + resource_path.substr(strlen("https://"));
-
-    if (HasPrefix(resource_path, "rtsps://") || HasPrefix(resource_path, "rtsp://")) {
-        const std::string host = ExtractHostFromUrlLike(resource_path);
-        return host.empty() ? "" : "wss://" + host + "/nvst/";
-    }
-
-    if (!resource_path.empty() && resource_path.front() == '/' && !ip.empty())
-        return "wss://" + ip + ":" + std::to_string(port) + resource_path;
-
-    return ip.empty() ? "" : "wss://" + ip + ":443/nvst/";
+    if (resource_path.find("://") != std::string::npos)
+        return ValidSignalingUrl(resource_path);
+    if (!resource_path.empty() && resource_path.front() != '/')
+        return {};
+    const std::string ip = GetConnectionIp(connection);
+    if (ip.empty())
+        return {};
+    const std::string host = ip.find(':') == std::string::npos ? ip : "[" + ip + "]";
+    return ValidSignalingUrl("wss://" + host + ":443" + (resource_path.empty() ? "/nvst/" : resource_path));
 }
 
 void AppendIceServer(SessionInfo& info, std::string url, std::string username, std::string credential)
@@ -233,16 +295,7 @@ void ApplySessionNetworkInfo(json_t* sess, SessionInfo& info)
     if (!session_token.empty())
         info.session_token = session_token;
 
-    const std::string server_ip = GetString(sess, "serverIp");
-    if (!server_ip.empty())
-        info.server_ip = server_ip;
-
-    json_t* session_control = json_object_get(sess, "sessionControlInfo");
-    CollectIceServersFromObject(session_control, info);
-    if (info.server_ip.empty() && session_control)
-        info.server_ip = GetString(session_control, "ip");
-
-    const std::string signaling_url = GetString(sess, "signalingUrl");
+    const std::string signaling_url = ValidSignalingUrl(GetString(sess, "signalingUrl"));
     if (!signaling_url.empty())
         info.signaling_url = signaling_url;
 
@@ -258,13 +311,14 @@ void ApplySessionNetworkInfo(json_t* sess, SessionInfo& info)
             json_array_foreach(connection_info_array, index, conn_info) {
                 CollectIceServersFromObject(conn_info, info);
 
-                if (GetInteger(conn_info, "usage") != priority)
+                if (WireInteger(json_object_get(conn_info, "usage")) != priority || IsNativeConnection(conn_info))
+                    continue;
+                if (priority == 14 && BuildSignalingUrlFromConnection(conn_info).empty())
                     continue;
 
-                const std::string fallback_ip = priority == 14 ? info.server_ip : "";
-                const std::string ip = GetConnectionIp(conn_info, fallback_ip);
+                const std::string ip = GetConnectionIp(conn_info);
                 const int port = GetConnectionPort(conn_info);
-                if (!ip.empty() && port > 0 && (priority != 14 || port > best_port)) {
+                if (!ip.empty() && port > 0 && (best_ip.empty() || (priority == 14 && port > best_port))) {
                     best_ip = ip;
                     best_port = port;
                 }
@@ -278,23 +332,146 @@ void ApplySessionNetworkInfo(json_t* sess, SessionInfo& info)
         }
 
         if (info.signaling_url.empty()) {
-            size_t index;
-            json_t* conn_info;
-            json_array_foreach(connection_info_array, index, conn_info) {
-                CollectIceServersFromObject(conn_info, info);
+            for (bool explicit_url : {true, false}) {
+                size_t index;
+                json_t* conn_info;
+                json_array_foreach(connection_info_array, index, conn_info) {
+                    CollectIceServersFromObject(conn_info, info);
 
-                if (GetInteger(conn_info, "usage") != 14)
-                    continue;
-
-                info.signaling_url = BuildSignalingUrlFromConnection(conn_info, info.server_ip);
+                    if (WireInteger(json_object_get(conn_info, "usage")) != 14)
+                        continue;
+                    const std::string resource = GetString(conn_info, "resourcePath");
+                    if ((HasPrefix(resource, "wss://") || HasPrefix(resource, "https://")) != explicit_url)
+                        continue;
+                    info.signaling_url = BuildSignalingUrlFromConnection(conn_info);
+                    if (!info.signaling_url.empty())
+                        break;
+                }
                 if (!info.signaling_url.empty())
                     break;
             }
         }
     }
 
-    if (info.signaling_url.empty() && session_control)
-        info.signaling_url = BuildSignalingUrlFromConnection(session_control, info.server_ip);
+    info.server_ip = ParseEndpoint(info.signaling_url).host;
+}
+
+int WireInteger(json_t* value, int fallback)
+{
+    if (json_is_integer(value)) {
+        const json_int_t number = json_integer_value(value);
+        return number >= INT32_MIN && number <= INT32_MAX ? static_cast<int>(number) : fallback;
+    }
+    if (!json_is_string(value))
+        return fallback;
+    const std::string text = JsonString(value);
+    int number = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), number);
+    return parsed.ec == std::errc() && parsed.ptr == text.data() + text.size() ? number : fallback;
+}
+
+std::string ResolveSessionControlBaseUrl(json_t* session, const std::string& fallback)
+{
+    json_t* control = json_object_get(session, "sessionControlInfo");
+    const std::string host = Lowercase(GetString(control, "ip"));
+    json_t* port = json_object_get(control, "port");
+    if (!ValidHost(host) || (port && WireInteger(port) != 443))
+        return fallback;
+    const Endpoint origin = ParseEndpoint(fallback);
+    if (host == Lowercase(origin.host))
+        return "https://" + (host.find(':') == std::string::npos ? host : "[" + host + "]") + "/";
+    const auto nvidia_host = [](const std::string& value) {
+        return value.ends_with(".cloudmatchbeta.nvidiagrid.net") ||
+            value.ends_with(".cloudmatch.nvidiagrid.net") ||
+            value.ends_with(".geforcenow.nvidiagrid.net");
+    };
+    if (nvidia_host(Lowercase(origin.host)) && nvidia_host(host) && HasPrefix(host, "np-"))
+        return "https://" + host + "/";
+    return fallback;
+}
+
+bool CloudMatchResponseSucceeded(const HttpResponse& response)
+{
+    if (response.status_code < 200 || response.status_code >= 300)
+        return false;
+    if (response.body.empty())
+        return true;
+    try {
+        JsonPtr root = LoadJson(response.body);
+        return json_is_object(root.get()) && WireInteger(json_object_get(
+            json_object_get(root.get(), "requestStatus"), "statusCode"), -1) == 1;
+    } catch (...) {
+        return false;
+    }
+}
+
+SessionInfo ParseSessionResponse(const HttpResponse& response, const std::string& stage,
+                                const std::string& expected_id, const std::string& base_url)
+{
+    JsonPtr root(nullptr, &json_decref);
+    try { root = LoadJson(response.body); } catch (...) {}
+    const bool patching = IsAppPatchingResponse(root.get());
+    json_t* request = json_object_get(root.get(), "requestStatus");
+    if (!json_is_object(root.get()) ||
+        (!patching && (response.status_code < 200 || response.status_code >= 300 ||
+            WireInteger(json_object_get(request, "statusCode"), -1) != 1)))
+        throw std::runtime_error(BuildCloudMatchErrorMessage(stage, response.status_code, root.get()));
+    json_t* sess = json_object_get(root.get(), "session");
+    SessionInfo info;
+    info.session_id = GetString(sess, "sessionId");
+    if (info.session_id.empty() || info.session_id.find_first_of("/?#\\\r\n") != std::string::npos ||
+        (!expected_id.empty() && expected_id != info.session_id))
+        throw std::runtime_error(stage + " returned an invalid or different session ID.");
+    info.status = ParseSessionStatus(json_object_get(sess, "status"));
+    if (patching && !json_object_get(sess, "status"))
+        info.status = 1;
+    if (info.status < 0 || info.status > 8)
+        throw std::runtime_error(stage + " returned an invalid or missing session status.");
+    info.app_patching = patching;
+    info.queue_position = WireInteger(json_object_get(sess, "queuePosition"), 0);
+    ApplySeatSetupInfo(sess, info);
+    info.queue_position = WireInteger(json_object_get(root.get(), "queuePosition"), info.queue_position);
+    CollectIceServersFromObject(root.get(), info);
+    ApplySessionNetworkInfo(sess, info);
+    info.streaming_base_url = ResolveSessionControlBaseUrl(sess, base_url);
+    const auto required = [](json_t* value) { return json_is_true(value) || WireInteger(value, 0) == 1; };
+    info.ads_pending = required(json_object_get(sess, "sessionAdsRequired")) ||
+        required(json_object_get(sess, "isAdsRequired")) ||
+        required(json_object_get(json_object_get(sess, "sessionProgress"), "isAdsRequired"));
+    json_t* ads = json_object_get(sess, "sessionAds");
+    size_t index;
+    json_t* ad;
+    json_array_foreach(ads, index, ad) {
+        std::string id = GetString(ad, "adId");
+        if (json_is_integer(json_object_get(ad, "adId")))
+            id = std::to_string(json_integer_value(json_object_get(ad, "adId")));
+        if (!id.empty() && id.size() <= 256 &&
+            std::find(info.ad_ids.begin(), info.ad_ids.end(), id) == info.ad_ids.end()) {
+            if (info.ad_ids.size() >= 32)
+                throw std::runtime_error("NVIDIA returned too many queue ads.");
+            info.ad_ids.push_back(std::move(id));
+        }
+    }
+    info.ads_pending = info.ads_pending || !info.ad_ids.empty();
+    return info;
+}
+
+std::string BuildQueueAdCancellationBody(const std::string& id)
+{
+    JsonPtr root(json_object(), &json_decref);
+    json_object_set_new(root.get(), "action", json_integer(6));
+    json_t* updates = json_array();
+    json_t* ad = json_object();
+    json_object_set_new(ad, "adId", json_string(id.c_str()));
+    json_object_set_new(ad, "adAction", json_integer(5));
+    json_object_set_new(ad, "clientTimestamp", json_integer(std::time(nullptr)));
+    json_object_set_new(ad, "cancelReason", json_string("FAILED_TO_REQUEST_ADS"));
+    json_object_set_new(ad, "watchedTimeInMs", json_integer(0));
+    json_object_set_new(ad, "pausedTimeInMs", json_integer(0));
+    json_object_set_new(ad, "adDurationInMs", json_integer(0));
+    json_array_append_new(updates, ad);
+    json_object_set_new(root.get(), "adUpdates", updates);
+    return DumpJson(root.get());
 }
 
 std::string BuildSessionBody(
@@ -458,8 +635,9 @@ std::string CreateNetworkTestSession(
 
 int ParseSessionStatus(json_t* status)
 {
-    if (json_is_integer(status))
-        return static_cast<int>(json_integer_value(status));
+    const int numeric = WireInteger(status, -1);
+    if (numeric >= 0)
+        return numeric;
 
     if (!json_is_string(status))
         return -1;

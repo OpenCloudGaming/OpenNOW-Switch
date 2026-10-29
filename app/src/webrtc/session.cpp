@@ -51,26 +51,6 @@ bool CreateNvdecCrashMarker()
     return marker.good();
 }
 
-std::string BuildSignInUrl(std::string base_url, const std::string& peer_name, const std::string& session_id)
-{
-    const size_t query_pos = base_url.find('?');
-    if (query_pos != std::string::npos)
-        base_url.erase(query_pos);
-
-    if (StartsWith(base_url, "http://"))
-        base_url.replace(0, 4, "ws");
-    else if (StartsWith(base_url, "https://"))
-        base_url.replace(0, 5, "wss");
-
-    while (!base_url.empty() && base_url.back() == '/')
-        base_url.pop_back();
-
-    if (base_url.size() < 8 || base_url.substr(base_url.size() - 8) != "sign_in")
-        base_url += "/sign_in";
-
-    return base_url + "?peer_id=" + peer_name + "&version=2&peer_role=1&pairing_id=" + session_id;
-}
-
 std::string MakePeerName()
 {
     std::random_device rd;
@@ -237,35 +217,9 @@ void WebRtcSession::start() {
         return;
     }
 
-    const std::string sign_in_url = BuildSignInUrl(signaling_url_, peer_name_, session_id_);
-    signaling_client_ = std::make_unique<SignalingClient>(sign_in_url);
-    signaling_client_->set_on_message([this](const std::string& msg) {
-        handle_signaling_message(msg);
-    });
-
-    std::vector<std::string> headers;
-    headers.push_back("Origin: https://play.geforcenow.com");
-    headers.push_back("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36");
-    if (!session_id_.empty()) {
-        headers.push_back("Sec-WebSocket-Protocol: x-nv-sessionid." + session_id_);
-    }
-    signaling_client_->set_custom_headers(headers);
-
-    if (!signaling_client_->connect()) {
-        current_state_ = "WebSocket Connect Failed: " + signaling_client_->get_last_error();
-        peer_terminal_kind_.store(
-            static_cast<int>(opennow::PeerTerminalKind::Failed),
-            std::memory_order_release);
-        peer_terminal_.store(true, std::memory_order_release);
-        AppendStreamLog("SESSION error websocket_connect_failed " + signaling_client_->get_last_error());
-        signaling_ready_ = false;
+    connect_signaling();
+    if (peer_terminal_.load(std::memory_order_acquire))
         return;
-    }
-    signaling_ready_ = true;
-    current_state_ = "Signaling connected, waiting for offer";
-    AppendStreamLog("SIGNAL connected");
-    send_peer_info();
-    send_heartbeat();
     if (settings_.audio_enabled)
         audio_->start();
     start_decoder_worker();
@@ -363,11 +317,9 @@ void WebRtcSession::poll() {
 
     std::lock_guard<std::recursive_mutex> lock(peer_mutex_);
 
-    if (signaling_client_) {
-        signaling_client_->poll();
-    }
-
-    maybe_send_keepalive();
+    poll_signaling();
+    if (stop_requested_.load(std::memory_order_acquire))
+        return;
 
     if (pc_ && signaling_ready_) {
         if (!remote_description_set_) {

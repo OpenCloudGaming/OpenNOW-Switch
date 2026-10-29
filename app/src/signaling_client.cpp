@@ -10,7 +10,7 @@ SignalingClient::~SignalingClient() {
     }
 }
 
-bool SignalingClient::connect() {
+bool SignalingClient::connect(WebSocketClient::Clock::time_point deadline) {
     if (!ws_) return false;
 
     ws_->set_on_message([this](const std::string& msg) {
@@ -19,7 +19,7 @@ bool SignalingClient::connect() {
         }
     });
     
-    if (ws_->connect()) {
+    if (ws_->connect(deadline)) {
         return true;
     }
     return false;

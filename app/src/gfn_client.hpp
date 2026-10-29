@@ -5,6 +5,7 @@
 #include "stream_settings.hpp"
 
 #include <functional>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -68,6 +69,11 @@ class GfnClient
         "NVIDIACEFClient/HEAD/debb5919f6 GFN-PC/2.0.80.173";
 
   private:
+    void AnswerQueueAds(AuthSession& auth, SessionInfo& info,
+                        std::vector<std::string> headers) const;
+    mutable std::string ad_session_key_;
+    mutable std::map<std::string, int> ad_attempts_;
+    mutable int ad_pending_polls_ = 0;
     HttpClient http_client_;
     std::string client_id_;
 };
